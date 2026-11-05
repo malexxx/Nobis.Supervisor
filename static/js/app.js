@@ -2,10 +2,14 @@
 // NOBIS A10 C LIGHT STYLE COAX — CONTRÔLEUR UI, COMMANDES & FLUX SSE TEMPS RÉEL
 // =============================================================================
 
-let installerUnlocked = true;
+let installerAuthToken = sessionStorage.getItem("nobis_installer_token") || "";
 
 function getInstallerHeaders(extra = {}) {
-  return extra;
+  const h = { ...extra };
+  if (installerAuthToken) {
+    h["X-Installer-Token"] = installerAuthToken;
+  }
+  return h;
 }
 
 function showToast(msg, isError = false) {
@@ -162,7 +166,7 @@ function switchTab(tabId) {
     }, 40);
   }
   if (tabId === "tab-installer") {
-    loadSnapshots();
+    checkInstallerAuthStatus();
   }
   if (tabId === "tab-logs") {
     loadLogs(currentLogSeverity);
@@ -1464,6 +1468,157 @@ function deleteSnapshot(id) {
 
 function toggleInstallerLock() {
   installerUnlocked = true;
+}
+
+// =============================================================================
+// AUTHENTIFICATION SÉCURISÉE MENU INSTALLATEUR (CLOUD AGUA PASSWORD)
+// =============================================================================
+
+async function checkInstallerAuthStatus(forceRefresh = false) {
+  const lockScreen = document.getElementById("installer-lock-screen");
+  const unlockedContent = document.getElementById("installer-unlocked-content");
+  const noPwdAlert = document.getElementById("installer-no-pwd-alert");
+  const errBox = document.getElementById("installer-auth-error");
+
+  if (!lockScreen || !unlockedContent) return;
+
+  try {
+    const headers = {};
+    if (installerAuthToken) {
+      headers["X-Installer-Token"] = installerAuthToken;
+    }
+    const res = await fetch("/api/installer/status", { headers });
+    if (!res.ok) {
+      lockScreen.classList.remove("hidden");
+      unlockedContent.classList.add("hidden");
+      return;
+    }
+    const data = await res.json();
+
+    if (data.authenticated) {
+      lockScreen.classList.add("hidden");
+      unlockedContent.classList.remove("hidden");
+      if (errBox) errBox.classList.add("hidden");
+      loadSnapshots();
+    } else {
+      if (installerAuthToken) {
+        installerAuthToken = "";
+        sessionStorage.removeItem("nobis_installer_token");
+      }
+      lockScreen.classList.remove("hidden");
+      unlockedContent.classList.add("hidden");
+
+      if (noPwdAlert) {
+        noPwdAlert.classList.toggle("hidden", !!data.has_password_configured);
+      }
+      const pwdInput = document.getElementById("installer-password-input");
+      if (pwdInput) {
+        pwdInput.disabled = !data.has_password_configured;
+        if (data.has_password_configured) {
+          setTimeout(() => pwdInput.focus(), 100);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Erreur vérification statut installateur:", err);
+  }
+}
+
+async function submitInstallerAuth(event) {
+  if (event) event.preventDefault();
+  const pwdInput = document.getElementById("installer-password-input");
+  const errBox = document.getElementById("installer-auth-error");
+  const btn = document.getElementById("installer-auth-submit-btn");
+  if (!pwdInput) return;
+
+  const password = pwdInput.value;
+  if (!password) {
+    if (errBox) {
+      errBox.textContent = "Veuillez saisir votre mot de passe Agua Cloud.";
+      errBox.classList.remove("hidden");
+    }
+    return;
+  }
+
+  if (errBox) errBox.classList.add("hidden");
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add("opacity-60", "cursor-wait");
+  }
+
+  try {
+    const res = await fetch("/api/installer/verify", {
+      method: "POST",
+      headers: getInstallerHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ password })
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (res.ok && (data.authenticated || data.success || data.status === "ok") && data.token) {
+      installerAuthToken = data.token;
+      sessionStorage.setItem("nobis_installer_token", installerAuthToken);
+      pwdInput.value = "";
+      if (errBox) errBox.classList.add("hidden");
+      showToast("Accès Installateur déverrouillé !");
+      await checkInstallerAuthStatus();
+    } else {
+      let errMsg = "Mot de passe Cloud incorrect.";
+      if (res.status === 429) {
+        errMsg = data.detail || "Trop de tentatives échouées. Veuillez patienter 60 secondes.";
+      } else if (data.detail) {
+        errMsg = data.detail;
+      }
+      if (errBox) {
+        errBox.textContent = errMsg;
+        errBox.classList.remove("hidden");
+      }
+      pwdInput.focus();
+      pwdInput.select();
+    }
+  } catch (err) {
+    console.error("Erreur authentification installateur:", err);
+    if (errBox) {
+      errBox.textContent = "Erreur de communication avec le serveur.";
+      errBox.classList.remove("hidden");
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove("opacity-60", "cursor-wait");
+    }
+  }
+}
+
+async function lockInstallerMenu() {
+  try {
+    if (installerAuthToken) {
+      await fetch("/api/installer/lock", {
+        method: "POST",
+        headers: { "X-Installer-Token": installerAuthToken }
+      });
+    }
+  } catch (err) {
+    console.warn("Erreur lock installer:", err);
+  } finally {
+    installerAuthToken = "";
+    sessionStorage.removeItem("nobis_installer_token");
+    showToast("Menu installateur reverrouillé.");
+    await checkInstallerAuthStatus();
+  }
+}
+
+function toggleInstallerPasswordVisibility() {
+  const inp = document.getElementById("installer-password-input");
+  const icon = document.getElementById("installer-pwd-toggle-icon");
+  if (!inp) return;
+  if (inp.type === "password") {
+    inp.type = "text";
+    if (icon) icon.textContent = "🙈";
+  } else {
+    inp.type = "password";
+    if (icon) icon.textContent = "👁️";
+  }
 }
 
 const SILENCE_OVERRIDABLE_KEYS = {
