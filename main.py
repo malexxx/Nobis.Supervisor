@@ -902,6 +902,7 @@ async def api_installer_verify(payload: InstallerVerifyPayload, request: Request
     db_log("INFO", "SECURITY", f"Accès menu installateur déverrouillé avec succès (IP {client_ip}).", active_mode)
     return {
         "status": "ok",
+        "success": True,
         "authenticated": True,
         "token": token,
         "expires_in_s": 7200

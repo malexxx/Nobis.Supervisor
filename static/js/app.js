@@ -1572,10 +1572,11 @@ async function submitInstallerAuth(event) {
 
     const data = await res.json().catch(() => ({}));
 
-    if (res.ok && data.success && data.token) {
+    if (res.ok && (data.authenticated || data.success || data.status === "ok") && data.token) {
       installerAuthToken = data.token;
       sessionStorage.setItem("nobis_installer_token", installerAuthToken);
       pwdInput.value = "";
+      if (errBox) errBox.classList.add("hidden");
       showToast("Accès Installateur déverrouillé !");
       await checkInstallerAuthStatus();
     } else {
