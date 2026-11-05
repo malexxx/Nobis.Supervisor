@@ -2,14 +2,10 @@
 // NOBIS A10 C LIGHT STYLE COAX — CONTRÔLEUR UI, COMMANDES & FLUX SSE TEMPS RÉEL
 // =============================================================================
 
-let installerAuthToken = sessionStorage.getItem("nobis_installer_token") || "";
+let installerUnlocked = true;
 
 function getInstallerHeaders(extra = {}) {
-  const h = { ...extra };
-  if (installerAuthToken) {
-    h["X-Installer-Token"] = installerAuthToken;
-  }
-  return h;
+  return extra;
 }
 
 function showToast(msg, isError = false) {
@@ -166,7 +162,7 @@ function switchTab(tabId) {
     }, 40);
   }
   if (tabId === "tab-installer") {
-    checkInstallerAuthStatus();
+    loadSnapshots();
   }
   if (tabId === "tab-logs") {
     loadLogs(currentLogSeverity);
@@ -1377,12 +1373,10 @@ function renderEepromTable() {
       <td class="py-1.5 px-2 text-gray-400">[${Number(r.min_val)}..${Number(r.max_val)}] ${escapeHtml(r.unit)}</td>
       <td class="py-1.5 px-2">
         <input id="inp-${escapeHtml(r.reg_key)}" type="number" step="${Number(r.step)}" min="${Number(r.min_val)}" max="${Number(r.max_val)}" value="${Number(r.current_val)}"
-          ${installerUnlocked ? "" : "disabled"}
           class="inst-input bg-gray-800 border border-gray-700 rounded px-2 py-0.5 w-20 text-white tabular-nums text-xs" />
       </td>
       <td class="py-1.5 px-2">
         <button data-reg="${escapeHtml(r.reg_key)}" onclick="sendCommand(this.dataset.reg, document.getElementById('inp-' + this.dataset.reg).value)"
-          ${installerUnlocked ? "" : "disabled"}
           class="inst-input px-2.5 py-0.5 rounded bg-orange-600 hover:bg-orange-500 text-white text-[11px] font-semibold cursor-pointer transition">Écrire</button>
       </td>
     `;
@@ -1469,177 +1463,7 @@ function deleteSnapshot(id) {
 }
 
 function toggleInstallerLock() {
-  if (!installerUnlocked) {
-    openActionModal({
-      title: "🔒 Déverrouillage EEPROM Micronova",
-      message: "Confirmez-vous le déverrouillage de l'édition directe des registres EEPROM Micronova ?",
-      confirmText: "Déverrouiller",
-      onConfirm: () => {
-        installerUnlocked = true;
-        document.getElementById("btn-unlock-installer").textContent = "🔓 Édition Déverrouillée (Verrouiller)";
-        document.querySelectorAll(".inst-input").forEach(el => el.disabled = false);
-      }
-    });
-  } else {
-    installerUnlocked = false;
-    document.getElementById("btn-unlock-installer").textContent = "🔒 Déverrouiller l'édition";
-    document.querySelectorAll(".inst-input").forEach(el => el.disabled = true);
-  }
-}
-
-// =============================================================================
-// AUTHENTIFICATION SÉCURISÉE MENU INSTALLATEUR (CLOUD AGUA PASSWORD)
-// =============================================================================
-
-async function checkInstallerAuthStatus(forceRefresh = false) {
-  const lockScreen = document.getElementById("installer-lock-screen");
-  const unlockedContent = document.getElementById("installer-unlocked-content");
-  const noPwdAlert = document.getElementById("installer-no-pwd-alert");
-  const errBox = document.getElementById("installer-auth-error");
-
-  if (!lockScreen || !unlockedContent) return;
-
-  try {
-    const headers = {};
-    if (installerAuthToken) {
-      headers["X-Installer-Token"] = installerAuthToken;
-    }
-    const res = await fetch("/api/installer/status", { headers });
-    if (!res.ok) {
-      lockScreen.classList.remove("hidden");
-      unlockedContent.classList.add("hidden");
-      return;
-    }
-    const data = await res.json();
-
-    if (data.authenticated) {
-      lockScreen.classList.add("hidden");
-      unlockedContent.classList.remove("hidden");
-      if (errBox) errBox.classList.add("hidden");
-      loadSnapshots();
-    } else {
-      if (installerAuthToken) {
-        installerAuthToken = "";
-        sessionStorage.removeItem("nobis_installer_token");
-      }
-      lockScreen.classList.remove("hidden");
-      unlockedContent.classList.add("hidden");
-
-      if (noPwdAlert) {
-        noPwdAlert.classList.toggle("hidden", !!data.has_password_configured);
-      }
-      const pwdInput = document.getElementById("installer-password-input");
-      if (pwdInput) {
-        pwdInput.disabled = !data.has_password_configured;
-        if (data.has_password_configured) {
-          setTimeout(() => pwdInput.focus(), 100);
-        }
-      }
-    }
-  } catch (err) {
-    console.error("Erreur vérification statut installateur:", err);
-  }
-}
-
-async function submitInstallerAuth(event) {
-  if (event) event.preventDefault();
-  const pwdInput = document.getElementById("installer-password-input");
-  const errBox = document.getElementById("installer-auth-error");
-  const btn = document.getElementById("installer-auth-submit-btn");
-  if (!pwdInput) return;
-
-  const password = pwdInput.value;
-  if (!password) {
-    if (errBox) {
-      errBox.textContent = "Veuillez saisir votre mot de passe Agua Cloud.";
-      errBox.classList.remove("hidden");
-    }
-    return;
-  }
-
-  if (errBox) errBox.classList.add("hidden");
-  if (btn) {
-    btn.disabled = true;
-    btn.classList.add("opacity-60", "cursor-wait");
-  }
-
-  try {
-    const res = await fetch("/api/installer/verify", {
-      method: "POST",
-      headers: getInstallerHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ password })
-    });
-
-    const data = await res.json().catch(() => ({}));
-
-    if (res.ok && (data.authenticated || data.success || data.status === "ok") && data.token) {
-      installerAuthToken = data.token;
-      sessionStorage.setItem("nobis_installer_token", installerAuthToken);
-      pwdInput.value = "";
-      if (errBox) errBox.classList.add("hidden");
-      showToast("Accès Installateur déverrouillé !");
-      await checkInstallerAuthStatus();
-    } else {
-      let errMsg = "Mot de passe Cloud incorrect.";
-      if (res.status === 429) {
-        errMsg = data.detail || "Trop de tentatives échouées. Veuillez patienter 60 secondes.";
-      } else if (data.detail) {
-        errMsg = data.detail;
-      }
-      if (errBox) {
-        errBox.textContent = errMsg;
-        errBox.classList.remove("hidden");
-      }
-      pwdInput.focus();
-      pwdInput.select();
-    }
-  } catch (err) {
-    console.error("Erreur authentification installateur:", err);
-    if (errBox) {
-      errBox.textContent = "Erreur de communication avec le serveur.";
-      errBox.classList.remove("hidden");
-    }
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.classList.remove("opacity-60", "cursor-wait");
-    }
-  }
-}
-
-async function lockInstallerMenu() {
-  try {
-    if (installerAuthToken) {
-      await fetch("/api/installer/lock", {
-        method: "POST",
-        headers: { "X-Installer-Token": installerAuthToken }
-      });
-    }
-  } catch (err) {
-    console.warn("Erreur lock installer:", err);
-  } finally {
-    installerAuthToken = "";
-    sessionStorage.removeItem("nobis_installer_token");
-    installerUnlocked = false;
-    const btnUnlock = document.getElementById("btn-unlock-installer");
-    if (btnUnlock) btnUnlock.textContent = "🔒 Déverrouiller l'édition";
-    document.querySelectorAll(".inst-input").forEach(el => el.disabled = true);
-    showToast("Menu installateur reverrouillé.");
-    await checkInstallerAuthStatus();
-  }
-}
-
-function toggleInstallerPasswordVisibility() {
-  const inp = document.getElementById("installer-password-input");
-  const icon = document.getElementById("installer-pwd-toggle-icon");
-  if (!inp) return;
-  if (inp.type === "password") {
-    inp.type = "text";
-    if (icon) icon.textContent = "🙈";
-  } else {
-    inp.type = "password";
-    if (icon) icon.textContent = "👁️";
-  }
+  installerUnlocked = true;
 }
 
 const SILENCE_OVERRIDABLE_KEYS = {
