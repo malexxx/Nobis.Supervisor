@@ -1,0 +1,2087 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <!-- Mode Application Native Plein Écran (PWA iOS & Android) -->
+  <meta name="theme-color" content="#0b0f19" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Nobis A10" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png" />
+  <link rel="icon" type="image/svg+xml" href="/static/icon.svg" />
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png" />
+  <title>Nobis A10 C Light Style Coax — Cockpit Micronova & Météo Bazoches</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/css/styles.css?v=20261104_v10" />
+</head>
+
+<body class="min-h-screen flex flex-col pb-20 md:pb-6">
+
+  <!-- TOAST NOTIFICATION FLOTTANTE -->
+  <div id="toast-box"
+    class="fixed bottom-20 md:bottom-5 right-4 z-50 hidden px-4 py-2.5 rounded-xl shadow-2xl border text-xs font-semibold flex items-center gap-2 transition-all">
+  </div>
+
+  <!-- MODALE D'INTERACTION GÉNÉRIQUE (REMPLACE CONFIRM / PROMPT / ALERT) -->
+  <div id="action-modal"
+    class="fixed inset-0 z-50 hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="card max-w-md w-full p-5 space-y-4 border border-gray-700 shadow-2xl">
+      <div class="flex items-center justify-between border-b border-gray-800 pb-2.5">
+        <h3 id="action-modal-title" class="text-sm font-bold text-white">Confirmation</h3>
+        <button onclick="closeActionModal()" class="text-gray-400 hover:text-white text-sm font-bold px-2">✕</button>
+      </div>
+      <div id="action-modal-message" class="text-xs text-gray-300 leading-relaxed whitespace-pre-line space-y-2"></div>
+      <div id="action-modal-input-wrap" class="hidden">
+        <input id="action-modal-input" type="text"
+          class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-orange-500" />
+      </div>
+      <div class="flex justify-end gap-2 pt-2 border-t border-gray-800">
+        <button id="action-modal-cancel-btn" onclick="closeActionModal()"
+          class="px-3.5 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold">Annuler</button>
+        <button id="action-modal-confirm-btn"
+          class="px-4 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold">Confirmer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODALE DÉDIÉE : ACTIVATION DU MODE SILENCE ! (DURÉE EN HEURES) -->
+  <div id="silence-modal"
+    class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="card max-w-md w-full p-5 space-y-4 border border-purple-800/80 shadow-2xl bg-gray-950">
+      <div class="flex items-center justify-between border-b border-gray-800 pb-2.5">
+        <div class="flex items-center gap-2">
+          <span class="text-xl">🤫</span>
+          <h3 class="text-sm font-bold text-white">Activer le mode Silence !</h3>
+        </div>
+        <button onclick="closeSilenceModal()" class="text-gray-400 hover:text-white text-sm font-bold px-2">✕</button>
+      </div>
+
+      <div class="space-y-3">
+        <!-- Actions résumées -->
+        <div class="rounded-lg bg-purple-950/30 border border-purple-800/50 p-3 space-y-1.5 text-xs text-purple-200">
+          <div class="font-bold flex items-center gap-1.5 text-purple-300">
+            <span>Actions automatiques appliquées au poêle :</span>
+          </div>
+          <ul class="space-y-1 text-[11px] text-gray-300 pl-4 list-disc">
+            <li><strong>Puissance de chauffe :</strong> bridée à <strong>P1</strong></li>
+            <li><strong>Ventilation frontale & canalisations :</strong> coupées à <strong>0 (OFF)</strong> pour une
+              <em>convection naturelle 100% silencieuse</em>
+            </li>
+            <li><strong>Désactivation :</strong> Mode Auto, Mode ECO et Mode BOOST coupés</li>
+            <li><strong>Fin de période :</strong> compte à rebours affiché dans le bouton et <strong>restauration
+                automatique</strong> des valeurs d'origine</li>
+          </ul>
+        </div>
+
+        <!-- Choix de la durée -->
+        <div class="space-y-2">
+          <label class="block text-xs font-semibold text-gray-300">
+            Durée du mode Silence (en heures) :
+          </label>
+          <!-- Boutons de présélection rapide -->
+          <div class="grid grid-cols-4 gap-2" id="silence-presets">
+            <button type="button" onclick="setSilenceDurationPreset(1)"
+              class="sil-preset-btn py-2 px-2 text-xs font-bold rounded-lg border border-gray-800 bg-gray-900 text-gray-300 hover:border-purple-600 transition">1
+              H</button>
+            <button type="button" onclick="setSilenceDurationPreset(2)"
+              class="sil-preset-btn py-2 px-2 text-xs font-bold rounded-lg border border-purple-500 bg-purple-900/50 text-purple-200 shadow hover:border-purple-400 transition">2
+              H (Défaut)</button>
+            <button type="button" onclick="setSilenceDurationPreset(3)"
+              class="sil-preset-btn py-2 px-2 text-xs font-bold rounded-lg border border-gray-800 bg-gray-900 text-gray-300 hover:border-purple-600 transition">3
+              H</button>
+            <button type="button" onclick="setSilenceDurationPreset(4)"
+              class="sil-preset-btn py-2 px-2 text-xs font-bold rounded-lg border border-gray-800 bg-gray-900 text-gray-300 hover:border-purple-600 transition">4
+              H</button>
+          </div>
+          <!-- Champ numérique personnalisé -->
+          <div class="flex items-center gap-2 pt-1">
+            <span class="text-xs text-gray-400">Durée personnalisée :</span>
+            <input id="silence-hours-input" type="number" min="0.5" max="24" step="0.5" value="2"
+              oninput="handleSilenceDurationInput()"
+              class="w-20 bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-center font-bold text-white focus:outline-none focus:border-purple-500" />
+            <span class="text-xs text-gray-300 font-semibold">Heure(s)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2 border-t border-gray-800">
+        <button type="button" onclick="closeSilenceModal()"
+          class="px-3.5 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold">Annuler</button>
+        <button id="silence-modal-confirm-btn" type="button" onclick="confirmActivateSilence()"
+          class="px-4 py-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-purple-950/50">
+          <span>Activer Silence ! (2H)</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODALE DÉDIÉE : PONT MATTER LOCAL (GOOGLE HOME / NEST HUB MAX / APPLE HOME) -->
+  <div id="matter-modal"
+    class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div class="card max-w-xl w-full p-5 space-y-4 border border-cyan-800/80 shadow-2xl bg-gray-950 my-auto">
+      <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+        <div class="flex items-center gap-2.5">
+          <span class="text-xl">🏠</span>
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <span>Google Home & Nest Hub Max</span>
+              <span id="matter-status-badge"
+                class="text-[10px] px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-700 font-semibold">Matter Local</span>
+            </h3>
+            <p class="text-[11px] text-gray-400">Thermostat Matter 100% local (sans cloud tiers ni ouverture de port)</p>
+          </div>
+        </div>
+        <button onclick="closeMatterModal()"
+          class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white font-bold flex items-center justify-center">✕</button>
+      </div>
+
+      <!-- État temps réel exposé à Google Home -->
+      <div class="grid grid-cols-3 gap-2 text-xs">
+        <div class="bg-gray-900/90 border border-gray-800 rounded-xl p-2.5 text-center">
+          <div class="text-[10px] text-gray-400">État Thermostat</div>
+          <div id="matter-live-mode" class="text-sm font-bold text-emerald-400 mt-0.5">--</div>
+        </div>
+        <div class="bg-gray-900/90 border border-gray-800 rounded-xl p-2.5 text-center">
+          <div class="text-[10px] text-gray-400">T° Salon remontée</div>
+          <div id="matter-live-amb" class="text-sm font-bold text-sky-400 mt-0.5 tabular-nums">-- °C</div>
+        </div>
+        <div class="bg-gray-900/90 border border-gray-800 rounded-xl p-2.5 text-center">
+          <div class="text-[10px] text-gray-400">Consigne cible</div>
+          <div id="matter-live-sp" class="text-sm font-bold text-orange-400 mt-0.5 tabular-nums">-- °C</div>
+        </div>
+      </div>
+
+      <!-- Zone QR Code + Instructions Nest Hub Max -->
+      <div class="grid grid-cols-1 sm:grid-cols-5 gap-4 items-center bg-gray-900/60 border border-gray-800 rounded-xl p-4">
+        <!-- Colonne QR Code -->
+        <div class="sm:col-span-2 flex flex-col items-center justify-center space-y-2">
+          <div id="matter-qr-box"
+            class="w-44 h-44 bg-white rounded-xl p-2 flex items-center justify-center shadow-lg border-2 border-cyan-500/40 overflow-hidden">
+            <span class="text-xs text-gray-500 font-medium text-center px-2">Chargement du QR Code Matter...</span>
+          </div>
+          <div class="w-full text-center space-y-1">
+            <div class="text-[10px] text-gray-400 uppercase tracking-wider font-semibold">Code manuel (11 chiffres)</div>
+            <div class="flex items-center justify-center gap-1.5">
+              <code id="matter-manual-code"
+                class="px-2.5 py-1 rounded-lg bg-gray-950 border border-cyan-800/70 text-cyan-300 font-mono text-sm font-bold tracking-wider select-all">---- --- ----</code>
+              <button type="button" onclick="copyMatterPairingCode()"
+                class="px-2 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs font-semibold border border-gray-700"
+                title="Copier le code à 11 chiffres">📋</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Colonne Guide d'appairage Google Home / Nest Hub Max -->
+        <div class="sm:col-span-3 space-y-2.5 text-xs text-gray-300">
+          <div class="font-bold text-cyan-300 flex items-center gap-1.5">
+            <span>📲</span><span>Appairer avec votre Google Nest Hub Max :</span>
+          </div>
+          <ol class="space-y-1.5 text-[11px] list-decimal pl-4 leading-relaxed text-gray-300">
+            <li>Connectez votre smartphone au <strong>même réseau Wi-Fi</strong> que votre <strong>Nest Hub Max</strong>.</li>
+            <li>Ouvrez l'application <strong>Google Home</strong> → onglet <strong>Appareils</strong> → <strong>+ Ajouter</strong> → <strong>Appareil compatible Matter</strong>.</li>
+            <li>Scannez le <strong>QR Code</strong> ci-contre (ou choisissez <em>« Configurer sans code QR »</em> et tapez le code à 11 chiffres).</li>
+            <li>Si Google affiche <em>« Appareil non certifié »</em>, appuyez sur <strong>Configurer quand même</strong>.</li>
+          </ol>
+          <div class="rounded-lg bg-emerald-950/40 border border-emerald-800/60 p-2.5 text-[11px] text-emerald-200 space-y-1">
+            <div class="font-bold text-emerald-300">🎙️ Commandes vocales disponibles :</div>
+            <div>• <em>« Ok Google, allume le poêle »</em> / <em>« éteins le poêle »</em></div>
+            <div>• <em>« Ok Google, mets le poêle sur 21 degrés »</em></div>
+            <div>• <em>« Ok Google, quelle est la température du poêle ? »</em></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="matter-fabrics-info" class="text-[11px] text-gray-400 bg-gray-900/80 border border-gray-800 rounded-lg px-3 py-2">
+        Statut d'appairage : vérification en cours...
+      </div>
+
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-gray-800">
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="refreshMatterStatus(true)"
+            class="px-3 py-1.5 rounded-lg bg-sky-800/80 hover:bg-sky-700 text-white text-xs font-semibold transition">
+            🔄 Actualiser
+          </button>
+          <button type="button" onclick="confirmResetMatterPairing()"
+            class="px-3 py-1.5 rounded-lg bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-800/70 text-xs font-semibold transition"
+            title="Efface les appairages existants et génère un nouveau QR Code Matter">
+            ♻️ Réinitialiser l'appairage
+          </button>
+        </div>
+        <button type="button" onclick="closeMatterModal()"
+          class="px-4 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs font-semibold">
+          Fermer
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODALE DÉDIÉE : INSPECTEUR DES 76 OFFSETS BRUTS DU POÊLE (POPUP) -->
+  <div id="offsets-modal"
+    class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-5">
+    <div
+      class="bg-gray-900 border border-cyan-700/60 rounded-2xl max-w-4xl w-full max-h-[88vh] flex flex-col shadow-2xl overflow-hidden">
+      <!-- Header -->
+      <div class="p-4 border-b border-gray-800 flex items-center justify-between bg-gray-950/80">
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">📡</span>
+          <div>
+            <h3 class="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+              <span>Inspecteur des 76 Offsets Poêle (`raw_buffer`)</span>
+              <span id="modal-offsets-badge" class="px-2 py-0.5 text-[11px] font-bold rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800">76 offsets</span>
+            </h3>
+            <p class="text-[11px] text-gray-400">Trame mémoire brute temps réel (Nobis A10 C Light Style Coax - Firmware Micronova V018_1)</p>
+          </div>
+        </div>
+        <button onclick="closeOffsetsModal()" class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white font-bold flex items-center justify-center transition">✕</button>
+      </div>
+
+      <!-- Barre de recherche & Actualiser -->
+      <div class="p-3 bg-gray-950/50 border-b border-gray-800/80 flex flex-wrap items-center justify-between gap-2.5">
+        <div class="flex items-center gap-2 flex-1 min-w-[200px]">
+          <input id="offsets-modal-search" type="text" placeholder="Rechercher par offset ou nom (ex: 103, temp, fan, pwr...)"
+            oninput="filterOffsetsModal(this.value)"
+            class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white w-full placeholder-gray-500 focus:outline-none focus:border-cyan-500" />
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="pollNow(); setTimeout(renderRawBufferInspector, 600);"
+            class="px-3 py-1.5 rounded-lg bg-cyan-800 hover:bg-cyan-700 text-cyan-200 text-xs font-semibold flex items-center gap-1.5 transition">
+            🔄 Actualiser Buffer
+          </button>
+        </div>
+      </div>
+
+      <!-- Grille des 76 offsets -->
+      <div class="p-4 overflow-y-auto flex-1 bg-gray-950/30">
+        <div id="modal-offsets-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 text-xs font-mono tabular-nums">
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="p-3 border-t border-gray-800 bg-gray-950/80 flex items-center justify-between text-xs text-gray-400">
+        <span id="modal-offsets-count-label">76 offsets</span>
+        <button onclick="closeOffsetsModal()" class="px-4 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-white font-semibold transition">
+          Fermer
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- POP-UP MODALE "CONFIGURATION" (PROTOCOLE DYNAMIQUE, BASE SQLITE, MÉTÉO, STOCK SACS & WEBHOOK) -->
+  <div id="config-modal"
+    class="fixed inset-0 z-50 hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div class="card max-w-lg w-full p-5 space-y-4 border border-gray-700 shadow-2xl my-auto">
+      <div class="flex items-center justify-between border-b border-gray-800 pb-3">
+        <div class="flex items-center gap-2">
+          <span class="text-lg">⚙️</span>
+          <div>
+            <h3 class="text-base font-bold text-white">Configuration</h3>
+            <p class="text-[11px] text-gray-400">Protocole, base SQLite, météo, stock sacs 15 kg & alertes push</p>
+          </div>
+        </div>
+        <button onclick="closeConfigModal()"
+          class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white font-bold flex items-center justify-center">✕</button>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <!-- Information sur la base de données active & Firmware -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div class="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-900/90 border border-gray-800"
+            title="Chaque mode possède sa propre base SQLite dédiée dans /app/data/">
+            <span class="text-gray-400 font-medium">🗄️ Base active :</span>
+            <strong id="hdr-db" class="text-cyan-400 font-mono">nobis_a10_agua_cloud.db</strong>
+          </div>
+          <div class="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-900/90 border border-gray-800"
+            title="Version du firmware carte mère Micronova Nobis">
+            <span class="text-gray-400 font-medium">📟 Firmware :</span>
+            <span
+              class="text-[11px] font-semibold text-orange-400 bg-orange-950/60 border border-orange-800 px-2 py-0.5 rounded">Firmware
+              V018_1</span>
+          </div>
+        </div>
+
+        <!-- Choix du protocole de communication & Fréquence de collecte -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div class="sm:col-span-2">
+            <label class="text-gray-300 font-semibold block mb-1">Protocole de communication actif</label>
+            <select id="cfg-mode" onchange="updateConfigModalFields()"
+              class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white font-medium focus:border-orange-500 focus:outline-none">
+              <option value="agua_cloud">☁️ Cloud Agua IOT (nobis_a10_agua_cloud.db)</option>
+              <option value="local_gateway">🔌 Passerelle UART Locale ESP32 (nobis_a10_local_gateway.db)</option>
+              <option value="simulation">🧪 Simulation Thermodynamique (nobis_a10_simulation.db)</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-gray-300 font-semibold block mb-1">Collecte (s)</label>
+            <input id="cfg-interval" type="number" min="15" max="3600"
+              class="w-full bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-2 text-white tabular-nums focus:border-orange-500 focus:outline-none"
+              title="Fréquence de scrutation de la télémétrie en secondes" />
+          </div>
+        </div>
+
+        <!-- Champs spécifiques : Cloud Agua IOT uniquement -->
+        <div id="cfg-fields-agua" class="space-y-3 bg-gray-950/70 border border-gray-800 rounded-xl p-3.5">
+          <div class="text-[11px] font-semibold text-amber-400 flex items-center gap-1.5">
+            <span>☁️</span><span>Identifiants Cloud Nobis Agua IOT (`nobis.agua-iot.com`)</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="text-gray-400 block mb-1">Email Agua IOT</label>
+              <input id="cfg-email" type="email" placeholder="votre.email@domaine.fr"
+                class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white" />
+            </div>
+            <div>
+              <label class="text-gray-400 block mb-1">Mot de passe (masqué)</label>
+              <input id="cfg-pass" type="password" value="********"
+                class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Champs spécifiques : Passerelle UART Locale uniquement -->
+        <div id="cfg-fields-gateway" class="hidden space-y-2 bg-gray-950/70 border border-gray-800 rounded-xl p-3.5">
+          <div class="text-[11px] font-semibold text-cyan-400 flex items-center gap-1.5">
+            <span>🔌</span><span>Passerelle Matérielle UART Locale (ESP32 / RS232 Micronova)</span>
+          </div>
+          <div>
+            <label class="text-gray-400 block mb-1">URL HTTP de la Passerelle Locale</label>
+            <input id="cfg-gw" type="text" placeholder="http://192.168.1.150"
+              class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white font-mono" />
+          </div>
+        </div>
+
+        <!-- Encart d'information : Mode Simulation uniquement -->
+        <div id="cfg-fields-sim"
+          class="hidden bg-emerald-950/30 border border-emerald-800/60 rounded-xl p-3 text-[11px] text-emerald-200">
+          🧪 <strong>Mode Simulation Thermodynamique actif :</strong> Aucun identifiant externe n'est requis. Le jumeau
+          numérique simule la physique du Nobis A10 (Trémie 30 kg) dans sa base dédiée <code
+            class="font-mono text-emerald-300">nobis_a10_simulation.db</code>.
+        </div>
+
+        <!-- Paramètres Granulés & Météo Extérieure -->
+        <div class="pt-2 border-t border-gray-800 space-y-3">
+          <!-- Cadre 1 : Pellets & Stock Sacs (Code couleur Marron Bois Chaud) -->
+          <div class="bg-[#2a170e]/70 border border-[#6e3b1f] rounded-xl p-3 space-y-2.5">
+            <div class="text-[11px] font-bold text-[#e8b693] flex items-center justify-between">
+              <span class="flex items-center gap-1.5">
+                <span>🪵</span><span>Gestion des Sacs de Granulés (15 kg)</span>
+              </span>
+              <span class="text-[10px] text-[#c98a5e] bg-[#3b2014] border border-[#6e3b1f] px-2 py-0.5 rounded">Trémie &
+                Stock</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label class="text-[#d4976a] block mb-1 text-[11px] font-medium">Prix sac 15 kg (€)</label>
+                <input id="cfg-bag-price" type="number" step="0.05" min="1" max="30"
+                  class="w-full bg-gray-900/90 border border-[#6e3b1f] rounded-lg px-2.5 py-1.5 text-white tabular-nums focus:border-amber-500 focus:outline-none" />
+              </div>
+              <div>
+                <label class="text-[#d4976a] block mb-1 text-[11px] font-medium">Stock sacs (15 kg)</label>
+                <input id="cfg-bags-stock" type="number" step="1" min="0" max="500"
+                  class="w-full bg-gray-900/90 border border-[#6e3b1f] rounded-lg px-2.5 py-1.5 text-white tabular-nums focus:border-amber-500 focus:outline-none transition-all" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Cadre 2 : Paramètres Station Météo Extérieure (Open-Meteo) -->
+          <div class="bg-sky-950/40 border border-sky-800/70 rounded-xl p-3 space-y-2.5">
+            <div class="text-[11px] font-bold text-sky-300 flex items-center justify-between">
+              <span class="flex items-center gap-1.5">
+                <span>🌦️</span><span>Localisation & Station Météo Extérieure</span>
+              </span>
+              <span
+                class="text-[10px] text-sky-300 bg-sky-900/50 border border-sky-700/60 px-2 py-0.5 rounded">Open-Meteo</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div>
+                <label class="text-sky-200/80 block mb-1 text-[11px] font-medium">Ville Météo</label>
+                <input id="cfg-city" type="text"
+                  class="w-full bg-gray-900/90 border border-sky-800/80 rounded-lg px-2.5 py-1.5 text-white focus:border-sky-400 focus:outline-none" />
+              </div>
+              <div>
+                <label class="text-sky-200/80 block mb-1 text-[11px] font-medium">Latitude</label>
+                <input id="cfg-lat" type="text"
+                  class="w-full bg-gray-900/90 border border-sky-800/80 rounded-lg px-2.5 py-1.5 text-white font-mono tabular-nums focus:border-sky-400 focus:outline-none" />
+              </div>
+              <div>
+                <label class="text-sky-200/80 block mb-1 text-[11px] font-medium">Longitude</label>
+                <input id="cfg-lon" type="text"
+                  class="w-full bg-gray-900/90 border border-sky-800/80 rounded-lg px-2.5 py-1.5 text-white font-mono tabular-nums focus:border-sky-400 focus:outline-none" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Cadre 3 : Pont Matter Local (Google Home / Nest Hub Max / Apple Home) -->
+          <div class="bg-cyan-950/40 border border-cyan-800/70 rounded-xl p-3 space-y-2.5">
+            <div class="text-[11px] font-bold text-cyan-300 flex items-center justify-between">
+              <span class="flex items-center gap-1.5">
+                <span>🏠</span><span>Pont Thermostat Matter (Google Nest Hub Max / Assistant)</span>
+              </span>
+              <button type="button" onclick="closeConfigModal(); openMatterModal();"
+                class="text-[10px] text-cyan-300 bg-cyan-900/60 hover:bg-cyan-800/80 border border-cyan-700/60 px-2 py-0.5 rounded font-semibold transition">
+                📲 Ouvrir l'appairage QR Code
+              </button>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div>
+                <label class="text-cyan-200/80 block mb-1 text-[11px] font-medium">Activation Matter</label>
+                <select id="cfg-matter-enabled"
+                  class="w-full bg-gray-900/90 border border-cyan-800/80 rounded-lg px-2.5 py-1.5 text-white focus:border-cyan-400 focus:outline-none">
+                  <option value="1">✅ Actif (Recommandé)</option>
+                  <option value="0">❌ Désactivé</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-cyan-200/80 block mb-1 text-[11px] font-medium">Nom de l'appareil</label>
+                <input id="cfg-matter-name" type="text" placeholder="Poêle Nobis A10"
+                  class="w-full bg-gray-900/90 border border-cyan-800/80 rounded-lg px-2.5 py-1.5 text-white focus:border-cyan-400 focus:outline-none" />
+              </div>
+              <div>
+                <label class="text-cyan-200/80 block mb-1 text-[11px] font-medium">Port UDP Matter</label>
+                <input id="cfg-matter-port" type="number" min="1024" max="65535" placeholder="5540"
+                  class="w-full bg-gray-900/90 border border-cyan-800/80 rounded-lg px-2.5 py-1.5 text-white font-mono tabular-nums focus:border-cyan-400 focus:outline-none" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Notifications Push Webhook / ntfy.sh -->
+          <div>
+            <label class="text-gray-400 block mb-1">🔔 Alertes Push (URL ntfy.sh / Webhook Discord / Home
+              Assistant)</label>
+            <div class="flex gap-2">
+              <input id="cfg-webhook" type="text" placeholder="https://ntfy.sh/nobis_a10_bazoches"
+                class="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white font-mono" />
+              <button onclick="testWebhook()"
+                class="px-3 py-1.5 rounded-lg bg-indigo-700 hover:bg-indigo-600 text-white font-semibold whitespace-nowrap">
+                🔔 Tester
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <pre id="cfg-diag"
+          class="text-[11px] bg-gray-950 border border-gray-800 rounded-lg p-3 text-gray-300 overflow-x-auto max-h-40 hidden font-mono"></pre>
+      </div>
+
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-gray-800">
+        <button onclick="testConnection()"
+          class="px-3.5 py-2 rounded-lg bg-sky-700 hover:bg-sky-600 text-white text-xs font-semibold transition">
+          📡 Tester la communication
+        </button>
+        <div class="flex items-center gap-2">
+          <button onclick="closeConfigModal()"
+            class="px-3.5 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold">
+            Fermer
+          </button>
+          <button onclick="saveSettings()"
+            class="px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold shadow transition">
+            💾 Enregistrer
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BANDEAU D'ALERTE CRITIQUE DYNAMIQUE (SÉCURITÉS & ALARMES) -->
+  <div id="critical-alert-banner"
+    class="hidden bg-rose-950/95 border-b border-rose-600 px-4 py-2.5 text-xs text-rose-100 flex flex-wrap items-center justify-between gap-2 animate-pulse">
+    <div class="flex items-center gap-2 font-bold">
+      <span class="text-base">🚨</span>
+      <span id="critical-alert-text">ALERTE SÉCURITÉ ACTIVE SUR LE POÊLE</span>
+    </div>
+    <button id="critical-alert-btn" onclick="resetStoveAlarm()"
+      class="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold border border-rose-400 transition flex items-center gap-1.5 shadow">
+      <span>🛡️</span><span id="critical-alert-btn-text">Guide Réarmement (P3)</span>
+    </button>
+  </div>
+
+  <!-- HEADER PRINCIPAL -->
+  <header
+    class="bg-gray-900/95 backdrop-blur border-b border-gray-800 px-4 sm:px-6 py-2.5 flex flex-wrap md:grid md:grid-cols-3 items-center justify-between gap-3">
+    <!-- GAUCHE : Météo Extérieure -->
+    <div class="flex items-center gap-3 justify-start">
+      <div
+        class="flex items-center gap-2 text-xs bg-gray-950/80 border border-gray-800 px-3 py-1.5 rounded-lg shadow-inner"
+        title="Conditions météo extérieures">
+        <span class="text-sm">🌦️</span>
+        <div class="flex items-baseline gap-1.5">
+          <span class="font-bold text-sky-400 tabular-nums"><span id="kpi-w-t">--</span>°C</span>
+          <span class="text-gray-400 text-[11px] hidden sm:inline">
+            (<b id="kpi-w-h" class="text-gray-300 font-normal">--</b>% • <b id="kpi-w-w"
+              class="text-gray-300 font-normal">--</b> km/h)
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- CENTRE : Titre avec voyant d'état dynamique à gauche et indicateur de connexion à droite -->
+    <div class="order-first md:order-none w-full md:w-auto flex items-center justify-center gap-2 sm:gap-2.5">
+      <!-- Voyant d'état dynamique (gauche du titre) reprenant les pictos de l'état en cours (chevrons) -->
+      <div id="hdr-dot"
+        class="w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-sm sm:text-base shadow transition-all duration-300 flex-shrink-0 cursor-help bg-slate-800 text-slate-300 border border-slate-700"
+        title="Voyant d'état dynamique du poêle">
+        <span id="hdr-dot-icon" class="select-none leading-none">⚫</span>
+      </div>
+
+      <h1 class="text-sm sm:text-base md:text-lg font-bold text-white tracking-tight select-none">
+        Nobis A10 C Light Style Coax
+      </h1>
+
+      <!-- Indicateur de connexion (droite du titre) avec picto nuage cloud -->
+      <div id="hdr-conn" onclick="pollNow()"
+        class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-emerald-950/60 border-emerald-700 text-emerald-300 shadow flex-shrink-0 cursor-pointer hover:border-emerald-500 transition-all duration-200"
+        title="Statut de la connexion • Cliquer pour actualiser">
+        <span id="hdr-conn-dot" class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"></span>
+        <span id="hdr-cloud-icon" class="text-sm leading-none" title="Cloud Agua IOT">☁️</span>
+        <span id="hdr-conn-text" class="tabular-nums">Connecté</span>
+      </div>
+    </div>
+
+    <!-- DROITE : Boutons Google Home (Matter) & Configuration -->
+    <div class="flex items-center justify-end gap-2 text-xs ml-auto md:ml-0">
+      <button onclick="openMatterModal()" id="hdr-matter-btn"
+        class="h-8 px-2.5 rounded-lg bg-cyan-950/70 hover:bg-cyan-900/80 text-cyan-200 border border-cyan-700/80 font-semibold flex items-center gap-1.5 transition flex-shrink-0 shadow"
+        title="Google Home / Nest Hub Max (Thermostat Matter Local)">
+        <span id="hdr-matter-dot" class="w-2 h-2 rounded-full bg-cyan-400"></span>
+        <span>🏠</span>
+        <span class="hidden sm:inline">Google Home</span>
+      </button>
+      <button onclick="openConfigModal()"
+        class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-100 border border-gray-600 font-semibold flex items-center justify-center transition flex-shrink-0"
+        title="Configuration" aria-label="Configuration">
+        ⚙️
+      </button>
+    </div>
+  </header>
+
+  <!-- ===================================================================== -->
+  <!-- BARRE DE NAVIGATION PC (5 ONGLETS : PILOTAGE, PROGRAMMES, SUPERVISION, ETC.)-->
+  <!-- ===================================================================== -->
+  <nav class="hidden md:flex justify-center bg-gray-900/70 border-b border-gray-800 px-6 overflow-x-auto text-sm">
+    <button onclick="switchTab('tab-control')" id="btn-tab-control"
+      class="px-5 py-3 tab-active whitespace-nowrap flex items-center gap-2">
+      <span>🎮</span><span>Pilotage</span>
+    </button>
+    <button onclick="switchTab('tab-chrono')" id="btn-tab-chrono"
+      class="px-5 py-3 text-gray-400 hover:text-white whitespace-nowrap flex items-center gap-2">
+      <span>🕒</span><span>Programmes</span>
+    </button>
+    <button onclick="switchTab('tab-dashboard')" id="btn-tab-dashboard"
+      class="px-5 py-3 text-gray-400 hover:text-white whitespace-nowrap flex items-center gap-2">
+      <span>📊</span><span>Supervision</span>
+    </button>
+    <button onclick="switchTab('tab-installer')" id="btn-tab-installer"
+      class="px-5 py-3 text-gray-400 hover:text-white whitespace-nowrap flex items-center gap-2">
+      <span>🔧</span><span>Paramètres</span>
+    </button>
+    <button onclick="switchTab('tab-logs')" id="btn-tab-logs"
+      class="px-5 py-3 text-gray-400 hover:text-white whitespace-nowrap flex items-center gap-2">
+      <span>📜</span><span>LOGS & ROLLBACK</span>
+    </button>
+  </nav>
+
+  <!-- ===================================================================== -->
+  <!-- BOTTOM APP BAR SUR SMARTPHONE (NAVIGATION AU POUCE TYPE APP NATIVE)   -->
+  <!-- ===================================================================== -->
+  <nav
+    class="fixed bottom-0 left-0 right-0 z-40 md:hidden backdrop-blur-md bg-gray-900/95 border-t border-gray-800 grid grid-cols-6 py-1.5 px-0.5 text-[10px]">
+    <button onclick="switchTab('tab-control')" id="mob-btn-tab-control"
+      class="flex flex-col items-center justify-center py-1 mob-tab-active">
+      <span class="text-base">🎮</span>
+      <span class="truncate">Pilotage</span>
+    </button>
+    <button onclick="switchTab('tab-chrono')" id="mob-btn-tab-chrono"
+      class="flex flex-col items-center justify-center py-1 text-gray-400">
+      <span class="text-base">🕒</span>
+      <span class="truncate">Programmes</span>
+    </button>
+    <button onclick="switchTab('tab-dashboard')" id="mob-btn-tab-dashboard"
+      class="flex flex-col items-center justify-center py-1 text-gray-400">
+      <span class="text-base">📊</span>
+      <span class="truncate">Supervis.</span>
+    </button>
+    <button onclick="switchTab('tab-installer')" id="mob-btn-tab-installer"
+      class="flex flex-col items-center justify-center py-1 text-gray-400">
+      <span class="text-base">🔧</span>
+      <span class="truncate">Param.</span>
+    </button>
+    <button onclick="switchTab('tab-logs')" id="mob-btn-tab-logs"
+      class="flex flex-col items-center justify-center py-1 text-gray-400">
+      <span class="text-base">📜</span>
+      <span class="truncate">Logs & Roll.</span>
+    </button>
+    <button onclick="openConfigModal()" class="flex flex-col items-center justify-center py-1 text-gray-400"
+      title="Configuration">
+      <span class="text-base">⚙️</span>
+      <span class="truncate">Config</span>
+    </button>
+  </nav>
+
+  <!-- CONTENU PRINCIPAL -->
+  <main class="flex-1 p-3 sm:p-6 max-w-[1650px] w-full mx-auto space-y-6">
+
+    <!-- =================================================================== -->
+    <!-- ONGLET 1 (AFFICHÉ PAR DÉFAUT) : PILOTAGE TÉLÉCOMMANDE               -->
+    <!-- =================================================================== -->
+    <section id="tab-control" class="space-y-4">
+      <!-- Indicateur Pagination Mobile (1 seule carte à la fois sur Smartphone) -->
+      <div id="mob-card-nav" class="md:hidden flex items-center justify-center gap-1.5 py-1 px-3 bg-gray-900/90 backdrop-blur rounded-full border border-gray-800 text-[11px] font-semibold mx-auto w-fit shadow-md select-none sticky top-1 z-30">
+        <button type="button" onclick="scrollToMobileCard(0)" id="mob-dot-0" class="px-2.5 py-0.5 rounded-full bg-orange-600 text-white font-bold transition-all shadow-sm">1. Pilotage</button>
+        <button type="button" onclick="scrollToMobileCard(1)" id="mob-dot-1" class="px-2.5 py-0.5 rounded-full text-gray-400 hover:text-white transition-all">2. Canalisations</button>
+        <button type="button" onclick="scrollToMobileCard(2)" id="mob-dot-2" class="px-2.5 py-0.5 rounded-full text-gray-400 hover:text-white transition-all">3. Pellets</button>
+      </div>
+
+      <div id="tab-control-cards" class="mobile-card-pager grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+        <!-- CARTE 1 : ALIMENTATION, CYCLE DE VIE & MODES DE FONCTIONNEMENT -->
+        <div class="card p-5 space-y-4 border-t-2 border-t-emerald-500 flex flex-col justify-between">
+          <div class="space-y-3.5">
+            <!-- Cadran Concentrique Intégré : Bouton Central + Couronne 11 Chevrons + Anneau 5 Boutons de Modes -->
+            <div class="relative w-[284px] h-[284px] sm:w-[324px] sm:h-[324px] mx-auto flex items-center justify-center select-none">
+              <!-- SVG Global (ViewBox -165 -165 330 330) -->
+              <svg id="lifecycle-flower-svg" viewBox="-165 -165 330 330"
+                onmouseleave="scheduleFlowerPetalRestore(600)"
+                class="w-full h-full overflow-visible drop-shadow-[0_8px_24px_rgba(0,0,0,0.7)]"
+                aria-label="Cadran de pilotage : Modes de fonctionnement et cycle de vie">
+                
+                <!-- Pistes et anneaux de guidage de fond -->
+                <circle cx="0" cy="0" r="159" fill="#090d16" stroke="#1e293b" stroke-width="1" stroke-dasharray="2 3" />
+                <circle cx="0" cy="0" r="100" fill="none" stroke="#1e293b" stroke-width="1.2" stroke-dasharray="3 3" />
+                <circle cx="0" cy="0" r="35" fill="#090d16" stroke="#1e293b" stroke-width="1.5" />
+
+                <!-- 1. Anneau Extérieur : Les 5 Boutons de Modes (Silence, 🔥+💨 Auto, BOOST, 💨 Auto, ECO) -->
+                <g id="lifecycle-mode-ring">
+                  <!-- Bouton 1 : Silence ! (Haut-Gauche, -72° à -6°) -->
+                  <g class="mode-ring-btn" id="ctl-silence-btn" onclick="handleSilenceButtonClick()">
+                    <title>Notice Nobis : Mode Silence ! (Convection naturelle pure) - Passe la puissance à P1, coupe la ventilation frontale et canalisations (0), et désactive les modes Auto, ECO et BOOST pour un silence absolu.</title>
+                    <path id="ctl-ring-silence-path" d="M -98.91 -32.14 L -150.27 -48.82 A 158 158 0 0 1 -16.52 -157.13 L -10.87 -103.43 A 104 104 0 0 0 -98.91 -32.14 Z"
+                          fill="rgba(15, 23, 42, 0.88)" stroke="rgba(71, 85, 105, 0.7)" stroke-width="1.5" />
+                    <text x="-82.4" y="-103" text-anchor="middle" dominant-baseline="central" class="pointer-events-none select-none">
+                      <tspan x="-82.4" dy="-7" font-size="14">🤫</tspan>
+                      <tspan x="-82.4" dy="16" font-size="11" font-weight="bold" fill="#e2e8f0" id="ctl-ring-silence-label">Silence !</tspan>
+                    </text>
+                  </g>
+
+                  <!-- Bouton 2 : 🔥+💨 Auto (Haut-Droite, +6° à +72°) -->
+                  <g class="mode-ring-btn" id="ctl-auto-btn" onclick="toggleAutoMode()">
+                    <title>Notice Nobis : Mode 🔥+💨 Auto (fun_auto_set, offset 33128) - Le poêle module automatiquement sa puissance et sa ventilation pour maintenir la consigne.</title>
+                    <path id="ctl-ring-auto-path" d="M 10.87 -103.43 L 16.52 -157.13 A 158 158 0 0 1 150.27 -48.82 L 98.91 -32.14 A 104 104 0 0 0 10.87 -103.43 Z"
+                          fill="rgba(15, 23, 42, 0.88)" stroke="rgba(71, 85, 105, 0.7)" stroke-width="1.5" />
+                    <text x="82.4" y="-103" text-anchor="middle" dominant-baseline="central" class="pointer-events-none select-none">
+                      <tspan x="82.4" dy="-7" font-size="13">🔥+💨</tspan>
+                      <tspan x="82.4" dy="16" font-size="11" font-weight="bold" fill="#e2e8f0">Auto</tspan>
+                    </text>
+                  </g>
+
+                  <!-- Bouton 3 : ⚡ BOOST (Bas-Droite, +78° à +144°) -->
+                  <g class="mode-ring-btn" id="ctl-boost-btn" onclick="cycleBoostMode()">
+                    <title>Notice Nobis : Mode BOOST (0 = Inactif, 1 = Continu ⚡, 2 = Chrono ⏱️). Cliquer pour basculer d'un état à l'autre.</title>
+                    <path id="ctl-ring-boost-path" d="M 101.73 -21.62 L 154.55 -32.85 A 158 158 0 0 1 92.87 127.82 L 61.13 84.14 A 104 104 0 0 0 101.73 -21.62 Z"
+                          fill="rgba(15, 23, 42, 0.88)" stroke="rgba(71, 85, 105, 0.7)" stroke-width="1.5" />
+                    <text x="122.3" y="47" text-anchor="middle" dominant-baseline="central" class="pointer-events-none select-none">
+                      <tspan x="122.3" dy="-9" font-size="13" id="ctl-ring-boost-icon">⚡</tspan>
+                      <tspan x="122.3" dy="14" font-size="11" font-weight="bold" fill="#e2e8f0">BOOST</tspan>
+                      <tspan x="122.3" dy="12" font-size="8.5" font-weight="bold" fill="#94a3b8" id="ctl-ring-boost-badge">OFF</tspan>
+                    </text>
+                  </g>
+
+                  <!-- Bouton 4 : 💨 Auto (Bas / 6h, +150° à +210°) -->
+                  <g class="mode-ring-btn" id="ctl-allfans-ps-btn" onclick="setAllFansMode(8)">
+                    <title>Notice Nobis : Mode 💨 Auto (PS) - Passe la soufflerie frontale et les 2 canalisations en mode PS (synchronisées automatiquement avec la puissance de combustion).</title>
+                    <path id="ctl-ring-fanauto-path" d="M 52.0 90.07 L 79.0 136.83 A 158 158 0 0 1 -79.0 136.83 L -52.0 90.07 A 104 104 0 0 0 52.0 90.07 Z"
+                          fill="rgba(8, 47, 73, 0.65)" stroke="rgba(14, 116, 144, 0.75)" stroke-width="1.5" />
+                    <text x="0" y="131" text-anchor="middle" dominant-baseline="central" class="pointer-events-none select-none">
+                      <tspan x="0" dy="-7" font-size="14">💨</tspan>
+                      <tspan x="0" dy="16" font-size="11" font-weight="bold" fill="#e2e8f0">Auto</tspan>
+                    </text>
+                  </g>
+
+                  <!-- Bouton 5 : 💤 ECO (Bas-Gauche, +216° à +282°) -->
+                  <g class="mode-ring-btn" id="ctl-eco-btn" onclick="toggleEcoMode()">
+                    <title>Notice Nobis : Mode ECO (standby_set / status_get #8) - Arrêt et veille automatique dès que la température de consigne est atteinte (Stand-by / Éco-Stop).</title>
+                    <path id="ctl-ring-eco-path" d="M -61.13 84.14 L -92.87 127.82 A 158 158 0 0 1 -154.55 -32.85 L -101.73 -21.62 A 104 104 0 0 0 -61.13 84.14 Z"
+                          fill="rgba(15, 23, 42, 0.88)" stroke="rgba(71, 85, 105, 0.7)" stroke-width="1.5" />
+                    <text x="-122.3" y="47" text-anchor="middle" dominant-baseline="central" class="pointer-events-none select-none">
+                      <tspan x="-122.3" dy="-7" font-size="14">💤</tspan>
+                      <tspan x="-122.3" dy="16" font-size="11" font-weight="bold" fill="#e2e8f0">ECO</tspan>
+                    </text>
+                  </g>
+                </g>
+
+                <!-- 2. Couronne Intermédiaire : Les 11 chevrons du Cycle de Vie générés par JS -->
+                <g id="lifecycle-flower-petals"></g>
+              </svg>
+
+              <!-- Bouton Central Cliquable : ON / OFF / RESET -->
+              <button id="ctl-dynamic-power-btn" onclick="handleDynamicPowerAction()"
+                class="absolute w-[54px] h-[54px] sm:w-[62px] sm:h-[62px] rounded-full font-bold text-xs shadow-2xl flex flex-col items-center justify-center gap-0.5 transition-all duration-200 cursor-pointer bg-gradient-to-br from-emerald-600 to-emerald-500 hover:scale-105 active:scale-95 text-white border-2 border-emerald-300/60 z-10">
+                <span id="ctl-dynamic-power-icon" class="flex items-center justify-center"></span>
+                <span id="ctl-dynamic-power-action-tag"
+                  class="text-[8px] sm:text-[9px] font-black tracking-widest uppercase leading-none">ON</span>
+              </button>
+            </div>
+
+            <!-- Bandeau épuré de la phase active (ou du chevron survolé) -->
+            <div id="flower-status-banner"
+              class="bg-gray-900/90 border border-gray-800 border-l-4 rounded-xl px-3.5 py-2.5 flex items-center gap-2.5 text-xs shadow-inner transition-all duration-200 min-h-[42px]">
+              <span id="kpi-state-dot" class="w-2.5 h-2.5 rounded-full bg-gray-500 shrink-0"></span>
+              <strong id="hdr-state" class="font-bold text-emerald-400 truncate text-sm">--</strong>
+              <span id="kpi-status-code" class="hidden">--</span>
+            </div>
+
+            <!-- Registres booléens masqués pour la télémétrie JS -->
+            <span id="kpi-auto" class="hidden">--</span>
+            <span id="kpi-clim" class="hidden">--</span>
+            <span id="kpi-sil" class="hidden">--</span>
+            <span id="kpi-pwf" class="hidden">--</span>
+            <span id="ctl-pwf-status-label" class="hidden"></span>
+          </div>
+        </div>
+
+        <!-- CARTE 2 : CANALISATIONS GAUCHE (SX) & DROITE (DX) -->
+        <div class="card p-5 space-y-4 border-t-2 border-t-cyan-500 flex flex-col justify-between">
+          <div class="space-y-4">
+            <h3 class="text-base font-bold text-white border-b border-gray-800 pb-2 flex items-center justify-between">
+              <span class="flex items-center gap-1.5 cursor-help"
+                title="Notice Nobis : Puissance combustion (offset 33120), soufflerie façade/ambiance (offset 103, 33122, 33132), canalisations gauche SX (offset 29, 33126, 33136) et droite DX (offset 28, 33124, 33134).">💨
+                Canalisations</span>
+            </h3>
+
+            <!-- Façade : Ambiance Salon & Ventilation Frontale -->
+            <div
+              class="bg-gray-900/60 border border-emerald-950/80 rounded-xl p-3 space-y-2 border-l-4 border-l-emerald-500">
+              <div class="flex justify-between items-center">
+                <span class="text-xs font-bold text-white flex items-center gap-1.5 cursor-help"
+                  title="Notice Nobis (temp_air2_get, offset 103) : Sonde ambiante & Consigne (7..41°C). Ventilation façade (0..7, 8=PS).">
+                  🏠 Salon
+                </span>
+                <div class="flex items-center gap-1.5">
+                  <span id="kpi-amb-delta" class="hidden">--</span>
+                  <!-- Badge compact fusionné : Mesure → Consigne -->
+                  <span class="text-xs px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 font-bold tabular-nums flex items-center gap-1">
+                    <span id="kpi-amb">--</span>°C
+                    <span class="text-emerald-500/60 font-normal">→</span>
+                    <strong id="ctl-amb-val" class="text-white font-bold">19 °C</strong>
+                    <span id="kpi-amb-sp" class="hidden">19 °C</span>
+                    <span id="ctl-amb-meas" class="hidden">--</span>
+                    <span id="ctl-real-fan" class="hidden">--</span>
+                    <span id="kpi-fan" class="hidden">--</span>
+                  </span>
+                </div>
+              </div>
+              <!-- Slider consigne ambiance -->
+              <div class="flex items-center gap-1.5">
+                <button onclick="stepControl('temp_amb_setpoint', -1, 7, 41)"
+                  class="w-7 h-7 rounded-lg bg-gray-800 hover:bg-gray-700 text-white font-bold text-xs">−</button>
+                <input id="ctl-amb-slider" type="range" min="7" max="41" step="1"
+                  oninput="updateAmbSetpointPreview(this.value)"
+                  onchange="sendCommand('temp_amb_setpoint', this.value)" class="flex-1 accent-emerald-500" />
+                <button onclick="stepControl('temp_amb_setpoint', 1, 7, 41)"
+                  class="w-7 h-7 rounded-lg bg-gray-800 hover:bg-gray-700 text-white font-bold text-xs">+</button>
+                <button id="btn-amb-max" onclick="updateAmbSetpointPreview(41); sendCommand('temp_amb_setpoint', 41)"
+                  class="h-7 px-1.5 rounded-lg bg-gray-800 text-[10px] text-amber-400 font-bold transition-all">MAX</button>
+              </div>
+              <!-- Boutons vitesse frontale -->
+              <div class="grid grid-cols-9 gap-1" id="ctl-fan-btns">
+                <button onclick="sendCommand('fan_front_speed', 0)" data-val="0"
+                  class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">OFF</button>
+                <button onclick="sendCommand('fan_front_speed', 1)" data-val="1"
+                  class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">1</button>
+                <button onclick="sendCommand('fan_front_speed', 2)" data-val="2"
+                  class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">2</button>
+                <button onclick="sendCommand('fan_front_speed', 3)" data-val="3"
+                  class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">3</button>
+                <button onclick="sendCommand('fan_front_speed', 4)" data-val="4"
+                  class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">4</button>
+                <button onclick="sendCommand('fan_front_speed', 5)" data-val="5"
+                  class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">5</button>
+                <button onclick="sendCommand('fan_front_speed', 6)" data-val="6"
+                  class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">6</button>
+                <button onclick="sendCommand('fan_front_speed', 7)" data-val="7"
+                  class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">7</button>
+                <button onclick="sendCommand('fan_front_speed', 8)" data-val="8"
+                  class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-bold border border-gray-700 text-cyan-300"
+                  title="8 = PS (Proportionnel Automatique)">PS</button>
+              </div>
+            </div>
+
+            <!-- Canalisation Gauche (SX) -->
+            <div
+              class="bg-gray-900/60 border border-cyan-950/80 rounded-xl p-3 space-y-2 border-l-4 border-l-cyan-500">
+                <div class="flex justify-between items-center">
+                  <span class="text-xs font-bold text-white flex items-center">⬅️ Canalisation SX</span>
+                  <!-- Badge compact fusionné : Mesure → Consigne -->
+                  <span class="text-xs px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 font-bold tabular-nums flex items-center gap-1">
+                    <span id="kpi-dl-t">--</span>°C
+                    <span class="text-cyan-500/60 font-normal">→</span>
+                    <strong id="kpi-dl-sp" class="text-white font-bold">--</strong>
+                    <span id="ctl-dl-sp" class="hidden">--</span>
+                    <span id="ctl-dl-meas" class="hidden">--</span>
+                    <span id="kpi-dl-v" class="hidden">--</span>
+                    <span id="kpi-dl-act" class="hidden">--</span>
+                  </span>
+                </div>
+                <!-- Slider consigne gauche -->
+                <div class="flex items-center gap-1.5">
+                  <button onclick="stepControl('duct_left_setpoint', -1, 7, 41)"
+                    class="w-7 h-7 rounded-lg bg-gray-800 hover:bg-gray-700 text-white font-bold text-xs">−</button>
+                  <input id="ctl-dl-slider" type="range" min="7" max="41" step="1"
+                    oninput="updateDuctSetpointPreview('dl', this.value)"
+                    onchange="sendCommand('duct_left_setpoint', this.value)" class="flex-1 accent-cyan-400" />
+                  <button onclick="stepControl('duct_left_setpoint', 1, 7, 41)"
+                    class="w-7 h-7 rounded-lg bg-gray-800 hover:bg-gray-700 text-white font-bold text-xs">+</button>
+                  <button id="btn-dl-max" onclick="updateDuctSetpointPreview('dl', 41); sendCommand('duct_left_setpoint', 41)"
+                    class="h-7 px-1.5 rounded-lg bg-gray-800 text-[10px] text-amber-400 font-bold transition-all">MAX</button>
+                </div>
+                <!-- Boutons vitesse gauche -->
+                <div class="grid grid-cols-9 gap-1" id="ctl-dl-spd-btns">
+                  <button onclick="sendCommand('duct_left_speed', 0)" data-val="0"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">OFF</button>
+                  <button onclick="sendCommand('duct_left_speed', 1)" data-val="1"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">1</button>
+                  <button onclick="sendCommand('duct_left_speed', 2)" data-val="2"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">2</button>
+                  <button onclick="sendCommand('duct_left_speed', 3)" data-val="3"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">3</button>
+                  <button onclick="sendCommand('duct_left_speed', 4)" data-val="4"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">4</button>
+                  <button onclick="sendCommand('duct_left_speed', 5)" data-val="5"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">5</button>
+                  <button onclick="sendCommand('duct_left_speed', 6)" data-val="6"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">6</button>
+                  <button onclick="sendCommand('duct_left_speed', 7)" data-val="7"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">7</button>
+                  <button onclick="sendCommand('duct_left_speed', 8)" data-val="8"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-bold border border-gray-700 text-cyan-300">PS</button>
+                </div>
+              </div>
+
+              <!-- Canalisation Droite (DX) -->
+              <div
+                class="bg-gray-900/60 border border-sky-950/80 rounded-xl p-3 space-y-2 border-l-4 border-l-sky-500">
+                <div class="flex justify-between items-center">
+                  <span class="text-xs font-bold text-white flex items-center">➡️ Canalisation DX</span>
+                  <!-- Badge compact fusionné : Mesure → Consigne -->
+                  <span class="text-xs px-2 py-0.5 rounded bg-sky-950 text-sky-300 font-bold tabular-nums flex items-center gap-1">
+                    <span id="kpi-dr-t">--</span>°C
+                    <span class="text-sky-500/60 font-normal">→</span>
+                    <strong id="kpi-dr-sp" class="text-white font-bold">--</strong>
+                    <span id="ctl-dr-sp" class="hidden">--</span>
+                    <span id="ctl-dr-meas" class="hidden">--</span>
+                    <span id="kpi-dr-v" class="hidden">--</span>
+                    <span id="kpi-dr-act" class="hidden">--</span>
+                  </span>
+                </div>
+                <!-- Slider consigne droite -->
+                <div class="flex items-center gap-1.5">
+                  <button onclick="stepControl('duct_right_setpoint', -1, 7, 41)"
+                    class="w-7 h-7 rounded-lg bg-gray-800 hover:bg-gray-700 text-white font-bold text-xs">−</button>
+                  <input id="ctl-dr-slider" type="range" min="7" max="41" step="1"
+                    oninput="updateDuctSetpointPreview('dr', this.value)"
+                    onchange="sendCommand('duct_right_setpoint', this.value)" class="flex-1 accent-sky-400" />
+                  <button onclick="stepControl('duct_right_setpoint', 1, 7, 41)"
+                    class="w-7 h-7 rounded-lg bg-gray-800 hover:bg-gray-700 text-white font-bold text-xs">+</button>
+                  <button id="btn-dr-max" onclick="updateDuctSetpointPreview('dr', 41); sendCommand('duct_right_setpoint', 41)"
+                    class="h-7 px-1.5 rounded-lg bg-gray-800 text-[10px] text-amber-400 font-bold transition-all">MAX</button>
+                </div>
+                <!-- Boutons vitesse droite -->
+                <div class="grid grid-cols-9 gap-1" id="ctl-dr-spd-btns">
+                  <button onclick="sendCommand('duct_right_speed', 0)" data-val="0"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">OFF</button>
+                  <button onclick="sendCommand('duct_right_speed', 1)" data-val="1"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">1</button>
+                  <button onclick="sendCommand('duct_right_speed', 2)" data-val="2"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">2</button>
+                  <button onclick="sendCommand('duct_right_speed', 3)" data-val="3"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">3</button>
+                  <button onclick="sendCommand('duct_right_speed', 4)" data-val="4"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">4</button>
+                  <button onclick="sendCommand('duct_right_speed', 5)" data-val="5"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">5</button>
+                  <button onclick="sendCommand('duct_right_speed', 6)" data-val="6"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">6</button>
+                  <button onclick="sendCommand('duct_right_speed', 7)" data-val="7"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">7</button>
+                  <button onclick="sendCommand('duct_right_speed', 8)" data-val="8"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-bold border border-gray-700 text-sky-300">PS</button>
+                </div>
+              </div>
+
+              <!-- Consigne & Puissance (P0 à P8) -->
+              <div
+                class="bg-gray-900/60 border border-orange-950/80 rounded-xl p-3 space-y-2 border-l-4 border-l-orange-500">
+                <div class="flex justify-between items-center">
+                  <span class="text-xs font-bold text-white flex items-center gap-1.5 cursor-help"
+                    title="Notice Nobis (power_set, offset 33120) : Puissance de combustion. Anneau = Consigne | Fond plein = Réel (P0 = Ralenti Éco, P1..P7 = Puissances nominales, P8 = Boost).">
+                    🔥 Puissance
+                  </span>
+                  <div class="flex items-center gap-1.5">
+                    <span id="ctl-power-mode-desc" class="text-[10px] text-amber-400 font-medium"></span>
+                    <span id="ctl-real-pwr" class="hidden">--</span>
+                    <span id="kpi-pwr" class="hidden">--</span>
+                  </div>
+                </div>
+                <!-- Boutons puissance P0 à P8 -->
+                <div class="grid grid-cols-9 gap-1" id="ctl-power-btns">
+                  <button onclick="handlePowerButtonClick(0)" data-val="0"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700 text-sky-300"
+                    title="P0 : Ralenti / Éco (Modulation automatique)">P0</button>
+                  <button onclick="handlePowerButtonClick(1)" data-val="1"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">P1</button>
+                  <button onclick="handlePowerButtonClick(2)" data-val="2"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">P2</button>
+                  <button onclick="handlePowerButtonClick(3)" data-val="3"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">P3</button>
+                  <button onclick="handlePowerButtonClick(4)" data-val="4"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">P4</button>
+                  <button onclick="handlePowerButtonClick(5)" data-val="5"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">P5</button>
+                  <button onclick="handlePowerButtonClick(6)" data-val="6"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">P6</button>
+                  <button onclick="handlePowerButtonClick(7)" data-val="7"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-semibold border border-gray-700">P7</button>
+                  <button onclick="handlePowerButtonClick(8)" data-val="8"
+                    class="min-h-[32px] py-1 rounded-lg bg-gray-800 text-xs font-bold border border-gray-700 text-rose-300"
+                    title="P8 : Mode BOOST (Surpuissance maximale)">P8</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        <!-- CARTE 3 : PELLETS (CODE COULEUR MARRON & SONDES TRÉMIE) -->
+        <div class="card p-5 space-y-4 border-t-2 border-t-[#96562c] flex flex-col justify-between">
+          <div class="space-y-4">
+            <h3 class="text-base font-bold text-white border-b border-gray-800 pb-2 flex items-center justify-between">
+              <span class="flex items-center gap-1.5 cursor-help"
+                title="Suivi en direct de la trémie de granulés (capacité 30 kg / 2 sacs), sondes trappe/niveau, estimation d'autonomie et gestion du stock.">🪵
+                Pellets</span>
+            </h3>
+
+            <!-- Section Trémie 30 kg -->
+            <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-3.5 space-y-2.5">
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-[#e8b693] font-semibold flex items-center gap-1">
+                  🪵 Trémie & Stock
+                </span>
+                <div class="flex items-center gap-1">
+                  <button onclick="refillHopper(1)"
+                    class="text-[10px] px-2 py-0.5 rounded bg-[#3b2014] hover:bg-[#4d2c1c] text-[#e8b693] border border-[#6e3b1f] font-semibold transition"
+                    title="Ajouter 1 sac de 15 kg (+50% dans la trémie de 30 kg)">+1 Sac</button>
+                  <button onclick="refillHopper(2)"
+                    class="text-[10px] px-2 py-0.5 rounded bg-[#4d2c1c] hover:bg-[#5f3622] text-[#f5d0b5] border border-[#854726] font-semibold transition"
+                    title="Remplir la trémie à 100% (30 kg = 2 sacs de 15 kg)">100%</button>
+                </div>
+              </div>
+
+              <!-- Jauge % et Autonomie -->
+              <div class="flex items-baseline justify-between">
+                <div class="text-3xl font-black text-[#e09f67] tabular-nums">
+                  <span id="kpi-hop">--</span> <span class="text-lg font-bold text-[#b46534]">%</span>
+                </div>
+                <span class="text-xs text-[#d4976a] font-semibold tabular-nums" id="kpi-hop-autonomy">~--h</span>
+              </div>
+
+              <!-- Barre de niveau visuelle -->
+              <div class="w-full h-2.5 bg-gray-800 rounded-full overflow-hidden">
+                <div id="kpi-hop-bar" class="h-full bg-[#96562c] transition-all duration-500" style="width: 78%"></div>
+              </div>
+
+              <!-- Métriques de consommation & Stock -->
+              <div class="grid grid-cols-2 gap-2 pt-1 text-xs tabular-nums">
+                <div class="bg-gray-950/70 rounded-lg p-2 border border-gray-800">
+                  <span class="text-[10px] text-gray-400 block">Débit instantané</span>
+                  <span class="font-bold text-gray-200"><b id="kpi-kgh">--</b> kg/h</span>
+                </div>
+                <div class="bg-gray-950/70 rounded-lg p-2 border border-gray-800 flex flex-col justify-between">
+                  <div class="flex items-center justify-between">
+                    <span class="text-[10px] text-gray-400">Stock Sacs 15kg</span>
+                    <button type="button" onclick="openConfigModal('cfg-bags-stock')"
+                      class="w-4 h-4 rounded bg-[#3b2014] hover:bg-[#5a321f] text-[#f5d0b5] border border-[#6e3b1f] text-[11px] font-bold flex items-center justify-center transition shadow cursor-pointer"
+                      title="Modifier ou ajouter du stock de sacs dans la configuration">
+                      +
+                    </button>
+                  </div>
+                  <span class="font-bold text-[#e09f67]"><b id="kpi-bags-stock">-- sacs</b></span>
+                </div>
+                <!-- Cadre fusionné : Consommation J, 7J et 30J (Poids & Coût) -->
+                <div class="bg-gray-950/70 rounded-lg p-2.5 border border-gray-800 col-span-2">
+                  <div class="grid grid-cols-3 divide-x divide-gray-800/80 text-center">
+                    <div class="px-1">
+                      <span class="text-[10px] font-semibold text-gray-400 block">J</span>
+                      <div class="font-bold text-gray-200 text-xs mt-0.5 tabular-nums">
+                        <b id="kpi-daily-kg">--</b> kg
+                      </div>
+                      <div class="text-[11px] font-semibold text-amber-300 tabular-nums">
+                        <b id="kpi-daily-cost">--€</b>
+                      </div>
+                    </div>
+                    <div class="px-1">
+                      <span class="text-[10px] font-semibold text-gray-400 block">7J</span>
+                      <div class="font-bold text-gray-200 text-xs mt-0.5 tabular-nums">
+                        <b id="kpi-weekly-kg">--</b> kg
+                      </div>
+                      <div class="text-[11px] font-semibold text-amber-300 tabular-nums">
+                        <b id="kpi-weekly-cost">--€</b>
+                      </div>
+                    </div>
+                    <div class="px-1">
+                      <span class="text-[10px] font-semibold text-gray-400 block">30J</span>
+                      <div class="font-bold text-gray-200 text-xs mt-0.5 tabular-nums">
+                        <b id="kpi-monthly-kg">--</b> kg
+                      </div>
+                      <div class="text-[11px] font-semibold text-amber-300 tabular-nums">
+                        <b id="kpi-monthly-cost">--€</b>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Prédiction Météo & Date Rupture Stock (DJU 14 jours) -->
+              <div
+                class="bg-gray-950/70 border border-gray-800/90 rounded-lg p-2.5 flex items-center justify-between text-xs cursor-help"
+                title="Simulation prédictive jour par jour croisant votre stock de granulés avec les prévisions météo réelles Open-Meteo sur 14 jours (Degrés-Jours Unifiés DJU).">
+                <div class="flex items-center gap-2">
+                  <span class="text-base">📅</span>
+                  <div>
+                    <span class="text-[10px] text-gray-400 block">Rupture estimée (Prévisions 14j DJU)</span>
+                    <span id="kpi-pellet-runway-date" class="font-bold text-[#e09f67] tabular-nums">--</span>
+                  </div>
+                </div>
+                <div class="text-right">
+                  <span class="text-[10px] text-gray-400 block">Autonomie Stock</span>
+                  <span id="kpi-pellet-runway-days" class="text-xs font-semibold text-emerald-400 tabular-nums">~--
+                    jours</span>
+                </div>
+              </div>
+
+              <!-- Sondes & Contacts Physiques Trémie (Trappe & Niveau bas) -->
+              <div class="pt-2 border-t border-gray-800/80 space-y-1.5">
+                <div class="text-[11px] text-[#c98a5e] font-semibold flex items-center justify-between cursor-help"
+                  title="Notice Nobis : État en direct des sondes physiques de la trémie (contacteur microswitch de trappe et capteur niveau bas trémie).">
+                  <span class="flex items-center gap-1">🪵 Sondes Trappe & Trémie</span>
+                  <span class="text-[10px] text-gray-500 font-mono">Offset 115</span>
+                </div>
+                <div class="grid grid-cols-2 gap-1.5 text-[11px]" id="pellet-security-badges"></div>
+              </div>
+              <span id="kpi-chr" class="hidden">--</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- ONGLET 2 : PROGRAMMES HEBDOMADAIRES (P1..P4) & FRISE 24H           -->
+    <!-- =================================================================== -->
+    <section id="tab-chrono" class="hidden space-y-6">
+      <div class="card p-5 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-4 border-b border-gray-800 pb-3">
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center cursor-help"
+              title="Notice Nobis : Configurez les 4 programmes P1..P4 (heures par pas de 10 min, jours, puissance 1..7, T° salon, canalisations SX/DX).">
+              🕒 Programmes Hebdomadaires (P1..P4) + Frise 24h
+            </h3>
+            <p class="text-xs text-gray-400">Visualisation Gantt sur 24h et configuration par tranche horaire P1..P4</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="ctl-chrono-enable-btn" onclick="toggleChronoWeek()"
+              title="Activer ou désactiver le programmateur chrono (offset 33162)"
+              class="min-h-[36px] min-w-[72px] px-4 py-1.5 rounded-lg font-bold text-xs bg-gray-800 text-gray-400 border border-gray-700 transition-all cursor-pointer text-center">
+              OFF
+            </button>
+          </div>
+        </div>
+
+        <!-- FRISE CHRONOLOGIQUE VISUELLE 24H (GANTT P1..P4) -->
+        <div class="bg-gray-950/90 border border-gray-800 rounded-xl p-3.5 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2.5 pb-2 border-b border-gray-800/80">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-semibold text-gray-200 text-xs sm:text-sm">📅 Frise Visuelle des Créneaux Actifs</span>
+              <span id="gantt-selected-day-badge"
+                class="px-2 py-0.5 text-[11px] font-bold rounded bg-orange-950/80 text-orange-400 border border-orange-800/60"></span>
+            </div>
+            <!-- Sélecteur de jour de la semaine -->
+            <div id="chrono-day-selector"
+              class="flex items-center gap-1 bg-gray-900/90 p-1 rounded-lg border border-gray-800 flex-wrap">
+              <!-- Rendu dynamiquement dans renderChronoPrograms() -->
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between text-[11px] text-gray-400">
+            <span id="gantt-day-subtext" class="text-gray-400 font-medium">Créneaux horaires programmés sur 24h</span>
+            <span id="gantt-now-label" class="text-orange-400 font-mono font-semibold tabular-nums">Heure actuelle :
+              --:--</span>
+          </div>
+
+          <div class="relative pt-1 pb-4">
+            <!-- Marqueur vertical de l'heure actuelle -->
+            <div id="gantt-now-line" class="absolute top-0 bottom-3 w-0.5 bg-rose-500 z-20 pointer-events-none"
+              style="left: 50%">
+              <div class="w-2 h-2 rounded-full bg-rose-500 -ml-[3px] -mt-0.5"></div>
+            </div>
+            <!-- Conteneur des pistes P1..P4 -->
+            <div id="chrono-gantt-tracks" class="space-y-1.5"></div>
+            <!-- Échelle horaire 00h..24h -->
+            <div class="flex justify-between text-[10px] text-gray-500 font-mono pt-1.5 border-t border-gray-800/80">
+              <span>00h</span><span>03h</span><span>06h</span><span>09h</span><span>12h</span><span>15h</span><span>18h</span><span>21h</span><span>24h</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4" id="chrono-programs-grid"></div>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- ONGLET 3 : SUPERVISION (4 VOLETS ALIGNÉS AU PIXEL PRÈS + TACTILE)   -->
+    <!-- =================================================================== -->
+    <section id="tab-dashboard" class="hidden space-y-4">
+      <div class="card p-4 sm:p-5 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-4 border-b border-gray-800 pb-3">
+          <div>
+            <h2 class="text-base font-bold text-white flex items-center cursor-help"
+              title="Volet 1 : Thermique, Canalisations & Fumées. Volet 2 : Combustion, Puissance, Ventilation, RPM & Granulés. Volet 3 : Rubans booléens (Phases & Modes). Volet 4 : Sécurités, Sondes (TCK/TCJ) & Contacts historisés.">
+              Cockpit de Supervision à 4 Volets Synchronisés
+            </h2>
+            <p class="text-xs text-gray-400">Analyse temporelle synchronisée des courbes thermiques, mécaniques, des
+              modes actifs et de l'historique des sécurités & contacts</p>
+          </div>
+          <!-- Timeline (3h, 6h, 24h, 7j, 30j, 3M) + Export CSV Complet -->
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="inline-flex rounded-lg bg-gray-800 p-1 border border-gray-700" id="timeline-btns">
+              <button onclick="setRange('3h')" data-range="3h"
+                class="px-2.5 sm:px-3 py-1 text-xs rounded text-gray-300">3h</button>
+              <button onclick="setRange('6h')" data-range="6h"
+                class="px-2.5 sm:px-3 py-1 text-xs rounded text-gray-300">6h</button>
+              <button onclick="setRange('24h')" data-range="24h"
+                class="px-2.5 sm:px-3 py-1 text-xs rounded bg-orange-600 text-white font-semibold">24h</button>
+              <button onclick="setRange('7j')" data-range="7j"
+                class="px-2.5 sm:px-3 py-1 text-xs rounded text-gray-300">7j</button>
+              <button onclick="setRange('30j')" data-range="30j"
+                class="px-2.5 sm:px-3 py-1 text-xs rounded text-gray-300">30j</button>
+              <button onclick="setRange('3M')" data-range="3M"
+                class="px-2.5 sm:px-3 py-1 text-xs rounded text-gray-300">3M</button>
+            </div>
+            <button onclick="exportCSV()"
+              class="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white border border-emerald-500 transition"
+              title="Exporte toutes les courbes + l'intégralité des registres et offsets bruts au format CSV Excel FR">
+              📥 Export CSV
+            </button>
+          </div>
+        </div>
+
+        <!-- BOUTON ACCORDÉON SUR MOBILE POUR LES FILTRES DE COURBES -->
+        <div class="sm:hidden">
+          <button onclick="toggleMobileSeriesDrawer()"
+            class="w-full py-2 px-3 rounded-lg bg-gray-800 border border-gray-700 text-xs font-semibold text-gray-200 flex items-center justify-between">
+            <span id="mob-series-drawer-label">🎛️ Filtrer les courbes & Présélections</span>
+            <span id="mob-series-drawer-icon">▼</span>
+          </button>
+        </div>
+
+        <!-- TIROIR PRÉSÉLECTIONS & BADGES DE SÉRIES (Replié sur mobile, ouvert sur PC) -->
+        <div id="series-filter-drawer" class="hidden sm:block space-y-2.5">
+          <div class="flex flex-wrap items-center gap-1.5 text-xs">
+            <span class="text-gray-400 font-medium mr-1">Présélections :</span>
+            <button onclick="applyPreset('ALL')"
+              class="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700">Tout afficher</button>
+            <button onclick="applyPreset('THERMAL')"
+              class="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700">Thermique</button>
+            <button onclick="applyPreset('DUCTS')"
+              class="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700">Canalisations
+              (G/D)</button>
+            <button onclick="applyPreset('COMBUSTION')"
+              class="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700">Combustion & Sonde
+              K</button>
+            <button onclick="applyPreset('SAFETY')"
+              class="px-2.5 py-1 rounded bg-rose-950/60 hover:bg-rose-900 border border-rose-700 text-rose-300 font-semibold">🛡️
+              Sécurités & Sondes</button>
+            <button onclick="applyPreset('MECHANICAL')"
+              class="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700">Mécanique</button>
+            <button onclick="applyPreset('CONTROL')"
+              class="px-2.5 py-1 rounded bg-amber-950/60 hover:bg-amber-900 border border-amber-700 text-amber-300 font-semibold">🎛️
+              Consignes</button>
+            <button onclick="applyPreset('TRIM')"
+              class="px-2.5 py-1 rounded bg-purple-950/60 hover:bg-purple-900 border border-purple-700 text-purple-300 font-semibold">⚖️
+              Tarages</button>
+            <button onclick="applyPreset('PELLETS')"
+              class="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700">Granulés</button>
+            <button onclick="applyPreset('NONE')"
+              class="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-red-900/60 text-red-300">Tout
+              masquer</button>
+          </div>
+          <div id="series-toggles" class="flex flex-wrap gap-1.5 pt-1"></div>
+        </div>
+
+        <!-- =============================================================== -->
+        <!-- SÉLECTEUR DE COUCHES VISUELLES DES PHASES DU POÊLE (1, 2, 3, 4) -->
+        <!-- =============================================================== -->
+        <div class="bg-gray-900/90 border border-gray-800 rounded-xl p-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="text-xs font-bold text-orange-300 flex items-center gap-1.5">
+              <span>🔥 Affichage des Phases du Poêle (0 à 11) :</span>
+              <span class="text-[11px] font-normal text-gray-400">Activez ou superposez librement les vues 1 à 4</span>
+            </div>
+            <div class="flex flex-wrap gap-1.5" id="phase-prop-tabs">
+              <button onclick="togglePhaseView('prop1')" data-prop="prop1"
+                class="px-3 py-1.5 rounded-lg text-xs font-bold border transition flex items-center gap-1.5 bg-orange-600 border-orange-400 text-white shadow">
+                <span class="prop-check">●</span>
+                <span>1️⃣ Ruban Maître + Durées</span>
+              </button>
+              <button onclick="togglePhaseView('prop2')" data-prop="prop2"
+                class="px-3 py-1.5 rounded-lg text-xs font-bold border transition flex items-center gap-1.5 bg-orange-600 border-orange-400 text-white shadow">
+                <span class="prop-check">●</span>
+                <span>2️⃣ Fond Coloré Courbes</span>
+              </button>
+              <button onclick="togglePhaseView('prop3')" data-prop="prop3"
+                class="px-3 py-1.5 rounded-lg text-xs font-bold border transition flex items-center gap-1.5 bg-orange-600 border-orange-400 text-white shadow">
+                <span class="prop-check">●</span>
+                <span>3️⃣ Focus & Badge Survol</span>
+              </button>
+              <button onclick="togglePhaseView('prop4')" data-prop="prop4"
+                class="px-3 py-1.5 rounded-lg text-xs font-bold border transition flex items-center gap-1.5 bg-orange-600 border-orange-400 text-white shadow">
+                <span class="prop-check">●</span>
+                <span>4️⃣ Stepper Cycle & Transitions</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- =============================================================== -->
+        <!-- BLOC PROPOSITION 4 : STEPPER VISUEL DU CYCLE & TRANSITIONS      -->
+        <!-- =============================================================== -->
+        <div id="phase-prop4-container" class="hidden bg-gray-950/90 border border-gray-800 rounded-xl p-3.5 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800/80 pb-2">
+            <div class="text-xs font-bold text-white flex items-center gap-2">
+              <span>🧭 Cycle de Vie Micronova (États #0 à #11)</span>
+              <span id="prop4-mode-indicator"
+                class="text-[10px] font-mono px-2 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800">
+                Temps réel
+              </span>
+            </div>
+            <span class="text-[11px] text-gray-400">Survolez les courbes pour voir le stepper s'animer à l'instant
+              T</span>
+          </div>
+          <!-- Stepper Horizontal 6 étapes -->
+          <div id="prop4-stepper-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2"></div>
+          <!-- Journal compact des dernières transitions de phases sur la période -->
+          <div class="pt-1 border-t border-gray-800/70">
+            <div class="text-[10px] text-gray-400 font-semibold mb-1.5">⏱️ Chronologie des transitions de phases sur la
+              période :</div>
+            <div id="prop4-transitions-list"
+              class="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] tabular-nums"></div>
+          </div>
+        </div>
+
+        <!-- =============================================================== -->
+        <!-- BLOC PROPOSITION 2 : CONTRÔLE DU FOND COLORÉ DES COURBES        -->
+        <!-- =============================================================== -->
+        <div id="phase-prop2-toolbar"
+          class="hidden bg-gray-950/90 border border-amber-800/50 rounded-xl px-3.5 py-2 text-xs flex flex-wrap items-center justify-between gap-3">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="font-bold text-amber-300">🎨 Légende Fond des Courbes :</span>
+            <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-semibold">⚫ 0 Éteint</span>
+            <span
+              class="px-2 py-0.5 rounded bg-amber-950 border border-amber-500/60 text-amber-300 text-[10px] font-semibold">🟡
+              1-4 Allumage</span>
+            <span
+              class="px-2 py-0.5 rounded bg-emerald-950 border border-emerald-500/60 text-emerald-300 text-[10px] font-semibold">🟢
+              5 Travail</span>
+            <span
+              class="px-2 py-0.5 rounded bg-purple-950 border border-purple-500/60 text-purple-300 text-[10px] font-semibold">🟣
+              6 Nettoyage</span>
+            <span
+              class="px-2 py-0.5 rounded bg-sky-950 border border-sky-500/60 text-sky-300 text-[10px] font-semibold">💨
+              7 Refroid.</span>
+            <span
+              class="px-2 py-0.5 rounded bg-cyan-950 border border-cyan-500/60 text-cyan-300 text-[10px] font-semibold">❄️
+              8-9 Eco-Stop</span>
+            <span
+              class="px-2 py-0.5 rounded bg-rose-950 border border-rose-500/60 text-rose-300 text-[10px] font-semibold">🚨
+              10-11 Alarme</span>
+          </div>
+          <div class="flex items-center gap-1.5 text-[11px]">
+            <span class="text-gray-400">Intensité du fond :</span>
+            <button onclick="setPhaseBgOpacity(0.06)" data-op="0.06"
+              class="prop2-op-btn px-2 py-0.5 rounded bg-gray-800 text-gray-300 border border-gray-700">Doux
+              (6%)</button>
+            <button onclick="setPhaseBgOpacity(0.12)" data-op="0.12"
+              class="prop2-op-btn px-2 py-0.5 rounded bg-amber-600 text-white font-bold border border-amber-400">Normal
+              (12%)</button>
+            <button onclick="setPhaseBgOpacity(0.22)" data-op="0.22"
+              class="prop2-op-btn px-2 py-0.5 rounded bg-gray-800 text-gray-300 border border-gray-700">Marqué
+              (22%)</button>
+          </div>
+        </div>
+
+        <!-- BARRE DE LECTURE SYNCHRONISÉE AU SURVOL / GLISSEMENT TACTILE -->
+        <div id="sync-hover-bar"
+          class="bg-gray-950/90 border border-gray-800 rounded-lg px-3 py-1.5 text-[11px] flex flex-wrap items-center justify-between gap-2 tabular-nums">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-gray-400">Pointeur : <strong id="hover-timestamp" class="text-sky-400 font-mono">Temps
+                réel
+                (Dernier point)</strong></span>
+            <!-- Badge de phase dynamique (Proposition 3) -->
+            <span id="hover-phase-badge"
+              class="hidden px-2.5 py-0.5 rounded-full text-[11px] font-bold border transition-all">--</span>
+          </div>
+          <div id="hover-values-summary" class="flex flex-wrap items-center gap-3 text-gray-300"></div>
+        </div>
+
+        <!-- =============================================================== -->
+        <!-- BLOC PROPOSITION 3 : CARTE FOCUS DÉTAILLÉE AU SURVOL            -->
+        <!-- =============================================================== -->
+        <div id="phase-prop3-inspector"
+          class="hidden bg-gray-950/95 border border-gray-800 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="flex items-start sm:items-center gap-3">
+            <div id="prop3-phase-icon"
+              class="w-10 h-10 rounded-xl bg-gray-900 border border-gray-700 flex items-center justify-center text-xl shrink-0">
+              🟢
+            </div>
+            <div>
+              <div class="flex flex-wrap items-center gap-2">
+                <span id="prop3-phase-title" class="text-sm font-black text-white">Phase #5 — TRAVAIL (Normal)</span>
+                <span id="prop3-segment-duration"
+                  class="text-[11px] font-mono px-2 py-0.5 rounded bg-gray-900 border border-gray-700 text-sky-300">
+                  Durée de cette phase : --
+                </span>
+              </div>
+              <p id="prop3-phase-desc" class="text-xs text-gray-400 mt-0.5">
+                Régime nominal stabilisé : Modulation de puissance P1..P7 et soufflerie active.
+              </p>
+            </div>
+          </div>
+          <div id="prop3-phase-metrics" class="grid grid-cols-3 gap-2 text-[11px] tabular-nums shrink-0">
+            <div class="bg-gray-900/90 border border-gray-800 rounded-lg px-2.5 py-1 text-center">
+              <span class="text-[10px] text-gray-400 block">Bougie</span>
+              <strong id="prop3-m-glow" class="text-gray-200">--</strong>
+            </div>
+            <div class="bg-gray-900/90 border border-gray-800 rounded-lg px-2.5 py-1 text-center">
+              <span class="text-[10px] text-gray-400 block">Vis sans fin</span>
+              <strong id="prop3-m-auger" class="text-lime-300">--</strong>
+            </div>
+            <div class="bg-gray-900/90 border border-gray-800 rounded-lg px-2.5 py-1 text-center">
+              <span class="text-[10px] text-gray-400 block">Puiss. Réelle</span>
+              <strong id="prop3-m-pwr" class="text-amber-300">--</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- =============================================================== -->
+        <!-- CONTENEUR DES 3 VOLETS SYNCHRONISÉS (SUPPORT SOURIS & TOUCHMOVE)-->
+        <!-- =============================================================== -->
+        <div id="three-panes-container" class="space-y-3 select-none">
+
+          <!-- VOLET 1 : THERMIQUE, CANALISATIONS, CONSIGNES & FUMÉES -->
+          <div class="bg-gray-950/70 border border-gray-800/90 rounded-xl p-2">
+            <div
+              class="h-6 px-2 flex items-center justify-between text-[11px] font-semibold border-b border-gray-800/70 mb-1">
+              <span class="text-emerald-400 truncate">🌡️ Volet 1 — Températures Salon, Canalisations SX/DX & Consignes
+                (°C)</span>
+              <span class="text-orange-400 truncate ml-2">🔥 Fumées & Sonde K (°C)</span>
+            </div>
+            <div class="relative h-[220px] sm:h-[260px] w-full">
+              <canvas id="chartPane1"></canvas>
+            </div>
+          </div>
+
+          <!-- VOLET 2 : PUISSANCE, VENTILATION, DÉPRESSION, GRANULÉS & EXTRACTEUR RPM -->
+          <div class="bg-gray-950/70 border border-gray-800/90 rounded-xl p-2">
+            <div
+              class="h-6 px-2 flex items-center justify-between text-[11px] font-semibold border-b border-gray-800/70 mb-1">
+              <span class="text-amber-400 truncate">⚙️ Volet 2 — Puissance (P), Vitesses (/8), Dépression (Pa), Trémie
+                (%) & Tarages</span>
+              <span class="text-purple-400 truncate ml-2">🌀 Extracteur Fumées (RPM)</span>
+            </div>
+            <div class="relative h-[190px] sm:h-[220px] w-full">
+              <canvas id="chartPane2"></canvas>
+            </div>
+          </div>
+
+          <!-- VOLET 3 : RUBANS BOOLÉENS D'ÉTAT ALIGNÉS AU PIXEL PRÈS (60 FPS) -->
+          <div class="bg-gray-950/70 border border-gray-800/90 rounded-xl p-2">
+            <div
+              class="h-6 px-2 flex items-center justify-between text-[11px] font-semibold border-b border-gray-800/70 mb-1.5">
+              <span class="text-teal-400">🎗️ Volet 3 — Chronologie des Phases & Modes Actifs (Auto, Confort Climat,
+                Powerful, Silence)</span>
+              <span class="text-gray-400 text-[10px] font-mono" id="ribbon-hover-state">Survolez ou glissez le
+                doigt</span>
+            </div>
+            <!-- Marges pl/pr strictement identiques à axis.width de Chart.js (42px mobile, 64px PC) -->
+            <div class="px-[42px] sm:px-[64px]">
+              <div id="ribbons-plot-area" class="relative space-y-1.5 py-1 cursor-crosshair">
+                <!-- PROPOSITION 1 : RUBAN MAÎTRE DES PHASES DU POÊLE (0..11) -->
+                <div id="ribbon-row-phase"
+                  class="relative h-7 rounded-md bg-gray-900 border border-gray-700 overflow-hidden shadow-inner">
+                  <div id="ribbon-track-phase" class="w-full h-full flex"></div>
+                  <div
+                    class="absolute inset-y-0 left-2 flex items-center text-[11px] font-extrabold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] pointer-events-none bg-gray-950/65 px-2 my-1 rounded">
+                    🔥 Phase Poêle (`#8`) : <span id="ribbon-val-phase" class="ml-1.5 text-emerald-300">--</span>
+                  </div>
+                </div>
+
+                <!-- Ruban 1 : Modulation Automatique -->
+                <div class="relative h-5 rounded bg-gray-900 border border-gray-800 overflow-hidden">
+                  <div id="ribbon-track-auto" class="w-full h-full flex"></div>
+                  <div
+                    class="absolute inset-y-0 left-2 flex items-center text-[10px] font-bold text-white drop-shadow pointer-events-none">
+                    🔄 Modulation Automatique (`33128`) : <span id="ribbon-val-auto"
+                      class="ml-1 text-teal-300">--</span>
+                  </div>
+                </div>
+
+                <!-- Ruban 2 : Mode ECO (Stand-by / Éco-Stop) -->
+                <div class="relative h-5 rounded bg-gray-900 border border-gray-800 overflow-hidden">
+                  <div id="ribbon-track-clim" class="w-full h-full flex"></div>
+                  <div
+                    class="absolute inset-y-0 left-2 flex items-center text-[10px] font-bold text-white drop-shadow pointer-events-none">
+                    🌱 ECO (Stand-by) : <span id="ribbon-val-clim" class="ml-1 text-cyan-300">--</span>
+                  </div>
+                </div>
+
+                <!-- Ruban 3 : Mode BOOST -->
+                <div class="relative h-5 rounded bg-gray-900 border border-gray-800 overflow-hidden">
+                  <div id="ribbon-track-pwf" class="w-full h-full flex"></div>
+                  <div
+                    class="absolute inset-y-0 left-2 flex items-center text-[10px] font-bold text-white drop-shadow pointer-events-none">
+                    ⚡ BOOST (`33154`) : <span id="ribbon-val-pwf" class="ml-1 text-orange-300">--</span>
+                  </div>
+                </div>
+
+                <!-- Ruban 4 : Mode Silencieux -->
+                <div class="relative h-5 rounded bg-gray-900 border border-gray-800 overflow-hidden">
+                  <div id="ribbon-track-sil" class="w-full h-full flex"></div>
+                  <div
+                    class="absolute inset-y-0 left-2 flex items-center text-[10px] font-bold text-white drop-shadow pointer-events-none">
+                    🤫 Silence ! (`33250`) : <span id="ribbon-val-sil" class="ml-1 text-purple-300">--</span>
+                  </div>
+                </div>
+
+                <!-- Unique ligne verticale curseur 60 FPS en superposition absolue (0 recalcul DOM) -->
+                <div id="ribbons-cursor-line"
+                  class="hidden absolute top-0 bottom-0 !m-0 w-[1.5px] bg-white/90 z-30 pointer-events-none shadow-[0_0_6px_#fff]">
+                </div>
+              </div>
+            </div>
+
+            <!-- PROPOSITION 1 (SUITE) : BILAN DES DURÉES & RÉPARTITION PAR PHASE SUR LA PÉRIODE -->
+            <div id="prop1-summary-footer" class="mt-2 pt-2 border-t border-gray-800/80 px-2 space-y-2">
+              <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                <span class="text-gray-400 font-semibold">📊 Répartition des phases sur la période affichée :</span>
+                <span id="prop1-total-span" class="text-[10px] text-gray-500 font-mono">--</span>
+              </div>
+              <!-- Barre globale de répartition 100% -->
+              <div id="prop1-distribution-bar"
+                class="w-full h-2.5 rounded-full bg-gray-900 overflow-hidden flex border border-gray-800"></div>
+              <!-- Badges de durée par phase -->
+              <div id="prop1-duration-badges" class="flex flex-wrap gap-1.5 text-[11px] tabular-nums"></div>
+            </div>
+          </div>
+
+          <!-- =============================================================== -->
+          <!-- VOLET 4 : SÉCURITÉS, SONDES (TCK/TCJ) & CONTACTS HISTORISÉS     -->
+          <!-- =============================================================== -->
+          <div class="bg-gray-950/70 border border-gray-800/90 rounded-xl p-2 space-y-2">
+            <div
+              class="h-6 px-2 flex items-center justify-between text-[11px] font-semibold border-b border-gray-800/70 pb-1">
+              <span class="text-rose-400 flex items-center gap-1.5 font-bold">
+                🛡️ Volet 4 — Sécurités, Sondes (TCK/TCJ) & Contacts Historisés
+              </span>
+              <span class="text-emerald-400 text-[10px] font-mono font-bold" id="sec-hover-state">Temps réel</span>
+            </div>
+
+            <!-- Badges d'état temps réel / dynamique au survol -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-1.5 text-[11px]" id="security-badges"></div>
+
+            <!-- Rubans booléens d'historique alignés au pixel près -->
+            <div class="px-[42px] sm:px-[64px]">
+              <div id="security-ribbons-plot-area" class="relative space-y-1.5 py-1 cursor-crosshair">
+                <!-- Ruban 1 : Porte foyer (offset 115 bit 4) -->
+                <div class="relative h-5 rounded bg-gray-900 border border-gray-800 overflow-hidden">
+                  <div id="ribbon-track-door" class="w-full h-full flex"></div>
+                  <div
+                    class="absolute inset-y-0 left-2 flex items-center text-[10px] font-bold text-white drop-shadow pointer-events-none">
+                    🚪 Porte foyer (`115:4`) : <span id="ribbon-val-door" class="ml-1 text-emerald-300">--</span>
+                  </div>
+                </div>
+
+                <!-- Ruban 2 : Pressostat Pa (offset 115 bit 2) -->
+                <div class="relative h-5 rounded bg-gray-900 border border-gray-800 overflow-hidden">
+                  <div id="ribbon-track-pa" class="w-full h-full flex"></div>
+                  <div
+                    class="absolute inset-y-0 left-2 flex items-center text-[10px] font-bold text-white drop-shadow pointer-events-none">
+                    💨 Pressostat Pa (`115:2`) : <span id="ribbon-val-pa" class="ml-1 text-emerald-300">--</span>
+                  </div>
+                </div>
+
+                <!-- Ruban 3 : Sonde K foyer TCK (offset 115 bit 0) -->
+                <div class="relative h-5 rounded bg-gray-900 border border-gray-800 overflow-hidden">
+                  <div id="ribbon-track-tck" class="w-full h-full flex"></div>
+                  <div
+                    class="absolute inset-y-0 left-2 flex items-center text-[10px] font-bold text-white drop-shadow pointer-events-none">
+                    🔥 Sonde K foyer TCK (`115:0`) : <span id="ribbon-val-tck" class="ml-1 text-emerald-300">--</span>
+                  </div>
+                </div>
+
+                <!-- Ruban 4 : Sonde Fumées TCJ (offset 115 bit 1) -->
+                <div class="relative h-5 rounded bg-gray-900 border border-gray-800 overflow-hidden">
+                  <div id="ribbon-track-tcj" class="w-full h-full flex"></div>
+                  <div
+                    class="absolute inset-y-0 left-2 flex items-center text-[10px] font-bold text-white drop-shadow pointer-events-none">
+                    🌡️ Sonde Fumées TCJ (`115:1`) : <span id="ribbon-val-tcj" class="ml-1 text-emerald-300">--</span>
+                  </div>
+                </div>
+
+                <!-- Ruban 5 : Coupure Secteur Blackout (offset 40) -->
+                <div class="relative h-5 rounded bg-gray-900 border border-gray-800 overflow-hidden">
+                  <div id="ribbon-track-blackout" class="w-full h-full flex"></div>
+                  <div
+                    class="absolute inset-y-0 left-2 flex items-center text-[10px] font-bold text-white drop-shadow pointer-events-none">
+                    ⚡ Secteur 230V / AL01 (`40`) : <span id="ribbon-val-blackout"
+                      class="ml-1 text-emerald-300">--</span>
+                  </div>
+                </div>
+
+                <!-- Ruban 6 : Contacts Thermostats Externes (offset 22) -->
+                <div class="relative h-5 rounded bg-gray-900 border border-gray-800 overflow-hidden">
+                  <div id="ribbon-track-thermostats" class="w-full h-full flex"></div>
+                  <div
+                    class="absolute inset-y-0 left-2 flex items-center text-[10px] font-bold text-white drop-shadow pointer-events-none">
+                    🎛️ Contacts Thermostats Ext. M/SX/DX (`22`) : <span id="ribbon-val-thermostats"
+                      class="ml-1 text-sky-300">--</span>
+                  </div>
+                </div>
+
+                <!-- Ruban 7 : Trappe pellet (offset 115 bit 3) -->
+                <div class="relative h-5 rounded bg-gray-900 border border-gray-800 overflow-hidden">
+                  <div id="ribbon-track-trap" class="w-full h-full flex"></div>
+                  <div
+                    class="absolute inset-y-0 left-2 flex items-center text-[10px] font-bold text-white drop-shadow pointer-events-none">
+                    🌾 Trappe pellet (`115:3`) : <span id="ribbon-val-trap" class="ml-1 text-emerald-300">--</span>
+                  </div>
+                </div>
+
+                <!-- Ruban 8 : Trémie (Niveau granulés - offset 115 bit 6) -->
+                <div class="relative h-5 rounded bg-gray-900 border border-gray-800 overflow-hidden">
+                  <div id="ribbon-track-hoppersec" class="w-full h-full flex"></div>
+                  <div
+                    class="absolute inset-y-0 left-2 flex items-center text-[10px] font-bold text-white drop-shadow pointer-events-none">
+                    🪣 Trémie (`115:6`) : <span id="ribbon-val-hoppersec" class="ml-1 text-emerald-300">--</span>
+                  </div>
+                </div>
+
+                <!-- Ligne verticale curseur synchronisé pour le Volet 4 (Superposition absolue 60 FPS) -->
+                <div id="sec-cursor-line"
+                  class="hidden absolute top-0 bottom-0 !m-0 w-[1.5px] bg-white/90 z-30 pointer-events-none shadow-[0_0_6px_#fff]">
+                </div>
+              </div>
+            </div>
+
+            <!-- Bilan synthétique des sécurités sur la période -->
+            <div
+              class="pt-1.5 border-t border-gray-800/80 px-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-gray-400 font-semibold">🛡️ Bilan historique sécurités :</span>
+                <span id="sec-summary-status"
+                  class="px-2.5 py-0.5 rounded font-bold bg-emerald-950 text-emerald-300 border border-emerald-800 text-xs">
+                  100% Sécurisé (0 alerte)
+                </span>
+              </div>
+              <span id="sec-anomalies-count" class="text-gray-400 text-[10px] font-mono">0 défaut détecté</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- ONGLET 4 : PARAMÈTRES (MENU INSTALLATEUR, SNAPSHOTS & 76 REGISTRES) -->
+    <!-- =================================================================== -->
+    <section id="tab-installer" class="hidden space-y-6">
+
+      <!-- ÉCRAN DE VERROUILLAGE SÉCURISÉ DU MENU INSTALLATEUR -->
+      <div id="installer-lock-screen" class="max-w-md mx-auto my-12 p-8 card bg-gray-900/95 border border-amber-500/30 rounded-2xl shadow-2xl backdrop-blur-md text-center space-y-6">
+        <div class="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-600/10 border border-amber-500/30 flex items-center justify-center text-3xl shadow-inner">
+          🔒
+        </div>
+        <div class="space-y-2">
+          <h2 class="text-xl font-bold text-white tracking-wide">Accès Installateur Sécurisé</h2>
+          <p class="text-xs text-gray-400 leading-relaxed">
+            L'accès aux registres EEPROM usine, sauvegardes système et calibration IA requiert une authentification par le mot de passe Agua Cloud du poêle.
+          </p>
+        </div>
+
+        <!-- Alerte si aucun mot de passe n'est configuré dans les paramètres -->
+        <div id="installer-no-pwd-alert" class="hidden p-3.5 bg-amber-950/70 border border-amber-600/60 rounded-xl text-left space-y-2.5">
+          <div class="flex items-start gap-2.5">
+            <span class="text-amber-400 text-base">⚠️</span>
+            <div class="text-xs text-amber-200">
+              <p class="font-semibold text-amber-300">Aucun mot de passe Cloud configuré</p>
+              <p class="text-amber-400/80 mt-0.5">Veuillez d'abord renseigner votre mot de passe Agua Cloud dans les réglages système pour déverrouiller ce menu.</p>
+            </div>
+          </div>
+          <button type="button" onclick="openConfigModal('cfg-agua-password')" class="w-full py-1.5 px-3 bg-amber-600/30 hover:bg-amber-600/50 text-amber-200 text-xs font-semibold rounded-lg border border-amber-500/40 transition flex items-center justify-center gap-1.5">
+            <span>⚙️</span><span>Configurer le mot de passe Cloud</span>
+          </button>
+        </div>
+
+        <!-- Formulaire d'authentification -->
+        <form id="installer-auth-form" onsubmit="submitInstallerAuth(event)" class="space-y-4 text-left">
+          <div class="space-y-1.5">
+            <label for="installer-password-input" class="block text-xs font-semibold text-gray-300">
+              Mot de passe Agua Cloud
+            </label>
+            <div class="relative">
+              <input type="password" id="installer-password-input" required autocomplete="current-password"
+                placeholder="Entrez votre mot de passe"
+                class="w-full bg-gray-950 border border-gray-700 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 rounded-lg px-3.5 py-2.5 text-sm text-gray-100 placeholder-gray-500 outline-none pr-10 transition">
+              <button type="button" onclick="toggleInstallerPasswordVisibility()"
+                class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-200 cursor-pointer" title="Afficher/Masquer">
+                <span id="installer-pwd-toggle-icon">👁️</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="installer-auth-error" class="hidden p-2.5 bg-red-950/70 border border-red-700/70 rounded-lg text-xs text-red-300"></div>
+
+          <button type="submit" id="installer-auth-submit-btn"
+            class="w-full py-2.5 px-4 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-semibold text-sm rounded-lg shadow-lg shadow-amber-900/30 transition duration-150 flex items-center justify-center gap-2">
+            <span>🔓</span><span>Déverrouiller le Menu</span>
+          </button>
+        </form>
+
+        <p class="text-[11px] text-gray-500">
+          La session reste active pendant 2 heures ou jusqu'au verrouillage manuel.
+        </p>
+      </div>
+
+      <!-- CONTENU DU MENU INSTALLATEUR (DÉVERROUILLÉ APRÈS AUTHENTIFICATION) -->
+      <div id="installer-unlocked-content" class="hidden space-y-6">
+
+        <!-- BANDEAU DE SESSION ACTIVE -->
+        <div class="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-emerald-950/40 border border-emerald-600/40 rounded-xl text-xs">
+          <div class="flex items-center gap-2 text-emerald-300 font-medium">
+            <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span>Accès Installateur Autorisé &bull; Authentifié via mot de passe Cloud Agua</span>
+          </div>
+          <button type="button" onclick="lockInstallerMenu()"
+            class="px-3 py-1.5 bg-gray-900/90 hover:bg-gray-800 text-gray-300 hover:text-white rounded-lg border border-gray-700 transition flex items-center gap-1.5 font-semibold text-xs shadow-sm">
+            <span>🔒</span><span>Verrouiller</span>
+          </button>
+        </div>
+
+      <!-- OPTIMISATION INTELLIGENTE DES TARAGES PAR IA (COMBUSTION & TIRAGE) -->
+      <div class="card p-5 space-y-4 border-l-4 border-l-[#e8b693]">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 pb-3">
+          <div>
+            <h3 class="text-sm font-bold text-white flex items-center gap-2 cursor-help"
+              title="Algorithme d'analyse thermique et aéraulique en continu : évalue le pouvoir calorifique des granulés et le tirage du conduit à partir des écarts moyens sur 15 minutes, et propose un tarage prédictif optimal.">
+              <span class="text-base">✨</span>
+              <span>Optimisation Intelligente des Tarages par IA</span>
+              <span
+                class="text-[10px] font-normal text-amber-400 bg-amber-950/60 border border-amber-800/80 px-2 py-0.5 rounded">Consigne
+                Stable (Moyenne 15 min)</span>
+            </h3>
+            <p class="text-xs text-gray-400">Diagnostic continu de la combustion (Granulés / PCI) et de l'aéraulique
+              (Tirage / Dépression Pa) avec recommandation prédictive et application en 1 clic</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <!-- VOLET 1 : QUALITÉ GRANULÉS & TARAGE VIS -->
+          <div class="bg-gray-950/70 border border-gray-800/90 rounded-lg p-3.5 space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold text-[#e8b693] flex items-center gap-1.5 cursor-help"
+                title="Évaluation de la combustion basée sur l'écart thermique moyenné sur 15 minutes à consigne de puissance constante pour identifier le pouvoir calorifique des granulés.">
+                <span>🌾</span><span>Qualité Granulés & Tarage Vis</span>
+              </span>
+              <span id="pellet-quality-badge"
+                class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-400 border border-emerald-700/50">
+                --
+              </span>
+            </div>
+
+            <!-- Analyse thermique & Tarage actuel -->
+            <div
+              class="grid grid-cols-3 gap-2 text-center bg-gray-900/60 p-2 rounded-lg border border-gray-800/60 text-xs tabular-nums">
+              <div>
+                <span class="text-[9px] text-gray-400 block">Flamme / Cible</span>
+                <span class="font-bold text-gray-200 text-xs"><b id="pellet-flame-val">--</b>°C</span>
+              </div>
+              <div>
+                <span class="text-[9px] text-gray-400 block"
+                  title="Écart thermique moyenné sur 15 minutes à consigne de puissance constante (sans variation) pour filtrer les fluctuations thermiques">Écart
+                  moyen (15m)</span>
+                <span id="pellet-delta-val" class="font-bold text-emerald-400 text-xs">--</span>
+              </div>
+              <div>
+                <span class="text-[9px] text-gray-400 block">Tarage Vis actuel</span>
+                <span class="font-bold text-amber-300 text-xs"><b id="pellet-cur-trim">0</b>%</span>
+              </div>
+            </div>
+
+            <!-- Diagnostic IA & Explication -->
+            <div
+              class="text-[11px] text-gray-300 bg-gray-900/40 p-2.5 rounded border border-gray-800/40 leading-relaxed min-h-[46px]"
+              id="pellet-ai-explanation">
+              Analyse de combustion en attente...
+            </div>
+
+            <!-- Action de correction par tarage -->
+            <div id="pellet-ai-action-container">
+              <div
+                class="flex items-center justify-between bg-[#3b2014]/50 border border-[#6e3b1f]/60 rounded-lg p-2 text-xs">
+                <div class="flex items-center gap-2">
+                  <span class="text-base">🤖</span>
+                  <div>
+                    <span class="text-[9px] text-gray-400 block">Proposition Tarage Vis (Offset 70)</span>
+                    <span id="pellet-ai-trim-proposal" class="font-bold text-[#f5d0b5]">Aucun ajustement requis</span>
+                  </div>
+                </div>
+                <button type="button" id="pellet-ai-apply-btn" onclick="applyAiPelletTrim()"
+                  class="hidden px-2.5 py-1 rounded bg-[#6e3b1f] hover:bg-[#854726] text-white text-[11px] font-semibold transition shadow cursor-pointer border border-[#a0522d]">
+                  Appliquer
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- VOLET 2 : TIRAGE CONDUIT & TARAGE EXTRACTEUR FUMÉES -->
+          <div class="bg-gray-950/70 border border-gray-800/90 rounded-lg p-3.5 space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold text-sky-300 flex items-center gap-1.5 cursor-help"
+                title="Évaluation du tirage dynamique du conduit coaxial basée sur la dépression (Pascal) moyennée sur 15 minutes à consigne de puissance constante pour filtrer les rafales de vent.">
+                <span>💨</span><span>Tirage Conduit & Extracteur Fumées</span>
+              </span>
+              <span id="exhaust-quality-badge"
+                class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-400 border border-emerald-700/50">
+                --
+              </span>
+            </div>
+
+            <!-- Analyse dépression & Tarage actuel -->
+            <div
+              class="grid grid-cols-3 gap-2 text-center bg-gray-900/60 p-2 rounded-lg border border-gray-800/60 text-xs tabular-nums">
+              <div>
+                <span class="text-[9px] text-gray-400 block">Dépression / Cible</span>
+                <span class="font-bold text-gray-200 text-xs"><b id="exhaust-dep-val">--</b> Pa</span>
+              </div>
+              <div>
+                <span class="text-[9px] text-gray-400 block"
+                  title="Écart de dépression moyenné sur 15 minutes à consigne de puissance constante (sans variation) pour filtrer les bourrasques de vent">Écart
+                  moyen (15m)</span>
+                <span id="exhaust-delta-val" class="font-bold text-emerald-400 text-xs">--</span>
+              </div>
+              <div>
+                <span class="text-[9px] text-gray-400 block">Tarage Fumées actuel</span>
+                <span class="font-bold text-amber-300 text-xs"><b id="exhaust-cur-trim">0</b>%</span>
+              </div>
+            </div>
+
+            <!-- Diagnostic IA & Explication -->
+            <div
+              class="text-[11px] text-gray-300 bg-gray-900/40 p-2.5 rounded border border-gray-800/40 leading-relaxed min-h-[46px]"
+              id="exhaust-ai-explanation">
+              Analyse aéraulique en attente...
+            </div>
+
+            <!-- Action de correction par tarage -->
+            <div id="exhaust-ai-action-container">
+              <div
+                class="flex items-center justify-between bg-sky-950/50 border border-sky-800/60 rounded-lg p-2 text-xs">
+                <div class="flex items-center gap-2">
+                  <span class="text-base">💨</span>
+                  <div>
+                    <span class="text-[9px] text-gray-400 block">Proposition Tarage Fumées (Offset 71)</span>
+                    <span id="exhaust-ai-trim-proposal" class="font-bold text-sky-200">Aucun ajustement requis</span>
+                  </div>
+                </div>
+                <button type="button" id="exhaust-ai-apply-btn" onclick="applyAiExhaustTrim()"
+                  class="hidden px-2.5 py-1 rounded bg-sky-700 hover:bg-sky-600 text-white text-[11px] font-semibold transition shadow cursor-pointer border border-sky-500">
+                  Appliquer
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card p-4 bg-amber-950/30 border-amber-700/70 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <div class="flex flex-wrap items-center gap-2 mb-1">
+            <h3 class="text-sm font-bold text-amber-300">⚠️ Sécurité Paramètres Installateur & EEPROM Micronova</h3>
+            <span
+              class="text-[11px] font-normal text-orange-400 bg-orange-950/60 border border-orange-800 px-2 py-0.5 rounded">Firmware
+              V018_1</span>
+          </div>
+          <p class="text-xs text-amber-200/80">L'écriture directe dans les registres EEPROM modifie les réglages
+            internes du poêle. Édition verrouillée par défaut.</p>
+        </div>
+        <button id="btn-unlock-installer" onclick="toggleInstallerLock()"
+          class="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold">
+          🔒 Déverrouiller l'édition
+        </button>
+      </div>
+
+      <!-- GESTIONNAIRE DE SNAPSHOTS DES REGISTRES & PARAMÈTRES -->
+      <div class="card p-5 space-y-4 border-l-4 border-l-indigo-500">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 pb-3">
+          <div>
+            <h3 class="text-sm font-bold text-white flex items-center cursor-help"
+              title="Sauvegarde une image complète à un instant T de tous les registres (CONTROL, TRIM, DUCT, CHRONO, PR_PARAM) et des 76 offsets bruts du poêle dans la base SQLite active. Permet d'exporter en CSV ou de restaurer une configuration en écriture groupée (batch).">
+              📸 Snapshots des Registres, Paramètres & Buffer Mémoire (76 Offsets)
+            </h3>
+            <p class="text-xs text-gray-400">Sauvegardez, comparez, exportez en CSV (Excel FR) ou restaurez l'état
+              complet des registres en 1 clic</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <input id="snap-name-input" type="text" placeholder="Nom du snapshot (ex: Réglage Hiver Optimal)"
+              class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-white w-64" />
+            <button onclick="createSnapshot()"
+              class="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">
+              📸 Capturer un Snapshot
+            </button>
+          </div>
+        </div>
+        <div class="overflow-x-auto max-h-[260px]">
+          <table class="w-full text-left text-xs">
+            <thead class="text-gray-400 border-b border-gray-800">
+              <tr>
+                <th class="py-2">ID / Horodatage</th>
+                <th>Nom du Snapshot</th>
+                <th>Mode / Base</th>
+                <th>Contenu</th>
+                <th>Actions (Export CSV / Restauration Batch / Suppression)</th>
+              </tr>
+            </thead>
+            <tbody id="snapshots-table-body" class="divide-y divide-gray-800/60"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Synchronisation Horloge RTC, Tarages & Injecteur d'Offset Brut -->
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+        <div class="card p-4 space-y-3 flex flex-col justify-between">
+          <h4 class="text-sm font-bold text-white flex items-center cursor-help"
+            title="Notice Nobis : Synchronise l'horloge interne du poêle (offsets 34048..34053) en batch avec l'heure exacte du serveur.">
+            ⌚ Horloge Interne RTC Poêle
+          </h4>
+          <div class="flex items-center justify-between gap-2">
+            <div class="text-xs text-gray-400">
+              RTC : <strong id="inst-clock-val" class="text-sky-400 font-mono tabular-nums">--:--</strong>
+            </div>
+            <button onclick="syncStoveClock()"
+              class="px-3 py-1.5 rounded-lg bg-sky-700 hover:bg-sky-600 text-white border border-sky-500 text-xs font-semibold transition">
+              ⌚ Sync Heure
+            </button>
+          </div>
+        </div>
+
+        <div class="card p-4 space-y-3 flex flex-col justify-between">
+          <h4 class="text-sm font-bold text-white flex items-center cursor-help"
+            title="Notice Nobis : Ajuste le temps de rotation de la vis sans fin selon le pouvoir calorifique et la granulométrie de votre pellet.">
+            🌾 Tarage Chargement Granulés (-30% à +30%)
+          </h4>
+          <div class="flex items-center gap-3">
+            <input id="inst-trim-pellet" type="number" min="-30" max="30" step="1" disabled
+              class="inst-input bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-28 tabular-nums" />
+            <button onclick="sendCommand('trim_pellet_pct', document.getElementById('inst-trim-pellet').value)" disabled
+              class="inst-input px-3 py-1.5 rounded bg-orange-600 text-white text-xs font-semibold">Appliquer</button>
+          </div>
+        </div>
+
+        <div class="card p-4 space-y-3 flex flex-col justify-between">
+          <h4 class="text-sm font-bold text-white flex items-center cursor-help"
+            title="Notice Nobis : Corrige la vitesse de l'extracteur de fumées (RPM) selon le tirage de votre conduit coaxial.">
+            💨 Tarage Extracteur Fumées (-30% à +30%)
+          </h4>
+          <div class="flex items-center gap-3">
+            <input id="inst-trim-exhaust" type="number" min="-30" max="30" step="1" disabled
+              class="inst-input bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-28 tabular-nums" />
+            <button onclick="sendCommand('trim_exhaust_pct', document.getElementById('inst-trim-exhaust').value)"
+              disabled
+              class="inst-input px-3 py-1.5 rounded bg-orange-600 text-white text-xs font-semibold">Appliquer</button>
+          </div>
+        </div>
+
+        <div class="card p-4 space-y-3 flex flex-col justify-between">
+          <h4 class="text-sm font-bold text-white flex items-center cursor-help"
+            title="Permet d'écrire directement dans n'importe quel offset RAM ou EEPROM de la carte Micronova V018_1 via /deviceRequestWriting.">
+            🧪 Injecteur d'Offset Mémoire Brut (`RWMSmaster`)
+          </h4>
+          <div class="flex items-center gap-2">
+            <input id="raw-offset" type="number" placeholder="Offset (ex: 33122)" disabled
+              class="inst-input bg-gray-800 border border-gray-700 rounded px-2.5 py-1.5 text-xs w-28 tabular-nums" />
+            <input id="raw-value" type="number" placeholder="Valeur" disabled
+              class="inst-input bg-gray-800 border border-gray-700 rounded px-2.5 py-1.5 text-xs w-20 tabular-nums" />
+            <button onclick="sendRawOffset()" disabled
+              class="inst-input px-3 py-1.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold">Injecter</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Décodage des Masques d'Options Matérielles Usine (Offsets 105 & 107) -->
+      <div class="card p-5 space-y-3">
+        <h3 class="text-sm font-bold text-white flex items-center cursor-help"
+          title="Notice Technique Micronova : Ces deux mots binaires (16 bits) indiquent quelles fonctions et sondes sont activées dans la configuration usine de votre A10 C Light Style Coax.">
+          🧩 Décodage des Masques d'Activation Matériels Usine (`Offset 105` & `Offset 107`)
+        </h3>
+        <div id="hardware-masks-grid"
+          class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 text-xs"></div>
+      </div>
+
+      <!-- Inspecteur des 76 Offsets remontés par le poêle (Popup) -->
+      <div class="card p-4 border-l-4 border-l-cyan-500">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <span class="text-2xl">📡</span>
+            <div>
+              <h3 class="text-sm font-bold text-white flex items-center gap-2 cursor-help"
+                title="Affiche l'intégralité des 76 adresses mémoire retournées par /deviceGetBufferReading sur votre Nobis A10 C Light Style Coax.">
+                <span>Inspecteur Intégral des 76 Offsets Poêle (`raw_buffer`)</span>
+                <span class="text-[11px] font-semibold px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
+                  <span id="raw-buf-count">0</span> / 76 offsets lus
+                </span>
+              </h3>
+              <p class="text-xs text-gray-400">Trame mémoire temps réel complète (télémétrie brute, états, consignes, masques).</p>
+            </div>
+          </div>
+          <button type="button" onclick="openOffsetsModal()"
+            class="px-4 py-2 rounded-lg bg-cyan-700 hover:bg-cyan-600 active:scale-95 text-white text-xs font-bold transition flex items-center gap-2 shadow-lg cursor-pointer">
+            <span>📡</span>
+            <span>Afficher les 76 Offsets dans la Popup</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Catalogue complet des registres EEPROM (Cadre Réduit & Filtrable) -->
+      <div class="card p-3.5 space-y-2.5">
+        <div class="flex flex-wrap items-center justify-between gap-2.5">
+          <div class="flex items-center gap-2">
+            <h3 class="text-sm font-bold text-white flex items-center gap-1.5">
+              <span>📋</span><span>Catalogue des Registres EEPROM</span>
+            </h3>
+            <span id="catalog-reg-count" class="text-[10px] text-gray-400 bg-gray-900 border border-gray-800 px-2 py-0.5 rounded-full">--</span>
+          </div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <input id="catalog-search" type="text" placeholder="Filtrer registres..." oninput="filterCatalogTable(this.value)"
+              class="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-white w-40 sm:w-52 placeholder-gray-500 focus:outline-none focus:border-orange-500" />
+            <button type="button" onclick="toggleCatalogCollapse()" id="btn-toggle-catalog"
+              class="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs font-semibold text-gray-300 transition">
+              ↕️ Déplier / Réduire
+            </button>
+          </div>
+        </div>
+        <div id="catalog-table-wrap" class="overflow-x-auto max-h-[220px] transition-all">
+          <table class="w-full text-left text-[11px]">
+            <thead class="text-gray-400 border-b border-gray-800 sticky top-0 bg-gray-900">
+              <tr>
+                <th class="py-1.5 px-2">Clé Registre</th>
+                <th class="py-1.5 px-2">Offset</th>
+                <th class="py-1.5 px-2">Catégorie</th>
+                <th class="py-1.5 px-2">Description</th>
+                <th class="py-1.5 px-2">Plage</th>
+                <th class="py-1.5 px-2">Valeur Actuelle</th>
+                <th class="py-1.5 px-2">Action</th>
+              </tr>
+            </thead>
+            <tbody id="eeprom-table-body" class="divide-y divide-gray-800/60 tabular-nums"></tbody>
+          </table>
+        </div>
+      </div>
+
+      </div>
+      <!-- FIN CONTENU DÉVERROUILLÉ -->
+
+    </section>
+
+    <!-- =================================================================== -->
+    <!-- ONGLET 5 : LOGS & ROLLBACK (JOURNAL D'AUDIT, ROLLBACK & LOGS)       -->
+    <!-- =================================================================== -->
+    <section id="tab-logs" class="hidden space-y-6">
+      <!-- Journal d'Audit avec Rollback en 1-clic -->
+      <div class="card p-5 space-y-3 border-t-2 border-t-amber-500">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 pb-3">
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2 cursor-help"
+              title="Historique inaltérable de toutes les commandes et écritures de registres exécutées, avec possibilité de restaurer instantanément la valeur antérieure (Rollback).">
+              <span>🛡️</span><span>Journal d'Audit des Écritures & Rollback en 1-Clic</span>
+            </h3>
+            <p class="text-xs text-gray-400">Traçabilité complète des modifications et restauration sécurisée en un clic
+            </p>
+          </div>
+          <button onclick="loadAudit()"
+            class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs font-semibold text-gray-200 border border-gray-700 transition">
+            ⟳ Actualiser Audit
+          </button>
+        </div>
+        <div class="overflow-x-auto max-h-[360px]">
+          <table class="w-full text-left text-xs">
+            <thead class="text-gray-400 border-b border-gray-800 sticky top-0 bg-gray-900">
+              <tr>
+                <th class="py-2">Horodatage</th>
+                <th>Registre / Offset</th>
+                <th>Ancienne Valeur</th>
+                <th>Nouvelle Valeur</th>
+                <th>Base / Mode</th>
+                <th>Statut</th>
+                <th>Restauration</th>
+              </tr>
+            </thead>
+            <tbody id="audit-table-body" class="divide-y divide-gray-800/60 tabular-nums"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Logs & Journal des Événements avec export CSV -->
+      <div class="card p-5 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <span>📜</span><span>Logs & Journal des Événements de la Base Active</span>
+            </h3>
+            <p class="text-xs text-gray-400">Journal technique des cycles de scrutation, télémétrie et communications
+            </p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 text-xs">
+            <button id="log-btn-all" onclick="loadLogs('ALL')" class="log-filter-btn active px-3 py-1 rounded bg-gray-800 hover:bg-gray-700 text-white font-semibold">ALL</button>
+            <button id="log-btn-info" onclick="loadLogs('INFO')" class="log-filter-btn px-3 py-1 rounded bg-sky-950 text-sky-300 font-semibold">INFO</button>
+            <button id="log-btn-command" onclick="loadLogs('COMMAND')"
+              class="log-filter-btn px-3 py-1 rounded bg-emerald-950 text-emerald-300 font-semibold">COMMAND</button>
+            <button id="log-btn-warning" onclick="loadLogs('WARNING')" class="log-filter-btn px-3 py-1 rounded bg-amber-950 text-amber-300 font-semibold">WARNING</button>
+            <button id="log-btn-error" onclick="loadLogs('ERROR')" class="log-filter-btn px-3 py-1 rounded bg-rose-950 text-rose-300 font-semibold">ERROR</button>
+            <button onclick="loadLogs(currentLogSeverity)" class="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 transition" title="Rafraîchir les logs">🔄</button>
+            <button onclick="exportLogsCSV()"
+              class="ml-2 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white font-semibold border border-emerald-500 transition">
+              📥 Exporter CSV (Excel FR)
+            </button>
+          </div>
+        </div>
+        <div id="logs-container"
+          class="bg-gray-950 border border-gray-800 rounded-lg p-3 h-[480px] overflow-y-auto font-mono text-xs space-y-1.5">
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Scripts modulaires du Cockpit Nobis A10 -->
+  <script src="/static/js/state.js?v=20261104_v20"></script>
+  <script src="/static/js/charts.js?v=20261104_v20"></script>
+  <script src="/static/js/app.js?v=20261104_v20"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' })
+          .then((reg) => console.log('[PWA] Service Worker actif, scope:', reg.scope))
+          .catch((err) => console.warn('[PWA] Enregistrement SW ignoré (contexte non sécurisé ou unsupported):', err));
+      });
+    }
+  </script>
+</body>
+
+</html>
