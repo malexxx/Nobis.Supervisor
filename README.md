@@ -1,4 +1,4 @@
-# 🔥 Nobis A10 Supervisor & Matter Bridge
+# 🔥 Nobis.Supervisor
 
 > **Cockpit de supervision haute fidélité, télémétrie temps réel et passerelle domotique Matter locale pour poêle à granulés Nobis A10 C Light Style Coax (électronique Micronova).**
 
@@ -42,7 +42,7 @@
 
 Le poêle à pellets étanche et coaxial **Nobis A10 C Light Style Coax** est un équipement de chauffage haut de gamme piloté par une carte électronique **Micronova**. Bien que performant, son utilisation au quotidien via les solutions mobiles d'origine souffre souvent de dépendances au cloud constructeur, de latences et d'un manque d'intégration avec les écosystèmes domotiques modernes.
 
-**Nobis A10 Supervisor** apporte une réponse complète et autonome :
+**Nobis.Supervisor** apporte une réponse complète et autonome :
 1. **Souveraineté locale** : fonctionnement 100% autonome en local (via passerelle locale ou jumeau numérique) avec fallback cloud Micronova si désiré.
 2. **Interface PWA moderne** : cockpit web réactif, installable sur smartphone/tablette/PC (icône dédiée, mode plein écran, thème sombre soigné avec effet verre dépoli *glassmorphism*).
 3. **Passerelle Matter native** : appairage direct du poêle en tant que thermostat Matter avec Google Home, Nest Hub Max, Apple Home / Siri, Alexa et Home Assistant, sans passer par un cloud externe.
@@ -137,7 +137,7 @@ flowchart TD
         SmartHome["Domotique Matter\nGoogle Home • Apple Home • Alexa • Home Assistant"]
     end
 
-    subgraph Core["⚙️ Nobis A10 Supervisor (FastAPI)"]
+    subgraph Core["⚙️ Nobis.Supervisor (FastAPI)"]
         API["FastAPI REST & SSE Router\n(/api/latest, /api/command, /api/events)"]
         Scheduler["APScheduler\n(Boucle télémétrie 5s-30s • Purge SQLite)"]
         TelemetryEngine["Moteur d'Analyse Télémétrique\n(Autonomie météo, Qualité flamme K, Tirage Pa)"]
@@ -420,3 +420,4 @@ OK
 <p align="center">
   Fait avec passion pour le confort thermique et la domotique ouverte 🏡🔥
 </p>
+

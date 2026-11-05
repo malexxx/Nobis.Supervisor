@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "Nobis A10 C Light Style Coax — Cockpit Micronova",
-  "short_name": "Nobis A10",
+  "name": "Nobis.Supervisor — Cockpit Micronova & Passerelle Matter",
+  "short_name": "Nobis.Supervisor",
   "description": "Supervision temps réel, pilotage Micronova V018_1, suivi trémie 35 kg & météo locale",
   "start_url": "/",
   "scope": "/",

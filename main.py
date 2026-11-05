@@ -383,7 +383,7 @@ async def lifespan(app: FastAPI):
         await close_http_client()
 
 
-app = FastAPI(title="Nobis A10 C Light Style Coax - Supervision Micronova", lifespan=lifespan)
+app = FastAPI(title="Nobis.Supervisor - Supervision Micronova & Pont Matter", lifespan=lifespan)
 
 
 class DbLogHandler(logging.Handler):
@@ -442,7 +442,7 @@ async def serve_spa():
     if os.path.exists(index_file):
         with open(index_file, "r", encoding="utf-8") as f:
             return HTMLResponse(content=f.read(), headers=no_cache)
-    return HTMLResponse(content="<h1>Nobis A10 Supervisor API Active</h1>", headers=no_cache)
+    return HTMLResponse(content="<h1>Nobis.Supervisor API Active</h1>", headers=no_cache)
 
 
 @app.api_route("/manifest.json", methods=["GET", "HEAD"])

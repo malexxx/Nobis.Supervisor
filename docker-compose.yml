@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  nobis-supervisor:
+    build: .
+    image: nobis.supervisor:latest
+    container_name: nobis.supervisor
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "5540:5540/udp"
+      - "5540:5540/tcp"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - TZ=Europe/Paris
+      - DB_PATH=/app/data/nobis_a10.db

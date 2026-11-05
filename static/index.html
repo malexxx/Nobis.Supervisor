@@ -8,12 +8,12 @@
   <meta name="theme-color" content="#0b0f19" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Nobis A10" />
+  <meta name="apple-mobile-web-app-title" content="Nobis.Supervisor" />
   <link rel="manifest" href="/manifest.json" />
   <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png" />
   <link rel="icon" type="image/svg+xml" href="/static/icon.svg" />
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png" />
-  <title>Nobis A10 C Light Style Coax — Cockpit Micronova & Météo Bazoches</title>
+  <title>Nobis.Supervisor — Cockpit Micronova & Météo Bazoches</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="/static/css/styles.css?v=20261104_v10" />
@@ -526,9 +526,12 @@
         <span id="hdr-dot-icon" class="select-none leading-none">⚫</span>
       </div>
 
-      <h1 class="text-sm sm:text-base md:text-lg font-bold text-white tracking-tight select-none">
-        Nobis A10 C Light Style Coax
-      </h1>
+      <div class="flex flex-col items-center leading-tight">
+        <h1 class="text-sm sm:text-base md:text-lg font-bold text-white tracking-tight select-none">
+          Nobis.Supervisor
+        </h1>
+        <span class="text-[10px] text-gray-400 font-medium tracking-wide">Nobis A10 C Light Style Coax</span>
+      </div>
 
       <!-- Indicateur de connexion (droite du titre) avec picto nuage cloud -->
       <div id="hdr-conn" onclick="pollNow()"
