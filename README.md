@@ -265,19 +265,20 @@ Le déploiement sous Docker est la solution la plus simple et la plus fiable. L'
 
 3. **Installer les dépendances du pont Matter :**
    ```bash
-   cd app/matter_bridge
+   cd matter_bridge
    npm install --omit=dev
-   cd ../..
+   cd ..
    ```
 
 4. **Démarrer le superviseur :**
    ```bash
-   # Sous Linux / macOS
-   uvicorn app.main:app --host 0.0.0.0 --port 8080
+   # Lancement direct avec Python (serveur Uvicorn intégré)
+   python main.py
 
-   # Sous Windows PowerShell
-   $env:PYTHONPATH="."
-   .\.venv\Scripts\uvicorn.exe app.main:app --host 0.0.0.0 --port 8080
+   # Ou via Uvicorn (recommandé avec rechargement à chaud)
+   uvicorn main:app --host 0.0.0.0 --port 8080 --reload
+
+   # Rétro-compatibilité : 'uvicorn app.main:app' reste également 100% fonctionnel
    ```
 
 L'application initialise automatiquement les bases de données SQLite nécessaires dans `data/` et démarre en mode `simulation` par défaut.

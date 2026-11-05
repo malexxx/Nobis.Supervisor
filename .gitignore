@@ -50,7 +50,6 @@ ehthumbs.db
 
 # Temporary / migration artifacts
 Dockerfile.txt
-app/
 
 # Logs
 *.log

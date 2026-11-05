@@ -212,6 +212,8 @@ function updateAmbSetpointPreview(val) {
   if (kpiEl) kpiEl.textContent = formatted;
   const maxBtn = document.getElementById("btn-amb-max");
   if (maxBtn) maxBtn.classList.toggle("btn-active-glow", Number(val) >= 41);
+  const frostBtn = document.getElementById("btn-amb-frost");
+  if (frostBtn) frostBtn.classList.toggle("btn-active-frost", Number(val) === 7);
 }
 
 function updateDuctSetpointPreview(prefix, val) {
@@ -222,7 +224,55 @@ function updateDuctSetpointPreview(prefix, val) {
   if (ctlEl) ctlEl.textContent = formatted;
   const maxBtn = document.getElementById(`btn-${prefix}-max`);
   if (maxBtn) maxBtn.classList.toggle("btn-active-glow", Number(val) >= 41);
+  const frostBtn = document.getElementById(`btn-${prefix}-frost`);
+  if (frostBtn) frostBtn.classList.toggle("btn-active-frost", Number(val) === 7);
 }
+
+function formatFanSpeedLabel(val) {
+  const v = Number(val);
+  if (v === 0) return "OFF";
+  if (v === 8) return "🔄 Auto (PS)";
+  return `Vitesse ${v}`;
+}
+
+function updateFanSliderPreview(zone, val) {
+  const v = Number(val);
+  const labelId = zone === "front" ? "ctl-fan-label" : `ctl-${zone}-fan-label`;
+  const el = document.getElementById(labelId);
+  if (el) {
+    el.textContent = formatFanSpeedLabel(v);
+    if (v === 0) {
+      el.className = "text-xs font-bold text-gray-400 tabular-nums";
+    } else if (v === 8) {
+      el.className = "text-xs font-black text-cyan-300 tabular-nums animate-pulse";
+    } else {
+      el.className = "text-xs font-bold text-emerald-300 tabular-nums";
+    }
+  }
+}
+
+function formatPowerSliderLabel(val) {
+  const v = Number(val);
+  if (v === 0) return "P0 (Ralenti Éco)";
+  if (v === 8) return "⚡ BOOST (P8)";
+  return `Puissance P${v}`;
+}
+
+function updatePwrSliderPreview(val) {
+  const v = Number(val);
+  const el = document.getElementById("ctl-pwr-label");
+  if (el) {
+    el.textContent = formatPowerSliderLabel(v);
+    if (v === 0) {
+      el.className = "text-xs font-bold text-sky-300 tabular-nums";
+    } else if (v === 8) {
+      el.className = "text-xs font-black text-rose-400 tabular-nums animate-pulse";
+    } else {
+      el.className = "text-xs font-bold text-amber-300 tabular-nums";
+    }
+  }
+}
+
 
 function formatFanSpeed(val) {
   const v = Number(val);

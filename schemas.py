@@ -43,6 +43,7 @@ class SettingsPayload(BaseModel):
 
 
 class TestConnectionPayload(BaseModel):
+    __test__ = False
     model_config = ConfigDict(extra="allow")
 
     comm_mode: str = "simulation"
@@ -66,6 +67,7 @@ class MatterWebhookPayload(BaseModel):
 
 
 class TestWebhookPayload(BaseModel):
+    __test__ = False
     webhook_url: Optional[str] = Field(default="", description="URL de destination webhook / ntfy")
 
 

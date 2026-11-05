@@ -113,6 +113,68 @@ input[type="range"]::-webkit-slider-thumb {
   cursor: pointer;
 }
 
+/* Gros curseurs tactiles ergonomiques pour Ventilation et Puissance */
+.chunky-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 14px;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #1e293b 0%, #334155 100%);
+  border: 1px solid #475569;
+  outline: none;
+  cursor: pointer;
+  touch-action: pan-y;
+  transition: all 0.2s ease;
+}
+
+.chunky-slider:hover, .chunky-slider:focus-visible {
+  border-color: #94a3b8;
+}
+
+.chunky-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 3px solid #0f172a;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.3);
+  cursor: grab;
+  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.15s ease;
+}
+
+.chunky-slider::-webkit-slider-thumb:active {
+  cursor: grabbing;
+  transform: scale(1.18);
+  box-shadow: 0 0 16px rgba(249, 115, 22, 0.7), 0 0 0 2px #f97316;
+}
+
+.chunky-slider::-moz-range-thumb {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 3px solid #0f172a;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.7);
+  cursor: grab;
+}
+
+.chunky-slider::-moz-range-thumb:active {
+  cursor: grabbing;
+  transform: scale(1.18);
+}
+
+/* Boutons actifs d'extrême température */
+.btn-active-frost {
+  background-color: #0284c7 !important;
+  color: #ffffff !important;
+  border-color: #38bdf8 !important;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.65) !important;
+}
+
+
 /* Fleur du Cycle de Vie (11 pétales #1..#11 + bouton central ON/OFF/RESET) */
 .flower-petal-group {
   cursor: pointer;
