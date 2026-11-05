@@ -2,7 +2,7 @@
 // NOBIS A10 C LIGHT STYLE COAX — ÉTAT PARTAGÉ, CONSTANTES & FORMATAGE
 // =============================================================================
 
-const HOPPER_CAPACITY_KG = 30.0;
+const HOPPER_CAPACITY_KG = 35.0; // Capacité officielle réservoir Nobis A10 C Light Style Coax (35 kg)
 const BAG_WEIGHT_KG = 15.0;
 
 // Catalogue des courbes réparties entre Volet 1 (pane: 1) et Volet 2 (pane: 2)
@@ -22,7 +22,7 @@ const SERIES_CONFIG = [
   { key: "power_actual", label: "Puissance Réelle", unit: "P", color: "#eab308", pane: 2, yAxisID: "yPct", group: "COMBUSTION", visible: true },
   { key: "power_level", label: "Cons. Puiss.", unit: "P", color: "#f59e0b", pane: 2, yAxisID: "yPct", group: "CONTROL", visible: true, dashed: true },
   { key: "depression_pa", label: "Dépression", unit: "Pa", color: "#f43f5e", pane: 2, yAxisID: "yPct", group: "COMBUSTION", visible: true },
-  { key: "flame_delta_avg", label: "Écart Thermique (Moy. 15m)", unit: "°C", color: "#fb7185", pane: 2, yAxisID: "yPct", group: "COMBUSTION", visible: true },
+  { key: "flame_delta_avg", label: "Écart Thermique (Moy. 30m)", unit: "°C", color: "#fb7185", pane: 2, yAxisID: "yPct", group: "COMBUSTION", visible: true },
   { key: "exhaust_rpm", label: "Extracteur Fumées", unit: "RPM", color: "#a855f7", pane: 2, yAxisID: "yRpm", group: "MECHANICAL", visible: true },
   { key: "fan_front_speed", label: "Ventil. Faç.", unit: "/8", color: "#ec4899", pane: 2, yAxisID: "yPct", group: "CONTROL", visible: false },
   { key: "duct_left_speed", label: "Vit. Canal. SX", unit: "/8", color: "#14b8a6", pane: 2, yAxisID: "yPct", group: "DUCTS", visible: false },

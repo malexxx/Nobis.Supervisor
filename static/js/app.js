@@ -885,11 +885,11 @@ function applyDashboardState(data, updateSeries = true) {
 
   const augerDutyEl = document.getElementById("kpi-auger-duty");
   if (augerDutyEl) {
-    augerDutyEl.textContent = `${Number(latestData.auger_duty_pct ?? 0).toFixed(1)}%`;
+    augerDutyEl.textContent = latestData.auger_duty_pct != null ? `${Number(latestData.auger_duty_pct).toFixed(1)}%` : "--";
   }
   const augerSEl = document.getElementById("kpi-auger-s");
   if (augerSEl) {
-    augerSEl.textContent = Number(latestData.auger_on_time_s ?? 0).toFixed(1);
+    augerSEl.textContent = latestData.auger_on_time_s != null ? Number(latestData.auger_on_time_s).toFixed(1) : "--";
   }
 
   const hopBar = document.getElementById("kpi-hop-bar");
@@ -1755,15 +1755,16 @@ function syncStoveClock() {
 function refillHopper(bagsAdded = 2) {
   const isOneBag = Number(bagsAdded) === 1;
   openActionModal({
-    title: isOneBag ? "🌾 Ajout +1 Sac (15 kg / +50%)" : "🌾 Trémie Pleine 100% (30 kg / 2 sacs)",
+    title: isOneBag ? "🌾 Ajout +1 Sac (15 kg / +43%)" : "🌾 Trémie Pleine 100% (35 kg / ~2.3 sacs)",
     message: isOneBag
-      ? "Ajouter 1 sac de 15 kg (+50% dans la trémie de 30 kg) et décrémenter le stock de granulés de 1 sac ?"
-      : "Remplir la trémie à 100 % (capacité 30 kg) et mettre à jour le stock de sacs de 15 kg ?",
-    confirmText: isOneBag ? "+1 Sac (15 kg)" : "Trémie Pleine (30 kg)",
+      ? "Ajouter 1 sac de 15 kg (+42.9% dans la trémie de 35 kg) et décrémenter le stock de granulés de 1 sac ?"
+      : "Remplir la trémie à 100 % (capacité certifiée 35 kg) et mettre à jour le stock de sacs de 15 kg ?",
+    confirmText: isOneBag ? "+1 Sac (15 kg)" : "Trémie Pleine (35 kg)",
     onConfirm: async () => {
+      const addedPct = (15.0 / HOPPER_CAPACITY_KG) * 100.0;
       const payload = isOneBag
-        ? { level_pct: Math.min(100.0, Number(latestData.pellet_hopper_pct ?? 50) + 50.0), bags_added: 1 }
-        : { level_pct: 100.0, bags_added: 2 };
+        ? { level_pct: Math.min(100.0, Number(latestData.pellet_hopper_pct ?? 50) + addedPct), bags_added: 1 }
+        : { level_pct: 100.0, bags_added: 2.33 };
       const res = await fetch("/api/refill-hopper", {
         method: "POST",
         headers: getInstallerHeaders({ "Content-Type": "application/json" }),
@@ -1822,25 +1823,45 @@ function renderPelletQuality(data) {
         };
       }
     } else if (latest.flame_delta_avg === null || latest.flame_delta_avg === undefined) {
-      q = {
-        status: "stabilizing",
-        quality_score: null,
-        quality_label: `Stabilisation P${pwr}`,
-        quality_color: "sky",
-        target_flame_temp: 430.0 + (pwr * 40.0),
-        flame_delta: Math.round((flame - (430.0 + (pwr * 40.0))) * 10) / 10,
-        flame_delta_avg: null,
-        current_trim: curTrim,
-        suggested_trim: curTrim,
-        explanation: `Consigne P${pwr} en cours de stabilisation thermique. Le lissage sur 15 minutes requiert que la consigne de puissance ne varie pas dans l'intervalle avant d'évaluer le granulé.`,
-        action_needed: false
-      };
+      // Vérification sécurité ventilation : ventilateurs coupés ?
+      const vf = Number(latest.vent_front_actual ?? latest.fan_front_speed ?? 0);
+      const vdl = Number(latest.duct_left_actual ?? latest.duct_left_speed ?? 0);
+      const vdr = Number(latest.duct_right_actual ?? latest.duct_right_speed ?? 0);
+      if (vf === 0 && vdl === 0 && vdr === 0) {
+        q = {
+          status: "natural_convection",
+          quality_score: null,
+          quality_label: "Ventilation coupée (Convection)",
+          quality_color: "amber",
+          target_flame_temp: 430.0 + (pwr * 40.0),
+          flame_delta: Math.round((flame - (430.0 + (pwr * 40.0))) * 10) / 10,
+          flame_delta_avg: null,
+          current_trim: curTrim,
+          suggested_trim: curTrim,
+          explanation: `Ventilateurs de convection coupés (offsets 16, 31, 32 à 0). En convection naturelle, la chaleur s'accumule sans échange pulsé. L'ajustement automatique du tarage est verrouillé par sécurité.`,
+          action_needed: false
+        };
+      } else {
+        q = {
+          status: "stabilizing",
+          quality_score: null,
+          quality_label: `Stabilisation P${pwr}`,
+          quality_color: "sky",
+          target_flame_temp: 430.0 + (pwr * 40.0),
+          flame_delta: Math.round((flame - (430.0 + (pwr * 40.0))) * 10) / 10,
+          flame_delta_avg: null,
+          current_trim: curTrim,
+          suggested_trim: curTrim,
+          explanation: `Consigne P${pwr} en cours de stabilisation thermique. Le lissage sur 30 minutes requiert que la consigne de puissance et la ventilation ne varient pas dans l'intervalle avant d'évaluer le granulé.`,
+          action_needed: false
+        };
+      }
     } else {
       const targetFlame = 430.0 + (pwr * 40.0);
       const instantDelta = Math.round((flame - targetFlame) * 10) / 10;
       const delta = Math.round(Number(latest.flame_delta_avg) * 10) / 10;
       if (delta > 30.0) {
-        const suggested = Math.max(-20, curTrim - 5);
+        const suggested = Math.max(-5, curTrim - (delta > 50.0 ? 2 : 1));
         q = {
           status: "active",
           quality_score: Math.max(60, Math.round(100 - Math.abs(delta) * 0.5)),
@@ -1851,11 +1872,11 @@ function renderPelletQuality(data) {
           flame_delta_avg: delta,
           current_trim: curTrim,
           suggested_trim: suggested,
-          explanation: `Combustion vive (+${delta}°C vs cible P${pwr}, moyenne 15 min). Granulé très dense et sec (PCI élevé). Conseil IA : réduire l'alimentation à ${suggested > 0 ? "+" + suggested : suggested}% pour préserver le creuset et économiser du granulé.`,
+          explanation: `Combustion vive (+${delta}°C vs cible P${pwr}, moyenne 30 min). Granulé très dense et sec (PCI élevé). Conseil : reporter le tarage granulés à ${suggested > 0 ? "+" + suggested : suggested}% sur la radiocommande (MENU ▸ PROGRAMMATION UTILISATEUR ▸ MÉLANGE G/A).`,
           action_needed: suggested !== curTrim
         };
       } else if (delta < -25.0) {
-        const suggested = Math.min(20, curTrim + 5);
+        const suggested = Math.min(5, curTrim + (delta < -45.0 ? 2 : 1));
         q = {
           status: "active",
           quality_score: Math.max(50, Math.round(100 - Math.abs(delta) * 0.7)),
@@ -1866,7 +1887,7 @@ function renderPelletQuality(data) {
           flame_delta_avg: delta,
           current_trim: curTrim,
           suggested_trim: suggested,
-          explanation: `Rendement thermique en retrait (${delta}°C vs cible P${pwr}, moyenne 15 min). Granulé potentiellement humide (>10%) ou poussiéreux. Conseil IA : augmenter le tarage à ${suggested > 0 ? "+" + suggested : suggested}% pour compenser la perte calorifique ou vérifier le creuset.`,
+          explanation: `Rendement thermique en retrait (${delta}°C vs cible P${pwr}, moyenne 30 min). Granulé potentiellement humide (>10%) ou poussiéreux. Conseil : reporter le tarage granulés à ${suggested > 0 ? "+" + suggested : suggested}% sur la radiocommande (MENU ▸ PROGRAMMATION UTILISATEUR ▸ MÉLANGE G/A).`,
           action_needed: suggested !== curTrim
         };
       } else {
@@ -1880,7 +1901,7 @@ function renderPelletQuality(data) {
           flame_delta_avg: delta,
           current_trim: curTrim,
           suggested_trim: curTrim,
-          explanation: `Combustion équilibrée et propre (écart thermique moyen de ${delta >= 0 ? "+" + delta : delta}°C en P${pwr}). Pouvoir calorifique nominal. Aucun ajustement de tarage requis.`,
+          explanation: `Combustion équilibrée et propre (écart thermique moyen de ${delta >= 0 ? "+" + delta : delta}°C en P${pwr} sur 30 min stables). Pouvoir calorifique nominal. Aucun ajustement de tarage requis.`,
           action_needed: false
         };
       }
@@ -1909,7 +1930,7 @@ function renderPelletQuality(data) {
   // Métriques thermiques
   const flameEl = document.getElementById("pellet-flame-val");
   if (flameEl) {
-    if ((q.status === "active" || q.status === "stabilizing") && q.target_flame_temp) {
+    if ((q.status === "active" || q.status === "stabilizing" || q.status === "natural_convection") && q.target_flame_temp) {
       flameEl.textContent = `${Math.round(latest.temp_probe_k || 0)} / ${Math.round(q.target_flame_temp)}`;
     } else {
       flameEl.textContent = `${Math.round(latest.temp_probe_k || 0)} / --`;
@@ -1919,8 +1940,11 @@ function renderPelletQuality(data) {
   const deltaEl = document.getElementById("pellet-delta-val");
   if (deltaEl) {
     if (q.status === "stabilizing") {
-      deltaEl.textContent = q.stable_minutes ? `${q.stable_minutes}/15m` : "En cours";
+      deltaEl.textContent = q.stable_minutes ? `${q.stable_minutes}/30m` : "En cours";
       deltaEl.className = "font-bold text-sky-400 text-xs";
+    } else if (q.status === "natural_convection") {
+      deltaEl.textContent = "Conv. Nat.";
+      deltaEl.className = "font-bold text-amber-400 text-xs";
     } else if (q.status === "active" && q.flame_delta_avg !== null && q.flame_delta_avg !== undefined) {
       const dVal = q.flame_delta_avg;
       deltaEl.textContent = `${dVal >= 0 ? "+" : ""}${Number(dVal).toFixed(1)}°C`;
@@ -1955,7 +1979,12 @@ function renderPelletQuality(data) {
         applyBtn.textContent = `Appliquer (${sign}${q.suggested_trim}%)`;
       }
     } else if (q.status === "stabilizing") {
-      propEl.textContent = `Stabilisation thermique en cours (${q.stable_minutes || 0}/15 min sans variation)`;
+      propEl.textContent = `Stabilisation thermique en cours (${q.stable_minutes || 0}/30 min sans variation)`;
+      if (applyBtn) {
+        applyBtn.classList.add("hidden");
+      }
+    } else if (q.status === "natural_convection") {
+      propEl.textContent = "Tarage verrouillé : ventilateurs à l'arrêt (convection naturelle)";
       if (applyBtn) {
         applyBtn.classList.add("hidden");
       }
@@ -1975,13 +2004,18 @@ function applyAiPelletTrim() {
   }
   const targetVal = Number(currentPelletAiDiagnosis.suggested_trim);
   const sign = targetVal > 0 ? "+" : "";
+  const isAgua = (currentCommMode === "agua_cloud");
+  const remoteNote = isAgua
+    ? `\n\n⚠️ IMPORTANT (Mode Cloud Agua) :\nLes offsets 70 et 71 ne figurent pas dans la table Cloud Agua IOT. L'application enregistre cette valeur en mémoire locale, mais vous devez la valider sur votre radiocommande :\nMENU ▸ PROGRAMMATION UTILISATEUR ▸ MÉLANGE G/A.`
+    : "";
+
   openActionModal({
     title: "✨ Tarage Granulés Optimisé par IA",
-    message: `Appliquer la recommandation IA sur le tarage d'alimentation en granulés (Offset 70) ?\n\n• Nouveau tarage recommandé : ${sign}${targetVal} %\n• Tarage actuel : ${currentPelletAiDiagnosis.current_trim} %\n\nMotif : ${currentPelletAiDiagnosis.explanation}`,
-    confirmText: `Appliquer (${sign}${targetVal}%)`,
+    message: `Appliquer la recommandation IA sur le tarage d'alimentation en granulés ?\n\n• Nouveau tarage recommandé : ${sign}${targetVal} %\n• Tarage actuel : ${currentPelletAiDiagnosis.current_trim} %\n\nMotif : ${currentPelletAiDiagnosis.explanation}${remoteNote}`,
+    confirmText: isAgua ? `Mémoriser (${sign}${targetVal}%)` : `Appliquer (${sign}${targetVal}%)`,
     onConfirm: async () => {
       await sendCommand("trim_pellet_pct", targetVal);
-      showToast(`Tarage granulés ajusté à ${sign}${targetVal}% selon recommandation IA.`);
+      showToast(`Tarage granulés ${sign}${targetVal}% enregistré.${isAgua ? " Validez sur votre radiocommande (MÉLANGE G/A)." : ""}`);
       await refreshLatestOnly();
     }
   });
@@ -2043,26 +2077,26 @@ function renderExhaustQuality(data) {
         quality_score: null,
         quality_label: `Stabilisation P${pwr}`,
         quality_color: "sky",
-        target_depression_pa: Math.round((8.5 + (pwr * 0.75)) * 10) / 10,
+        target_depression_pa: Math.round((2.0 + (pwr * 0.25)) * 10) / 10,
         depression_pa: dep,
-        dep_delta: Math.round((dep - (8.5 + (pwr * 0.75))) * 10) / 10,
+        dep_delta: Math.round((dep - (2.0 + (pwr * 0.25))) * 10) / 10,
         dep_delta_avg: null,
         exhaust_rpm: rpm,
         current_trim: curTrim,
         suggested_trim: curTrim,
-        explanation: `Consigne P${pwr} en cours de stabilisation aéraulique. Le lissage sur 15 minutes requiert que la consigne de puissance ne varie pas dans l'intervalle avant d'évaluer le tirage.`,
+        explanation: `Consigne P${pwr} en cours de stabilisation aéraulique. Le lissage sur 30 minutes requiert une consigne de puissance et une ventilation stables avant d'évaluer le tirage.`,
         action_needed: false
       };
     } else {
-      const targetDep = Math.round((8.5 + (pwr * 0.75)) * 10) / 10;
+      const targetDep = Math.round((2.0 + (pwr * 0.25)) * 10) / 10;
       const instantDelta = Math.round((dep - targetDep) * 10) / 10;
       const delta = Math.round(Number(latest.dep_delta_avg) * 10) / 10;
-      if (delta < -1.8 || dep < 7.5) {
-        const suggested = Math.min(30, curTrim + 5);
+      if (delta < -1.0 || dep < 1.2) {
+        const suggested = Math.min(5, curTrim + (delta < -2.0 ? 2 : 1));
         q = {
           status: "active",
-          quality_score: Math.max(50, Math.round(100 - Math.abs(delta) * 12.0)),
-          quality_label: "Tirage Insuffisant (Pertes de charge)",
+          quality_score: Math.max(50, Math.round(100 - Math.abs(delta) * 20.0)),
+          quality_label: "Débit d'Air Insuffisant (Pertes de charge)",
           quality_color: "rose",
           target_depression_pa: targetDep,
           depression_pa: dep,
@@ -2071,15 +2105,15 @@ function renderExhaustQuality(data) {
           exhaust_rpm: rpm,
           current_trim: curTrim,
           suggested_trim: suggested,
-          explanation: `Dépression inférieure à la consigne dynamique (${delta >= 0 ? "+" + delta : delta} Pa vs cible ${targetDep} Pa, moyenne 15 min). Évacuation ralentie. Conseil IA : augmenter l'extracteur à ${suggested > 0 ? "+" + suggested : suggested}% ou vérifier l'encrassement du conduit.`,
+          explanation: `Dépression comburant inférieure à la consigne (${delta >= 0 ? "+" + delta : delta} Pa vs cible ${targetDep} Pa, moyenne 30 min). Mesure capteur d'entrée à ${dep.toFixed(1)} Pa (seuil d'alerte AL11 à 1,0 Pa). Conseil : reporter le tarage extracteur à ${suggested > 0 ? "+" + suggested : suggested}% sur la radiocommande (MENU ▸ PROGRAMMATION UTILISATEUR ▸ MÉLANGE G/A).`,
           action_needed: suggested !== curTrim
         };
-      } else if (delta > 2.2 || dep > 15.0) {
-        const suggested = Math.max(-30, curTrim - 5);
+      } else if (delta > 1.5 || dep > 6.0) {
+        const suggested = Math.max(-5, curTrim - (delta > 2.5 ? 2 : 1));
         q = {
           status: "active",
-          quality_score: Math.max(55, Math.round(100 - Math.abs(delta) * 10.0)),
-          quality_label: "Tirage Excessif (Sur-tirage)",
+          quality_score: Math.max(55, Math.round(100 - Math.abs(delta) * 15.0)),
+          quality_label: "Débit d'Air Élevé (Sur-tirage dynamique)",
           quality_color: "amber",
           target_depression_pa: targetDep,
           depression_pa: dep,
@@ -2088,14 +2122,14 @@ function renderExhaustQuality(data) {
           exhaust_rpm: rpm,
           current_trim: curTrim,
           suggested_trim: suggested,
-          explanation: `Dépression élevée (${delta >= 0 ? "+" + delta : delta} Pa vs cible ${targetDep} Pa, moyenne 15 min). Sur-tirage ou vent fort évacuant trop vite les calories. Conseil IA : réduire l'extracteur à ${suggested > 0 ? "+" + suggested : suggested}% pour optimiser le rendement.`,
+          explanation: `Dépression comburant élevée (${delta >= 0 ? "+" + delta : delta} Pa vs cible ${targetDep} Pa, moyenne 30 min). Sur-tirage ou vent fort évacuant trop vite les calories. Conseil : réduire l'extracteur à ${suggested > 0 ? "+" + suggested : suggested}% sur la radiocommande (MENU ▸ PROGRAMMATION UTILISATEUR ▸ MÉLANGE G/A).`,
           action_needed: suggested !== curTrim
         };
       } else {
         q = {
           status: "active",
-          quality_score: Math.min(100, Math.round(98 - Math.abs(delta) * 5.0)),
-          quality_label: "Aéraulique Optimale (Dépression Conforme)",
+          quality_score: Math.min(100, Math.round(98 - Math.abs(delta) * 10.0)),
+          quality_label: "Aéraulique Optimale (Débit Conforme)",
           quality_color: "emerald",
           target_depression_pa: targetDep,
           depression_pa: dep,
@@ -2104,7 +2138,7 @@ function renderExhaustQuality(data) {
           exhaust_rpm: rpm,
           current_trim: curTrim,
           suggested_trim: curTrim,
-          explanation: `Dépression et tirage parfaitement équilibrés (${dep} Pa, écart moyen de ${delta >= 0 ? "+" + delta : delta} Pa en P${pwr}). Évacuation des fumées conforme aux spécifications Nobis. Aucun ajustement requis.`,
+          explanation: `Dépression dynamique et débit comburant parfaitement équilibrés (${dep.toFixed(1)} Pa, écart moyen de ${delta >= 0 ? "+" + delta : delta} Pa en P${pwr} sur 30 min stables). Conforme aux spécifications Nobis. Aucun ajustement requis.`,
           action_needed: false
         };
       }
@@ -2143,7 +2177,7 @@ function renderExhaustQuality(data) {
   const deltaEl = document.getElementById("exhaust-delta-val");
   if (deltaEl) {
     if (q.status === "stabilizing") {
-      deltaEl.textContent = q.stable_minutes ? `${q.stable_minutes}/15m` : "En cours";
+      deltaEl.textContent = q.stable_minutes ? `${q.stable_minutes}/30m` : "En cours";
       deltaEl.className = "font-bold text-sky-400 text-xs";
     } else if (q.status === "active" && q.dep_delta_avg !== null && q.dep_delta_avg !== undefined) {
       const dVal = q.dep_delta_avg;
@@ -2179,7 +2213,7 @@ function renderExhaustQuality(data) {
         applyBtn.textContent = `Appliquer (${sign}${q.suggested_trim}%)`;
       }
     } else if (q.status === "stabilizing") {
-      propEl.textContent = `Stabilisation thermique en cours (${q.stable_minutes || 0}/15 min sans variation)`;
+      propEl.textContent = `Stabilisation aéraulique en cours (${q.stable_minutes || 0}/30 min sans variation)`;
       if (applyBtn) {
         applyBtn.classList.add("hidden");
       }
@@ -2199,14 +2233,51 @@ function applyAiExhaustTrim() {
   }
   const targetVal = Number(currentExhaustAiDiagnosis.suggested_trim);
   const sign = targetVal > 0 ? "+" : "";
+  const isAgua = (currentCommMode === "agua_cloud");
+  const remoteNote = isAgua
+    ? `\n\n⚠️ IMPORTANT (Mode Cloud Agua) :\nLes offsets 70 et 71 ne figurent pas dans la table Cloud Agua IOT. L'application enregistre cette valeur en mémoire locale, mais vous devez la valider sur votre radiocommande :\nMENU ▸ PROGRAMMATION UTILISATEUR ▸ MÉLANGE G/A.`
+    : "";
+
   openActionModal({
     title: "✨ Tarage Extracteur Fumées Optimisé par IA",
-    message: `Appliquer la recommandation IA sur la vitesse de l'extracteur de fumées (Offset 71) ?\n\n• Nouveau tarage recommandé : ${sign}${targetVal} %\n• Tarage actuel : ${currentExhaustAiDiagnosis.current_trim} %\n\nMotif : ${currentExhaustAiDiagnosis.explanation}`,
-    confirmText: `Appliquer (${sign}${targetVal}%)`,
+    message: `Appliquer la recommandation IA sur la vitesse de l'extracteur de fumées ?\n\n• Nouveau tarage recommandé : ${sign}${targetVal} %\n• Tarage actuel : ${currentExhaustAiDiagnosis.current_trim} %\n\nMotif : ${currentExhaustAiDiagnosis.explanation}${remoteNote}`,
+    confirmText: isAgua ? `Mémoriser (${sign}${targetVal}%)` : `Appliquer (${sign}${targetVal}%)`,
     onConfirm: async () => {
       await sendCommand("trim_exhaust_pct", targetVal);
-      showToast(`Tarage extracteur fumées ajusté à ${sign}${targetVal}% selon recommandation IA.`);
+      showToast(`Tarage extracteur fumées ${sign}${targetVal}% enregistré.${isAgua ? " Validez sur votre radiocommande (MÉLANGE G/A)." : ""}`);
       await refreshLatestOnly();
+    }
+  });
+}
+
+function promptResetPelletBatch() {
+  openActionModal({
+    title: "🔄 RAZ Changement de Marque de Granulés",
+    message: "Avant de confirmer la remise à zéro :\n" +
+             "1. Aspirez le fond de la trémie (35 kg), le brasero et derrière le coupe-flamme (poêle froid et débranché).\n" +
+             "2. Sur la télécommande Nobis, remettez MENU ▸ MÉLANGE G/A sur PELLET = 00 et PRISE D'AIR = 00.\n\n" +
+             "Indiquez le nom ou la certification du nouveau lot de granulés (ENplus A1 / DINplus) :",
+    showInput: true,
+    defaultValue: "Lot DINplus / ENplus A1 - " + new Date().toLocaleDateString("fr-FR"),
+    confirmText: "Lancer RAZ (0% & 180 min)",
+    onConfirm: async (brandName) => {
+      try {
+        showToast("Remise à zéro de l'évaluation Mélange P/A en cours...");
+        const res = await fetch("/api/pellet-batch/raz", {
+          method: "POST",
+          headers: getInstallerHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ pellet_brand: brandName })
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          showToast("Erreur RAZ : " + (err.detail || res.statusText), true);
+          return;
+        }
+        await loadDashboard();
+        showToast(`RAZ effectué pour « ${brandName} » : évaluation de 180 min démarrée !`);
+      } catch (e) {
+        showToast("Erreur réseau RAZ : " + e.message, true);
+      }
     }
   });
 }

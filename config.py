@@ -1,4 +1,5 @@
 import os
+import sys
 from typing import Dict, Any, List
 
 # ==============================================================================
@@ -7,8 +8,12 @@ from typing import Dict, Any, List
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _DEFAULT_DATA_DIR = (
     "/app/data"
-    if os.path.isdir("/app/data")
-    else os.path.join(os.path.dirname(BASE_DIR), "data")
+    if os.path.isdir("/app/data") and not sys.platform.startswith("win")
+    else (
+        os.path.join(BASE_DIR, "data")
+        if os.path.isdir(os.path.join(BASE_DIR, "data"))
+        else os.path.join(os.path.dirname(BASE_DIR), "data")
+    )
 )
 DATA_DIR = os.path.dirname(os.environ["DB_PATH"]) if "DB_PATH" in os.environ else _DEFAULT_DATA_DIR
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -32,7 +37,7 @@ MODE_DB_PATHS: Dict[str, str] = {
 }
 
 # Capacité du réservoir de granulés du poêle Nobis A10 (en kg) et poids d'un sac standard
-HOPPER_CAPACITY_KG: float = 30.0
+HOPPER_CAPACITY_KG: float = 35.0
 PELLET_BAG_WEIGHT_KG: float = 15.0
 
 STOVE_STATES: Dict[int, str] = {
@@ -153,8 +158,8 @@ DEFAULT_REGISTERS_CATALOG: List[Dict[str, Any]] = [
     {"reg_key": "calendar_month_set", "offset": 34051, "mem_type": "EEPROM", "label": "Calendrier Poêle - Mois (1..12)", "unit": "m", "min_val": 1, "max_val": 12, "step": 1, "default_val": 11, "category": "PR_PARAM"},
     {"reg_key": "calendar_year_set", "offset": 34052, "mem_type": "EEPROM", "label": "Calendrier Poêle - Année (0..99 -> +2000)", "unit": "an", "min_val": 0, "max_val": 99, "step": 1, "default_val": 26, "category": "PR_PARAM"},
     {"reg_key": "calendar_day_week_set", "offset": 34053, "mem_type": "EEPROM", "label": "Calendrier Poêle - Jour semaine (1=Lun..7=Dim)", "unit": "j", "min_val": 1, "max_val": 7, "step": 1, "default_val": 7, "category": "PR_PARAM"},
-    {"reg_key": "trim_pellet_pct", "offset": 70, "mem_type": "EEPROM", "label": "Tarage Chargement Granulés (-30% à +30%)", "unit": "%", "min_val": -30, "max_val": 30, "step": 1, "default_val": 0, "category": "TRIM"},
-    {"reg_key": "trim_exhaust_pct", "offset": 71, "mem_type": "EEPROM", "label": "Tarage Extracteur Fumées (-30% à +30%)", "unit": "%", "min_val": -30, "max_val": 30, "step": 1, "default_val": 0, "category": "TRIM"},
+    {"reg_key": "trim_pellet_pct", "offset": 70, "mem_type": "EEPROM", "label": "Mélange P/A - Tarage Granulés (-5% à +5%)", "unit": "%", "min_val": -5, "max_val": 5, "step": 1, "default_val": 0, "category": "TRIM"},
+    {"reg_key": "trim_exhaust_pct", "offset": 71, "mem_type": "EEPROM", "label": "Mélange P/A - Prise d'Air Fumées (-5% à +5%)", "unit": "%", "min_val": -5, "max_val": 5, "step": 1, "default_val": 0, "category": "TRIM"},
     {"reg_key": "cat_service_hours", "offset": 260, "mem_type": "EEPROM", "label": "Compteur Heures avant Entretien CAT", "unit": "h", "min_val": 0, "max_val": 2500, "step": 1, "default_val": 1420, "category": "MAINTENANCE"},
 ]
 
@@ -180,11 +185,11 @@ TELEMETRY_COLUMNS: Dict[str, str] = {
     "temp_amb_setpoint": "REAL DEFAULT 19.0",
     "temp_fumes": "REAL DEFAULT 185.0",
     "temp_probe_k": "REAL DEFAULT 309.0",
-    "temp_board_ntc": "REAL DEFAULT 309.0",
+    "temp_board_ntc": "REAL DEFAULT NULL",
     "exhaust_rpm": "INTEGER DEFAULT 2200",
-    "exhaust_target_rpm": "INTEGER DEFAULT 2200",
+    "exhaust_target_rpm": "INTEGER DEFAULT NULL",
     "depression_pa": "REAL DEFAULT 8.3",
-    "flame_light_idx": "INTEGER DEFAULT 309",
+    "flame_light_idx": "INTEGER DEFAULT NULL",
     "glow_plug_on": "INTEGER DEFAULT 0",
     "power_level": "INTEGER DEFAULT 4",
     "power_actual": "INTEGER DEFAULT 4",
@@ -230,9 +235,9 @@ TELEMETRY_COLUMNS: Dict[str, str] = {
     "chrono_p4_power": "INTEGER DEFAULT 7",
     "chrono_p4_temp": "REAL DEFAULT 20.0",
     "stove_clock_str": "TEXT DEFAULT '17:42 01/11/2026'",
-    "auger_on_time_s": "REAL DEFAULT 1.8",
-    "auger_cycle_s": "REAL DEFAULT 4.0",
-    "auger_duty_pct": "REAL DEFAULT 45.0",
+    "auger_on_time_s": "REAL DEFAULT NULL",
+    "auger_cycle_s": "REAL DEFAULT NULL",
+    "auger_duty_pct": "REAL DEFAULT NULL",
     "pellet_rate_kgh": "REAL DEFAULT 1.15",
     "pellet_hopper_pct": "REAL DEFAULT 78.0",
     "pellet_daily_kg": "REAL DEFAULT 8.4",

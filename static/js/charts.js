@@ -485,8 +485,15 @@ function updatePhaseHoverViews(idx, isHovering) {
       p3Glow.className = glowOn ? "text-amber-400 font-bold" : "text-gray-400";
     }
     if (p3Auger) {
-      const augerS = Number(row.auger_on_time_s ?? 0);
-      p3Auger.textContent = row._isGap ? "--" : `${augerS.toFixed(1)}s (${Number(row.pellet_rate_kgh ?? 0).toFixed(2)} kg/h)`;
+      if (row._isGap) {
+        p3Auger.textContent = "--";
+      } else if (row.auger_on_time_s != null) {
+        const augerS = Number(row.auger_on_time_s);
+        p3Auger.textContent = `${augerS.toFixed(1)}s (${Number(row.pellet_rate_kgh ?? 0).toFixed(2)} kg/h)`;
+      } else {
+        const rate = Number(row.pellet_rate_kgh ?? 0);
+        p3Auger.textContent = `${rate.toFixed(2)} kg/h (P${row.power_actual ?? 0})`;
+      }
     }
     if (p3Pwr) {
       p3Pwr.textContent = row._isGap ? "--" : formatRealPower(row.power_actual ?? row.power_level ?? 0);

@@ -72,6 +72,8 @@ from telemetry import (
     check_power_stability,
     enrich_telemetry_record,
     prune_database_retention,
+    reset_pellet_batch_calibration,
+    get_pellet_batch_state,
 )
 from matter_service import matter_manager
 
@@ -584,23 +586,29 @@ async def api_dashboard(range_key: str = Query("24h")):
         if latest_dict:
             enrich_telemetry_record(conn, latest_dict)
 
+        # Filtre d'exclusion des données reconstituées ou orphelines (ex: id 1 à 27)
+        where_clause = "epoch >= ?"
+        params: List[Any] = [min_epoch]
+        if active_mode == "agua_cloud":
+            where_clause += " AND id NOT BETWEEN 1 AND 27 AND NOT (status_code != -1 AND (raw_buffer_json = '{}' OR raw_buffer_json IS NULL))"
+
         if bucket_s <= 120:
             rows = conn.execute(
-                "SELECT * FROM telemetry WHERE epoch >= ? ORDER BY epoch ASC",
-                (min_epoch,)
+                f"SELECT * FROM telemetry WHERE {where_clause} ORDER BY epoch ASC",
+                tuple(params)
             ).fetchall()
         else:
             rows = conn.execute(
-                """
+                f"""
                 SELECT * FROM telemetry
                 WHERE id IN (
                     SELECT MAX(id) FROM telemetry
-                    WHERE epoch >= ?
+                    WHERE {where_clause}
                     GROUP BY CAST(epoch / ? AS INTEGER)
                 )
                 ORDER BY epoch ASC
                 """,
-                (min_epoch, bucket_s)
+                tuple(params + [bucket_s])
             ).fetchall()
     finally:
         conn.close()
@@ -804,6 +812,19 @@ async def api_refill_hopper(payload: Optional[RefillHopperPayload] = Body(defaul
         "bags_used_season": new_used,
         "latest": latest
     }
+
+
+@app.post("/api/pellet-batch/raz")
+async def api_pellet_batch_raz(payload: Dict[str, Any] = Body(default={})):
+    """Réinitialise l'évaluation algorithmique lors d'un changement de marque de granulés."""
+    brand = str(payload.get("pellet_brand") or "Nouveau Lot Certifié A1")
+    return await reset_pellet_batch_calibration(brand)
+
+
+@app.get("/api/pellet-batch/status")
+async def api_pellet_batch_status():
+    """Retourne l'état courant du lot de granulés évalué."""
+    return get_pellet_batch_state()
 
 
 @app.post("/api/sync-clock")
@@ -1192,7 +1213,7 @@ async def api_test_webhook(payload: TestWebhookPayload = Body(default=TestWebhoo
     ok = await notification_service.send_webhook(
         url,
         "🔥 Test Superviseur Nobis A10",
-        "Connexion notifications Push/Webhook opérationnelle (Trémie 30 kg).",
+        "Connexion notifications Push/Webhook opérationnelle (Trémie 35 kg).",
         "test_alert",
         active_mode
     )
@@ -1259,7 +1280,17 @@ async def api_export_csv(range_key: str = Query("24h")):
 
     conn = get_db(active_mode)
     try:
-        rows = conn.execute("SELECT * FROM telemetry WHERE epoch >= ? ORDER BY epoch DESC", (min_epoch,)).fetchall()
+        # Exclusion stricte des lignes reconstituées (id 1 à 27) et buffers vides invalides
+        if active_mode == "agua_cloud":
+            rows = conn.execute("""
+                SELECT * FROM telemetry 
+                WHERE epoch >= ? 
+                  AND id NOT BETWEEN 1 AND 27
+                  AND NOT (status_code != -1 AND (raw_buffer_json = '{}' OR raw_buffer_json IS NULL))
+                ORDER BY epoch DESC
+            """, (min_epoch,)).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM telemetry WHERE epoch >= ? ORDER BY epoch DESC", (min_epoch,)).fetchall()
     finally:
         conn.close()
 

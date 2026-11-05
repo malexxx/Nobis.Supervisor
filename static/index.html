@@ -357,7 +357,7 @@
         <div id="cfg-fields-sim"
           class="hidden bg-emerald-950/30 border border-emerald-800/60 rounded-xl p-3 text-[11px] text-emerald-200">
           🧪 <strong>Mode Simulation Thermodynamique actif :</strong> Aucun identifiant externe n'est requis. Le jumeau
-          numérique simule la physique du Nobis A10 (Trémie 30 kg) dans sa base dédiée <code
+          numérique simule la physique du Nobis A10 (Trémie 35 kg) dans sa base dédiée <code
             class="font-mono text-emerald-300">nobis_a10_simulation.db</code>.
         </div>
 
@@ -955,11 +955,11 @@
           <div class="space-y-4">
             <h3 class="text-base font-bold text-white border-b border-gray-800 pb-2 flex items-center justify-between">
               <span class="flex items-center gap-1.5 cursor-help"
-                title="Suivi en direct de la trémie de granulés (capacité 30 kg / 2 sacs), sondes trappe/niveau, estimation d'autonomie et gestion du stock.">🪵
+                title="Suivi en direct de la trémie de granulés (capacité 35 kg / ~2.3 sacs), sondes trappe/niveau, estimation d'autonomie et gestion du stock.">🪵
                 Pellets</span>
             </h3>
 
-            <!-- Section Trémie 30 kg -->
+            <!-- Section Trémie 35 kg -->
             <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-3.5 space-y-2.5">
               <div class="flex items-center justify-between">
                 <span class="text-xs text-[#e8b693] font-semibold flex items-center gap-1">
@@ -968,10 +968,10 @@
                 <div class="flex items-center gap-1">
                   <button onclick="refillHopper(1)"
                     class="text-[10px] px-2 py-0.5 rounded bg-[#3b2014] hover:bg-[#4d2c1c] text-[#e8b693] border border-[#6e3b1f] font-semibold transition"
-                    title="Ajouter 1 sac de 15 kg (+50% dans la trémie de 30 kg)">+1 Sac</button>
+                    title="Ajouter 1 sac de 15 kg (+43% dans la trémie de 35 kg)">+1 Sac</button>
                   <button onclick="refillHopper(2)"
                     class="text-[10px] px-2 py-0.5 rounded bg-[#4d2c1c] hover:bg-[#5f3622] text-[#f5d0b5] border border-[#854726] font-semibold transition"
-                    title="Remplir la trémie à 100% (30 kg = 2 sacs de 15 kg)">100%</button>
+                    title="Remplir la trémie à 100% (35 kg = ~2.3 sacs de 15 kg)">100%</button>
                 </div>
               </div>
 
@@ -1686,16 +1686,21 @@
         <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 pb-3">
           <div>
             <h3 class="text-sm font-bold text-white flex items-center gap-2 cursor-help"
-              title="Algorithme d'analyse thermique et aéraulique en continu : évalue le pouvoir calorifique des granulés et le tirage du conduit à partir des écarts moyens sur 15 minutes, et propose un tarage prédictif optimal.">
+              title="Algorithme d'analyse thermique et aéraulique par lot : évalue le pouvoir calorifique des granulés et le tirage du conduit après 180 min stabilisées et 3 cycles, et propose un tarage prédictif optimal (-5% à +5%).">
               <span class="text-base">✨</span>
               <span>Optimisation Intelligente des Tarages par IA</span>
               <span
-                class="text-[10px] font-normal text-amber-400 bg-amber-950/60 border border-amber-800/80 px-2 py-0.5 rounded">Consigne
-                Stable (Moyenne 15 min)</span>
+                class="text-[10px] font-normal text-amber-400 bg-amber-950/60 border border-amber-800/80 px-2 py-0.5 rounded">Évaluation
+                par Lot (180 min / 3 cyc)</span>
             </h3>
             <p class="text-xs text-gray-400">Diagnostic continu de la combustion (Granulés / PCI) et de l'aéraulique
               (Tirage / Dépression Pa) avec recommandation prédictive et application en 1 clic</p>
           </div>
+          <button type="button" onclick="promptResetPelletBatch()"
+            class="px-3 py-1.5 rounded-lg bg-[#6e3b1f] hover:bg-[#854726] text-[#f5d0b5] border border-[#a0522d] text-xs font-bold flex items-center gap-1.5 shadow transition cursor-pointer"
+            title="Réinitialiser l'algorithme d'évaluation (180 min) et remettre les tarages Mélange P/A à 0% lors d'un changement de marque de granulés">
+            <span>🔄</span><span>RAZ Nouveau Lot de Pellets</span>
+          </button>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -1703,7 +1708,7 @@
           <div class="bg-gray-950/70 border border-gray-800/90 rounded-lg p-3.5 space-y-3">
             <div class="flex items-center justify-between">
               <span class="text-xs font-semibold text-[#e8b693] flex items-center gap-1.5 cursor-help"
-                title="Évaluation de la combustion basée sur l'écart thermique moyenné sur 15 minutes à consigne de puissance constante pour identifier le pouvoir calorifique des granulés.">
+                title="Évaluation de la combustion basée sur l'écart thermique moyenné sur 30 minutes à consigne de puissance constante pour identifier le pouvoir calorifique des granulés.">
                 <span>🌾</span><span>Qualité Granulés & Tarage Vis</span>
               </span>
               <span id="pellet-quality-badge"
@@ -1721,8 +1726,8 @@
               </div>
               <div>
                 <span class="text-[9px] text-gray-400 block"
-                  title="Écart thermique moyenné sur 15 minutes à consigne de puissance constante (sans variation) pour filtrer les fluctuations thermiques">Écart
-                  moyen (15m)</span>
+                  title="Écart thermique moyenné sur 30 minutes à consigne de puissance constante (sans variation) pour filtrer les fluctuations thermiques">Écart
+                  moyen (30m)</span>
                 <span id="pellet-delta-val" class="font-bold text-emerald-400 text-xs">--</span>
               </div>
               <div>
@@ -1761,7 +1766,7 @@
           <div class="bg-gray-950/70 border border-gray-800/90 rounded-lg p-3.5 space-y-3">
             <div class="flex items-center justify-between">
               <span class="text-xs font-semibold text-sky-300 flex items-center gap-1.5 cursor-help"
-                title="Évaluation du tirage dynamique du conduit coaxial basée sur la dépression (Pascal) moyennée sur 15 minutes à consigne de puissance constante pour filtrer les rafales de vent.">
+                title="Évaluation du tirage dynamique du conduit coaxial basée sur la dépression (Pascal) moyennée sur 30 minutes à consigne de puissance constante pour filtrer les rafales de vent.">
                 <span>💨</span><span>Tirage Conduit & Extracteur Fumées</span>
               </span>
               <span id="exhaust-quality-badge"
@@ -1779,8 +1784,8 @@
               </div>
               <div>
                 <span class="text-[9px] text-gray-400 block"
-                  title="Écart de dépression moyenné sur 15 minutes à consigne de puissance constante (sans variation) pour filtrer les bourrasques de vent">Écart
-                  moyen (15m)</span>
+                  title="Écart de dépression moyenné sur 30 minutes à consigne de puissance constante (sans variation) pour filtrer les bourrasques de vent">Écart
+                  moyen (30m)</span>
                 <span id="exhaust-delta-val" class="font-bold text-emerald-400 text-xs">--</span>
               </div>
               <div>
@@ -1874,12 +1879,15 @@
         </div>
 
         <div class="card p-4 space-y-3 flex flex-col justify-between">
-          <h4 class="text-sm font-bold text-white flex items-center cursor-help"
-            title="Notice Nobis : Ajuste le temps de rotation de la vis sans fin selon le pouvoir calorifique et la granulométrie de votre pellet.">
-            🌾 Tarage Chargement Granulés (-30% à +30%)
-          </h4>
+          <div>
+            <h4 class="text-sm font-bold text-white flex items-center cursor-help"
+              title="Notice Nobis : Ajuste le temps de rotation de la vis sans fin selon le pouvoir calorifique et la granulométrie de votre pellet (-5% à +5%).">
+              🌾 Tarage Chargement Granulés (-5% à +5%)
+            </h4>
+            <p class="text-[10px] text-gray-400 mt-0.5">En mode Cloud Agua, valider la consigne sur la radiocommande : MENU ▸ PROG. UTILISATEUR ▸ MÉLANGE G/A.</p>
+          </div>
           <div class="flex items-center gap-3">
-            <input id="inst-trim-pellet" type="number" min="-30" max="30" step="1" disabled
+            <input id="inst-trim-pellet" type="number" min="-5" max="5" step="1" disabled
               class="inst-input bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-28 tabular-nums" />
             <button onclick="sendCommand('trim_pellet_pct', document.getElementById('inst-trim-pellet').value)" disabled
               class="inst-input px-3 py-1.5 rounded bg-orange-600 text-white text-xs font-semibold">Appliquer</button>
@@ -1887,12 +1895,15 @@
         </div>
 
         <div class="card p-4 space-y-3 flex flex-col justify-between">
-          <h4 class="text-sm font-bold text-white flex items-center cursor-help"
-            title="Notice Nobis : Corrige la vitesse de l'extracteur de fumées (RPM) selon le tirage de votre conduit coaxial.">
-            💨 Tarage Extracteur Fumées (-30% à +30%)
-          </h4>
+          <div>
+            <h4 class="text-sm font-bold text-white flex items-center cursor-help"
+              title="Notice Nobis : Corrige la vitesse de l'extracteur de fumées (RPM) selon le tirage de votre conduit coaxial (-5% à +5%).">
+              💨 Tarage Extracteur Fumées (-5% à +5%)
+            </h4>
+            <p class="text-[10px] text-gray-400 mt-0.5">En mode Cloud Agua, valider la consigne sur la radiocommande : MENU ▸ PROG. UTILISATEUR ▸ MÉLANGE G/A.</p>
+          </div>
           <div class="flex items-center gap-3">
-            <input id="inst-trim-exhaust" type="number" min="-30" max="30" step="1" disabled
+            <input id="inst-trim-exhaust" type="number" min="-5" max="5" step="1" disabled
               class="inst-input bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-28 tabular-nums" />
             <button onclick="sendCommand('trim_exhaust_pct', document.getElementById('inst-trim-exhaust').value)"
               disabled

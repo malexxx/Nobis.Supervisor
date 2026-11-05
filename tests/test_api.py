@@ -153,6 +153,21 @@ class TestAPIEndpoints(unittest.TestCase):
             finally:
                 conn.close()
 
+    def test_pellet_batch_status_endpoint(self):
+        resp = self.client.get("/api/pellet-batch/status")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("raz_epoch", data)
+        self.assertIn("pellet_brand", data)
+
+    def test_pellet_batch_raz_endpoint(self):
+        resp = self.client.post("/api/pellet-batch/raz", json={"pellet_brand": "DINplus Test Lot A1"})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["pellet_batch_state"]["pellet_brand"], "DINplus Test Lot A1")
+        self.assertIn("latest", data)
+
 
 if __name__ == "__main__":
     unittest.main()

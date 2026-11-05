@@ -13,7 +13,7 @@ class BatchCommandPayload(BaseModel):
 
 
 class RefillHopperPayload(BaseModel):
-    bags_added: float = Field(default=2.0, ge=0.0, le=10.0, description="Nombre de sacs de 15 kg ajoutés (2 sacs = 30 kg = 100%)")
+    bags_added: float = Field(default=2.0, ge=0.0, le=10.0, description="Nombre de sacs de 15 kg ajoutés (capacité trémie 35 kg)")
     target_pct: float = Field(default=100.0, ge=0.0, le=100.0, description="Niveau cible de la trémie en %")
 
 
