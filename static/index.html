@@ -1937,11 +1937,10 @@
                 MENU ▸ PROG. UTILISATEUR ▸ MÉLANGE G/A.</p>
             </div>
             <div class="flex items-center gap-3">
-              <input id="inst-trim-pellet" type="number" min="-5" max="5" step="1" disabled
+              <input id="inst-trim-pellet" type="number" min="-5" max="5" step="1"
                 class="inst-input bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-28 tabular-nums" />
               <button onclick="sendCommand('trim_pellet_pct', document.getElementById('inst-trim-pellet').value)"
-                disabled
-                class="inst-input px-3 py-1.5 rounded bg-orange-600 text-white text-xs font-semibold">Appliquer</button>
+                class="inst-input px-3 py-1.5 rounded bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold cursor-pointer">Appliquer</button>
             </div>
           </div>
 
@@ -1955,11 +1954,10 @@
                 MENU ▸ PROG. UTILISATEUR ▸ MÉLANGE G/A.</p>
             </div>
             <div class="flex items-center gap-3">
-              <input id="inst-trim-exhaust" type="number" min="-5" max="5" step="1" disabled
+              <input id="inst-trim-exhaust" type="number" min="-5" max="5" step="1"
                 class="inst-input bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm w-28 tabular-nums" />
               <button onclick="sendCommand('trim_exhaust_pct', document.getElementById('inst-trim-exhaust').value)"
-                disabled
-                class="inst-input px-3 py-1.5 rounded bg-orange-600 text-white text-xs font-semibold">Appliquer</button>
+                class="inst-input px-3 py-1.5 rounded bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold cursor-pointer">Appliquer</button>
             </div>
           </div>
 
@@ -1969,12 +1967,12 @@
               🧪 Injecteur d'Offset Mémoire Brut (`RWMSmaster`)
             </h4>
             <div class="flex items-center gap-2">
-              <input id="raw-offset" type="number" placeholder="Offset (ex: 33122)" disabled
+              <input id="raw-offset" type="number" placeholder="Offset (ex: 33122)"
                 class="inst-input bg-gray-800 border border-gray-700 rounded px-2.5 py-1.5 text-xs w-28 tabular-nums" />
-              <input id="raw-value" type="number" placeholder="Valeur" disabled
+              <input id="raw-value" type="number" placeholder="Valeur"
                 class="inst-input bg-gray-800 border border-gray-700 rounded px-2.5 py-1.5 text-xs w-20 tabular-nums" />
-              <button onclick="sendRawOffset()" disabled
-                class="inst-input px-3 py-1.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold">Injecter</button>
+              <button onclick="sendRawOffset()"
+                class="inst-input px-3 py-1.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold cursor-pointer">Injecter</button>
             </div>
           </div>
         </div>
@@ -2135,9 +2133,9 @@
   </main>
 
   <!-- Scripts modulaires du Cockpit Nobis A10 -->
-  <script src="/static/js/state.js?v=20261105_v24"></script>
-  <script src="/static/js/charts.js?v=20261105_v24"></script>
-  <script src="/static/js/app.js?v=20261105_v24"></script>
+  <script src="/static/js/state.js?v=20261108_v25"></script>
+  <script src="/static/js/charts.js?v=20261108_v25"></script>
+  <script src="/static/js/app.js?v=20261108_v25"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {

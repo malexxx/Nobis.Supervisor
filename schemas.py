@@ -15,6 +15,7 @@ class BatchCommandPayload(BaseModel):
 class RefillHopperPayload(BaseModel):
     bags_added: float = Field(default=2.0, ge=0.0, le=10.0, description="Nombre de sacs de 15 kg ajoutés (capacité trémie 35 kg)")
     target_pct: float = Field(default=100.0, ge=0.0, le=100.0, description="Niveau cible de la trémie en %")
+    level_pct: Optional[float] = Field(default=None, ge=0.0, le=100.0, description="Alias optionnel du niveau cible en %")
 
 
 class SnapshotCreatePayload(BaseModel):
@@ -79,4 +80,12 @@ class ClientErrorPayload(BaseModel):
 
 class InstallerVerifyPayload(BaseModel):
     password: str = Field(..., min_length=1, description="Mot de passe Agua Cloud pour déverrouillage installateur")
+
+
+class StoveSetPayload(BaseModel):
+    type: str = Field(..., min_length=1, description="Type de consigne: power, temp ou fan")
+    zone: Optional[str] = Field(default=None, description="Zone cible pour temp/fan: salon, sx ou dx")
+    value: float = Field(..., description="Valeur de consigne à appliquer")
+    label: Optional[str] = Field(default=None, description="Libellé optionnel (ex: OFF, PS)")
+
 

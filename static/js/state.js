@@ -41,8 +41,17 @@ const OFFSET_NAMES = {
   103: "temp_air2_get (°C)", 105: "enable_mask_105",
   107: "enable_mask_107", 115: "popups_bitmask", 232: "status_managed (85/170)", 260: "cat_service_hours",
   33120: "power_set (1..7)", 33122: "temp_air_set (°C)", 33124: "can_dx_temp_set", 33126: "can_sx_temp_set",
-  33128: "fun_auto_set (Auto)", 33132: "vent_front_set", 33134: "can_dx_vent_set", 33136: "can_sx_vent_set",
-  33154: "fun_pwf_set (0=OFF,1=ON,2=CRONO)", 33162: "chrono_week_enable", 33250: "set_silece_set",
+  33128: "fun_auto_set (Auto)", 33130: "standby_set (Eco)", 33132: "vent_front_set", 33134: "can_dx_vent_set", 33136: "can_sx_vent_set",
+  33154: "fun_pwf_set (0=OFF,1=ON,2=CRONO)", 33162: "chrono_week_enable",
+  33164: "chrono_p1_start", 33166: "chrono_p1_stop", 33168: "chrono_p1_days_mask", 33170: "chrono_p1_power", 33172: "chrono_p1_temp",
+  33174: "chrono_p1_tcanr", 33176: "chrono_p1_tcanl", 33178: "chrono_p1_fan_front", 33180: "chrono_p1_canr", 33182: "chrono_p1_canl",
+  33184: "chrono_p2_start", 33186: "chrono_p2_stop", 33188: "chrono_p2_days_mask", 33190: "chrono_p2_power", 33192: "chrono_p2_temp",
+  33194: "chrono_p2_tcanr", 33196: "chrono_p2_tcanl", 33198: "chrono_p2_fan_front", 33200: "chrono_p2_canr", 33202: "chrono_p2_canl",
+  33204: "chrono_p3_start", 33206: "chrono_p3_stop", 33208: "chrono_p3_days_mask", 33210: "chrono_p3_power", 33212: "chrono_p3_temp",
+  33214: "chrono_p3_tcanr", 33216: "chrono_p3_tcanl", 33218: "chrono_p3_fan_front", 33220: "chrono_p3_canr", 33222: "chrono_p3_canl",
+  33224: "chrono_p4_start", 33226: "chrono_p4_stop", 33228: "chrono_p4_days_mask", 33230: "chrono_p4_power", 33232: "chrono_p4_temp",
+  33234: "chrono_p4_tcanr", 33236: "chrono_p4_tcanl", 33238: "chrono_p4_fan_front", 33240: "chrono_p4_canr", 33242: "chrono_p4_canl",
+  33250: "set_silece_set",
   34048: "clock_hour", 34049: "clock_minute", 34050: "cal_day", 34051: "cal_month", 34052: "cal_year", 34053: "cal_weekday"
 };
 

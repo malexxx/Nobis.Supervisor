@@ -301,7 +301,15 @@ class AguaCloudClient:
                     try:
                         off_int = int(off)
                         if off_int not in self.registers_map_by_offset or item.get("reg_type") == "SET":
-                            self.registers_map_by_offset[off_int] = item
+                            # Si plusieurs registres SET partagent le même offset avec des masques unitaires par bit
+                            # (ex: chrono_pX_day_*_set sur 33168/33188/33208/33228 avec mask=1,2,4..64),
+                            # l'entrée indexée par offset doit conserver un masque complet (65535) afin de ne pas
+                            # bloquer l'écriture globale du registre (ex: chrono_pX_days_mask).
+                            item_for_offset = dict(item)
+                            raw_mask = item_for_offset.get("mask") or item_for_offset.get("Mask")
+                            if raw_mask is not None and int(raw_mask) not in (255, 65535):
+                                item_for_offset["mask"] = 65535 if item_for_offset.get("is_word", True) else 255
+                            self.registers_map_by_offset[off_int] = item_for_offset
                     except (ValueError, TypeError):
                         pass
                 if rk:
@@ -480,12 +488,16 @@ class AguaCloudClient:
             return data
 
     def _resolve_register_write_params(self, offset: int, reg_key: Optional[str] = None) -> Tuple[int, int, str, int]:
-        meta = self.registers_map_by_offset.get(int(offset))
-        if not meta and reg_key:
+        meta = None
+        matched_by_key = False
+        if reg_key:
             for alias in [reg_key] + AGUA_REG_KEY_ALIASES.get(reg_key, []):
                 if alias in self.registers_map_by_key:
                     meta = self.registers_map_by_key[alias]
+                    matched_by_key = True
                     break
+        if not meta:
+            meta = self.registers_map_by_offset.get(int(offset))
 
         byte_offsets = {
             8, 11, 16, 22, 28, 29, 31, 32, 34, 40, 70, 71, 115, 232,
@@ -499,9 +511,27 @@ class AguaCloudClient:
 
         try:
             real_offset = int(meta.get("offset", offset))
-            bit_len = int(meta.get("bit_data") or meta.get("BitData") or default_bit)
-            endian = str(meta.get("endianess") or meta.get("Endianess") or "L")
-            mask_val = int(meta.get("mask") or meta.get("Mask") or (255 if bit_len == 8 else 65535))
+            bit_from_meta = meta.get("bit_data") or meta.get("BitData")
+            if bit_from_meta is not None:
+                bit_len = int(bit_from_meta)
+            elif meta.get("is_word") is not None:
+                bit_len = 16 if bool(meta.get("is_word")) else 8
+            else:
+                bit_len = default_bit
+
+            if meta.get("endianess") or meta.get("Endianess"):
+                endian = str(meta.get("endianess") or meta.get("Endianess"))
+            elif meta.get("big_endian") is not None:
+                endian = "B" if bool(meta.get("big_endian")) else "L"
+            else:
+                endian = "L"
+
+            full_mask = 255 if bit_len == 8 else 65535
+            raw_meta_mask = int(meta.get("mask") or meta.get("Mask") or full_mask)
+            if matched_by_key:
+                mask_val = raw_meta_mask
+            else:
+                mask_val = 65535 if raw_meta_mask == 65535 else full_mask
             return real_offset, bit_len, endian, mask_val
         except Exception:
             return int(offset), default_bit, "L", default_mask

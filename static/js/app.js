@@ -972,6 +972,7 @@ function applyDashboardState(data, updateSeries = true) {
   if (btnDrMax) btnDrMax.classList.toggle("btn-active-glow", drSpVal >= 41);
 
   const climBadge = document.getElementById("ctl-clim-badge");
+  const isSilActive = Boolean(silenceModeState && silenceModeState.active);
   if (climBadge) {
     const isStandbyPhase = (stCode === 8 || stCode === 9);
     const isEcoActive = !isSilActive && (Number(getRegVal("standby_set", 0)) === 1);
@@ -1039,8 +1040,14 @@ function applyDashboardState(data, updateSeries = true) {
   renderRawBufferInspector();
 
   // Onglet Paramètres (Menu Installateur)
-  document.getElementById("inst-trim-pellet").value = getRegVal("trim_pellet_pct", 0);
-  document.getElementById("inst-trim-exhaust").value = getRegVal("trim_exhaust_pct", 0);
+  const trimPelletInp = document.getElementById("inst-trim-pellet");
+  if (trimPelletInp && document.activeElement !== trimPelletInp) {
+    trimPelletInp.value = getRegVal("trim_pellet_pct", 0);
+  }
+  const trimExhaustInp = document.getElementById("inst-trim-exhaust");
+  if (trimExhaustInp && document.activeElement !== trimExhaustInp) {
+    trimExhaustInp.value = getRegVal("trim_exhaust_pct", 0);
+  }
 
   // Compteurs Horaires & Révision CAT
   const catHours = Number(latestData.cat_service_hours ?? getRegVal("cat_service_hours", 1420));
@@ -1361,6 +1368,7 @@ function filterCatalogTable(query) {
 function renderEepromTable() {
   const tbody = document.getElementById("eeprom-table-body");
   if (!tbody) return;
+  if (document.activeElement && tbody.contains(document.activeElement)) return;
   tbody.innerHTML = "";
   const regs = Object.values(registersCatalog);
   const countEl = document.getElementById("catalog-reg-count");
@@ -1386,6 +1394,11 @@ function renderEepromTable() {
     `;
     tbody.appendChild(tr);
   });
+
+  const searchInp = document.getElementById("catalog-search");
+  if (searchInp && searchInp.value) {
+    filterCatalogTable(searchInp.value);
+  }
 }
 
 async function loadSnapshots() {
@@ -1499,6 +1512,7 @@ async function checkInstallerAuthStatus(forceRefresh = false) {
       lockScreen.classList.add("hidden");
       unlockedContent.classList.remove("hidden");
       if (errBox) errBox.classList.add("hidden");
+      document.querySelectorAll(".inst-input").forEach(el => { el.disabled = false; });
       loadSnapshots();
     } else {
       if (installerAuthToken) {
@@ -1762,9 +1776,12 @@ function refillHopper(bagsAdded = 2) {
     confirmText: isOneBag ? "+1 Sac (15 kg)" : "Trémie Pleine (35 kg)",
     onConfirm: async () => {
       const addedPct = (15.0 / HOPPER_CAPACITY_KG) * 100.0;
+      const targetPct = isOneBag
+        ? Math.min(100.0, Number(latestData.pellet_hopper_pct ?? 50) + addedPct)
+        : 100.0;
       const payload = isOneBag
-        ? { level_pct: Math.min(100.0, Number(latestData.pellet_hopper_pct ?? 50) + addedPct), bags_added: 1 }
-        : { level_pct: 100.0, bags_added: 2.33 };
+        ? { target_pct: targetPct, level_pct: targetPct, bags_added: 1 }
+        : { target_pct: 100.0, level_pct: 100.0, bags_added: 2.33 };
       const res = await fetch("/api/refill-hopper", {
         method: "POST",
         headers: getInstallerHeaders({ "Content-Type": "application/json" }),
@@ -1773,7 +1790,9 @@ function refillHopper(bagsAdded = 2) {
       if (res.ok) {
         const j = await res.json();
         await refreshLatestOnly();
-        showToast(`Trémie à ${j.pellet_hopper_pct}% (${j.hopper_capacity_kg} kg max) — Stock restant : ${j.pellet_bags_stock} sacs`);
+        const capKg = j.hopper_capacity_kg ?? HOPPER_CAPACITY_KG;
+        const stockBags = j.pellet_bags_stock ?? j.bags_stock ?? "--";
+        showToast(`Trémie à ${j.pellet_hopper_pct}% (${capKg} kg max) — Stock restant : ${stockBags} sacs`);
       }
     }
   });
@@ -2004,7 +2023,8 @@ function applyAiPelletTrim() {
   }
   const targetVal = Number(currentPelletAiDiagnosis.suggested_trim);
   const sign = targetVal > 0 ? "+" : "";
-  const isAgua = (currentCommMode === "agua_cloud");
+  const activeMode = latestData.comm_mode || (currentSettings && currentSettings.comm_mode) || "agua_cloud";
+  const isAgua = (activeMode === "agua_cloud");
   const remoteNote = isAgua
     ? `\n\n⚠️ IMPORTANT (Mode Cloud Agua) :\nLes offsets 70 et 71 ne figurent pas dans la table Cloud Agua IOT. L'application enregistre cette valeur en mémoire locale, mais vous devez la valider sur votre radiocommande :\nMENU ▸ PROGRAMMATION UTILISATEUR ▸ MÉLANGE G/A.`
     : "";
@@ -2233,7 +2253,8 @@ function applyAiExhaustTrim() {
   }
   const targetVal = Number(currentExhaustAiDiagnosis.suggested_trim);
   const sign = targetVal > 0 ? "+" : "";
-  const isAgua = (currentCommMode === "agua_cloud");
+  const activeMode = latestData.comm_mode || (currentSettings && currentSettings.comm_mode) || "agua_cloud";
+  const isAgua = (activeMode === "agua_cloud");
   const remoteNote = isAgua
     ? `\n\n⚠️ IMPORTANT (Mode Cloud Agua) :\nLes offsets 70 et 71 ne figurent pas dans la table Cloud Agua IOT. L'application enregistre cette valeur en mémoire locale, mais vous devez la valider sur votre radiocommande :\nMENU ▸ PROGRAMMATION UTILISATEUR ▸ MÉLANGE G/A.`
     : "";
@@ -2472,7 +2493,7 @@ function updateModeRing() {
   const isSilActive = Boolean(silenceModeState && silenceModeState.active);
   const remSec = silenceModeState ? Math.max(0, Math.round(silenceModeState.end_epoch - Date.now() / 1000)) : 0;
   const isEco = !isSilActive && (Number(getRegVal("standby_set", 0)) === 1);
-  const pwfVal = Number(getRegVal("pwr_boost_mode", 0));
+  const pwfVal = Number(getRegVal("fun_pwf_set", latestData.fun_pwf_set ?? 0));
   const isPsAll = (Number(getRegVal("fan_front_speed", 0)) === 8 &&
                    Number(getRegVal("duct_left_speed", 0)) === 8 &&
                    Number(getRegVal("duct_right_speed", 0)) === 8);
@@ -3273,12 +3294,16 @@ async function testWebhook() {
     headers: getInstallerHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ webhook_url: url })
   });
-  const res = await fetch("/api/test-webhook", { method: "POST" });
-  const j = await res.json();
-  if (j.ok) {
-    showToast("Notification de test envoyée avec succès !");
+  const res = await fetch("/api/test-webhook", {
+    method: "POST",
+    headers: getInstallerHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ webhook_url: url })
+  });
+  const j = await res.json().catch(() => ({}));
+  if (res.ok && (j.status === "ok" || j.ok)) {
+    showToast(j.message || "Notification de test envoyée avec succès !");
   } else {
-    showToast("Échec de l'envoi Webhook (vérifiez l'URL).", true);
+    showToast(j.detail || "Échec de l'envoi Webhook (vérifiez l'URL).", true);
   }
 }
 

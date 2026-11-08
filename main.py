@@ -39,6 +39,7 @@ from schemas import (
     TestWebhookPayload,
     ClientErrorPayload,
     InstallerVerifyPayload,
+    StoveSetPayload,
 )
 from database import (
     get_sys_db,
@@ -661,6 +662,69 @@ async def api_command_batch(payload: BatchCommandPayload):
     return await execute_registers_batch_write(cmds)
 
 
+@app.post("/api/stove/set")
+async def api_stove_set(payload: StoveSetPayload):
+    """Point d'entrée unifié de pilotage pour le composant modulaire NobisPilotage (temp, fan, power)."""
+    cmd_type = (payload.type or "").strip().lower()
+    zone = (payload.zone or "salon").strip().lower()
+    val = float(payload.value)
+
+    if cmd_type == "temp":
+        zone_map = {
+            "salon": ("temp_amb_setpoint", 33122),
+            "front": ("temp_amb_setpoint", 33122),
+            "sx": ("duct_left_setpoint", 33126),
+            "dx": ("duct_right_setpoint", 33124),
+        }
+        if zone not in zone_map:
+            raise HTTPException(status_code=400, detail=f"Zone de température inconnue : {zone}")
+        reg_key, offset = zone_map[zone]
+        if val <= 6.0:
+            mapped_val = 7.0
+        elif val >= 31.0 and val < 41.0:
+            mapped_val = 41.0
+        else:
+            mapped_val = max(7.0, min(41.0, round(val * 2.0) / 2.0))
+        return await execute_register_write(reg_key, mapped_val, offset)
+
+    elif cmd_type == "fan":
+        zone_map = {
+            "salon": ("fan_front_speed", 33132),
+            "front": ("fan_front_speed", 33132),
+            "sx": ("duct_left_speed", 33136),
+            "dx": ("duct_right_speed", 33134),
+        }
+        if zone not in zone_map:
+            raise HTTPException(status_code=400, detail=f"Zone de ventilation inconnue : {zone}")
+        reg_key, offset = zone_map[zone]
+        iv = int(round(val))
+        if iv < 0 or iv > 8:
+            raise HTTPException(status_code=400, detail=f"Vitesse de ventilation hors plage (0..8) : {iv}")
+        return await execute_register_write(reg_key, float(iv), offset)
+
+    elif cmd_type == "power":
+        iv = int(round(val))
+        if iv < 0 or iv > 8:
+            raise HTTPException(status_code=400, detail=f"Niveau de puissance hors plage (0..8) : {iv}")
+        if iv == 0:
+            return {
+                "status": "ok",
+                "reg_key": "power_level",
+                "new_value": 0.0,
+                "message": "P0 (Éco) est un ralenti automatique enclenché lorsque la température atteint la consigne."
+            }
+        if iv == 8:
+            return await execute_register_write("fun_pwf_set", 1.0, 33154)
+        active_mode = get_active_mode()
+        regs = get_registers_dict(active_mode)
+        pwf_cur = float(regs.get("fun_pwf_set", {}).get("current_val", 0.0))
+        if pwf_cur > 0.0:
+            await execute_register_write("fun_pwf_set", 0.0, 33154, skip_poll=True)
+        return await execute_register_write("power_level", float(iv), 33130)
+
+    raise HTTPException(status_code=400, detail=f"Type de commande inconnu : {cmd_type}")
+
+
 @app.post("/api/silence/activate")
 async def api_silence_activate(payload: SilenceActivatePayload = Body(default=SilenceActivatePayload())):
     """Active le mode Silence ! : P1, ventilation=0, arrêt auto/eco/boost, compte à rebours temporisé."""
@@ -751,11 +815,12 @@ async def api_refill_hopper(payload: Optional[RefillHopperPayload] = Body(defaul
     try:
         last_row = conn.execute("SELECT id, pellet_hopper_pct FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
         prev_pct = float(last_row["pellet_hopper_pct"]) if last_row else 50.0
-        if payload is not None and payload.bags_added == 1.0:
+        if payload is not None and payload.bags_added == 1.0 and payload.level_pct is None and payload.target_pct == 100.0:
             added_pct = (PELLET_BAG_WEIGHT_KG / HOPPER_CAPACITY_KG) * 100.0
             new_pct = round(min(100.0, prev_pct + added_pct), 1)
         else:
-            new_pct = round(min(100.0, payload.target_pct if payload is not None else 100.0), 1)
+            req_pct = (payload.level_pct if (payload is not None and payload.level_pct is not None) else (payload.target_pct if payload is not None else 100.0))
+            new_pct = round(min(100.0, req_pct), 1)
 
         if last_row:
             conn.execute(
@@ -808,7 +873,9 @@ async def api_refill_hopper(payload: Optional[RefillHopperPayload] = Body(defaul
     return {
         "status": "ok",
         "pellet_hopper_pct": new_pct,
+        "hopper_capacity_kg": HOPPER_CAPACITY_KG,
         "bags_stock": new_stock,
+        "pellet_bags_stock": new_stock,
         "bags_used_season": new_used,
         "latest": latest
     }
