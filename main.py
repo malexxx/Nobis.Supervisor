@@ -75,6 +75,7 @@ from telemetry import (
     prune_database_retention,
     reset_pellet_batch_calibration,
     get_pellet_batch_state,
+    get_comm_status,
 )
 from matter_service import matter_manager
 
@@ -384,7 +385,11 @@ async def lifespan(app: FastAPI):
         await close_http_client()
 
 
-app = FastAPI(title="Nobis.Supervisor - Supervision Micronova & Pont Matter", lifespan=lifespan)
+app = FastAPI(
+    title="Nobis.Supervisor - Supervision Micronova & Pont Matter",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 
 class DbLogHandler(logging.Handler):
@@ -480,7 +485,8 @@ async def healthcheck():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "active_mode": mode,
-        "active_db": os.path.basename(MODE_DB_PATHS[mode])
+        "active_db": os.path.basename(MODE_DB_PATHS[mode]),
+        "comm_status": get_comm_status()
     }
 
 
@@ -545,6 +551,7 @@ async def api_latest():
         "active_mode": active_mode,
         "active_db_file": os.path.basename(MODE_DB_PATHS[active_mode]),
         "latest": latest_dict,
+        "comm_status": get_comm_status(),
         "settings": get_public_settings_dict(),
         "registers": get_registers_dict(active_mode),
         "consumption_stats": stats,
@@ -635,6 +642,7 @@ async def api_dashboard(range_key: str = Query("24h")):
         "active_mode": active_mode,
         "active_db_file": os.path.basename(MODE_DB_PATHS[active_mode]),
         "latest": latest_dict,
+        "comm_status": get_comm_status(),
         "series": sampled,
         "settings": get_public_settings_dict(),
         "registers": get_registers_dict(active_mode),
@@ -648,7 +656,7 @@ async def api_dashboard(range_key: str = Query("24h")):
 @app.post("/api/poll-now")
 async def api_poll_now():
     record = await collect_telemetry_cycle()
-    return {"status": "ok", "latest": record}
+    return {"status": "ok", "latest": record, "comm_status": get_comm_status()}
 
 
 @app.post("/api/command")

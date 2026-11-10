@@ -36,7 +36,10 @@ function openActionModal({
   onConfirm,
   onCancel
 }) {
-  document.getElementById("action-modal-title").textContent = title || "Confirmation";
+  const titleEl = document.getElementById("action-modal-title");
+  if (titleEl) {
+    titleEl.innerHTML = title || "Confirmation";
+  }
   const msgEl = document.getElementById("action-modal-message");
   if (htmlContent) {
     msgEl.innerHTML = htmlContent;
@@ -83,6 +86,8 @@ function closeActionModal() {
   actionModalCallback = null;
 }
 
+const showActionModal = openActionModal;
+
 // Gestion de la pop-up Configuration avec champs dynamiques selon le protocole choisi
 function openConfigModal(highlightFieldId = null) {
   updateConfigModalFields();
@@ -125,6 +130,19 @@ function toggleMobileSeriesDrawer() {
 }
 
 function switchTab(tabId) {
+  if (tabId === "tab-logs") {
+    tabId = "tab-installer";
+  }
+
+  // Verrouillage du scroll vertical sur l'écran Pilotage sur smartphone (seul le swipe gauche/droite est actif)
+  if (tabId === "tab-control" && window.innerWidth < 768) {
+    document.documentElement.classList.add("overflow-y-hidden");
+    document.body.classList.add("overflow-y-hidden");
+  } else {
+    document.documentElement.classList.remove("overflow-y-hidden");
+    document.body.classList.remove("overflow-y-hidden");
+  }
+
   // Remet l'ascenseur tout en haut de page lors du changement d'onglet
   window.scrollTo({ top: 0, left: 0, behavior: "instant" });
   document.documentElement.scrollTop = 0;
@@ -132,7 +150,7 @@ function switchTab(tabId) {
   const mainEl = document.querySelector("main");
   if (mainEl) mainEl.scrollTop = 0;
 
-  ["tab-control", "tab-chrono", "tab-dashboard", "tab-installer", "tab-logs"].forEach(id => {
+  ["tab-control", "tab-pellets", "tab-chrono", "tab-dashboard", "tab-installer"].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.classList.toggle("hidden", id !== tabId);
     const btn = document.getElementById("btn-" + id);
@@ -167,8 +185,6 @@ function switchTab(tabId) {
   }
   if (tabId === "tab-installer") {
     checkInstallerAuthStatus();
-  }
-  if (tabId === "tab-logs") {
     loadLogs(currentLogSeverity);
     loadAudit();
   }
@@ -553,59 +569,204 @@ function renderRawBufferInspector() {
   }).join("");
 }
 
-// État de connexion globale au serveur et au flux temps réel SSE
+// États de connexion dissociés :
+// 1) Conteneur (Navigateur <-> Conteneur Nobis.Supervisor / Serveur Web & Flux SSE)
+// 2) Cloud Nobis (Conteneur <-> Cloud Agua IOT / Poêle physique Micronova)
 const connectionState = {
   isServerConnected: true,
   isSSEConnected: false,
+  containerStatus: "connected",
+  cloudStatus: "connected",
+  commStatus: null,
+  containerLatencyMs: null,
 };
 
-// Met à jour l'indicateur visuel de connexion situé à droite du titre
-function updateConnectionIndicator(overrideStatus, message) {
-  const connEl = document.getElementById("hdr-conn");
-  const connDot = document.getElementById("hdr-conn-dot");
-  const connText = document.getElementById("hdr-conn-text");
-  if (!connEl || !connDot || !connText) return;
+// Met à jour l'indicateur visuel de connexion à ce conteneur Docker Nobis.Supervisor
+function updateContainerConnectionIndicator(overrideStatus, message) {
+  const connEl = document.getElementById("hdr-conn-container");
+  const connDot = document.getElementById("hdr-conn-container-dot");
+  const connText = document.getElementById("hdr-conn-container-text");
+  const cfgDiagContainer = document.getElementById("cfg-diag-container");
+
+  const effectiveStatus = overrideStatus || (connectionState.isServerConnected ? "connected" : "disconnected");
+  connectionState.containerStatus = effectiveStatus;
+
+  // Cas 1 : Conteneur ou réseau injoignable -> Bulle Rouge
+  if (effectiveStatus === "disconnected" || !connectionState.isServerConnected) {
+    if (connEl) {
+      connEl.className = "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border bg-rose-600/85 border-rose-400 text-white shadow-[0_0_10px_rgba(244,63,94,0.45)] animate-pulse flex-shrink-0 cursor-pointer hover:bg-rose-500 transition-all";
+      connEl.title = "Conteneur Nobis.Supervisor injoignable • Cliquer pour ouvrir la Configuration";
+    }
+    if (connDot) connDot.className = "hidden";
+    if (connText) connText.textContent = message || "Conteneur KO";
+    if (cfgDiagContainer) {
+      cfgDiagContainer.className = "text-[11px] font-semibold text-rose-400 flex items-center gap-1.5";
+      cfgDiagContainer.innerHTML = `<span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>${message || "Injoignable"}`;
+    }
+    return;
+  }
+
+  // Cas 2 : Reconnexion / négociation en cours -> Bulle Verte (pulse)
+  if (effectiveStatus === "connecting") {
+    if (connEl) {
+      connEl.className = "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border bg-emerald-600/75 border-emerald-400 text-white shadow-[0_0_10px_rgba(16,185,129,0.45)] animate-pulse flex-shrink-0 cursor-pointer hover:bg-emerald-500 transition-all";
+      connEl.title = "Connexion au conteneur Nobis.Supervisor en cours... • Cliquer pour ouvrir la Configuration";
+    }
+    if (connDot) connDot.className = "hidden";
+    if (connText) connText.textContent = message || "Connexion...";
+    if (cfgDiagContainer) {
+      cfgDiagContainer.className = "text-[11px] font-semibold text-sky-400 flex items-center gap-1.5";
+      cfgDiagContainer.innerHTML = `<span class="w-2 h-2 rounded-full bg-sky-400 animate-pulse"></span>Connexion...`;
+    }
+    return;
+  }
+
+  // Cas 3 : Conteneur connecté et opérationnel -> Bulle Verte
+  if (connEl) {
+    connEl.className = "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border bg-emerald-600/85 border-emerald-400 text-white shadow-[0_0_10px_rgba(16,185,129,0.45)] flex-shrink-0 cursor-pointer hover:bg-emerald-500 transition-all";
+    const sseTxt = connectionState.isSSEConnected ? " • Flux SSE actif" : " • HTTP actif";
+    const latTxt = connectionState.containerLatencyMs ? ` • Ping ${connectionState.containerLatencyMs}ms` : "";
+    connEl.title = `Configuration & Conteneur Nobis.Supervisor en ligne${sseTxt}${latTxt}`;
+  }
+  if (connDot) connDot.className = "hidden";
+  if (connText) connText.textContent = "Conteneur";
+  if (cfgDiagContainer) {
+    cfgDiagContainer.className = "text-[11px] font-semibold text-emerald-400 flex items-center gap-1.5";
+    cfgDiagContainer.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]"></span>En ligne (${connectionState.isSSEConnected ? 'SSE actif' : 'HTTP'})`;
+  }
+}
+
+// Met à jour l'indicateur visuel de liaison avec le Cloud Nobis (Agua IOT) ou la passerelle
+function updateCloudConnectionIndicator(overrideStatus, message) {
+  const cloudEl = document.getElementById("hdr-conn-cloud");
+  const cloudDot = document.getElementById("hdr-conn-cloud-dot");
+  const cloudIcon = document.getElementById("hdr-cloud-icon");
+  const cloudText = document.getElementById("hdr-conn-cloud-text");
+  const cfgDiagCloud = document.getElementById("cfg-diag-cloud");
 
   const st = Number(latestData.status_code ?? 0);
-  const activeMode = latestData.comm_mode || (currentSettings && currentSettings.comm_mode) || "agua_cloud";
+  const activeMode = (connectionState.commStatus && connectionState.commStatus.comm_mode) ||
+    latestData.comm_mode ||
+    (currentSettings && currentSettings.comm_mode) ||
+    "agua_cloud";
 
-  // Cas 1 : Déconnexion réseau ou serveur injoignable
-  if (overrideStatus === "disconnected" || !connectionState.isServerConnected) {
-    connEl.className = "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-rose-950/70 border-rose-700 text-rose-300 shadow flex-shrink-0 cursor-pointer hover:bg-rose-900/80 transition-all";
-    connDot.className = "w-2 h-2 rounded-full bg-rose-500 animate-ping shadow-[0_0_8px_#f43f5e]";
-    connText.textContent = message || "Déconnecté";
-    connEl.title = "Serveur ou réseau injoignable • Cliquez pour forcer la reconnexion";
-    return;
+  let modeName = "Cloud Nobis";
+  let modeIcon = "☁️";
+  if (activeMode === "local_gateway") {
+    modeName = "Passerelle UART";
+    modeIcon = "🔌";
+  } else if (activeMode === "simulation") {
+    modeName = "Simulation";
+    modeIcon = "🧪";
   }
 
-  // Cas 2 : Reconnexion / négociation en cours
-  if (overrideStatus === "connecting") {
-    connEl.className = "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-sky-950/60 border-sky-700 text-sky-300 shadow flex-shrink-0 cursor-pointer hover:bg-sky-900/80 transition-all";
-    connDot.className = "w-2 h-2 rounded-full bg-sky-400 animate-pulse shadow-[0_0_8px_#38bdf8]";
-    connText.textContent = message || "Connexion...";
-    connEl.title = "Tentative de connexion en cours...";
-    return;
-  }
-
-  // Cas 3 : Serveur OK mais liaison avec le poêle perdue (st === -1)
-  if (st === -1) {
-    connEl.className = "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-amber-950/70 border-amber-600 text-amber-300 shadow flex-shrink-0 cursor-pointer hover:bg-amber-900/80 transition-all";
-    connDot.className = "w-2 h-2 rounded-full bg-amber-400 animate-pulse shadow-[0_0_8px_#fbbf24]";
-    connText.textContent = "Poêle hors ligne";
-    connEl.title = `Serveur connecté, mais perte de communication avec le poêle (${activeMode}) • Cliquez pour actualiser`;
-    return;
-  }
-
-  // Cas 4 : Tout est connecté et opérationnel
-  connEl.className = "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border bg-emerald-950/60 border-emerald-700 text-emerald-300 shadow flex-shrink-0 cursor-pointer hover:border-emerald-500 transition-all";
-  connDot.className = "w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]";
-  const cloudIcon = document.getElementById("hdr-cloud-icon");
   if (cloudIcon) {
-    cloudIcon.textContent = activeMode === "agua_cloud" ? "☁️" : (activeMode === "local_gateway" ? "🔌" : "🧪");
+    cloudIcon.textContent = modeIcon;
     cloudIcon.title = `Protocole : ${activeMode}`;
   }
-  connText.textContent = "Connecté";
-  connEl.title = `Connexion active • Mode : ${activeMode} • Flux temps réel synchronisé • Cliquez pour actualiser`;
+
+  // Cas 1 : Si le conteneur lui-même est inaccessible -> Bulle Rouge
+  if (!connectionState.isServerConnected) {
+    if (cloudEl) {
+      cloudEl.className = "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border bg-rose-600/85 border-rose-400 text-white shadow-[0_0_10px_rgba(244,63,94,0.45)] flex-shrink-0 cursor-pointer transition-all";
+      cloudEl.title = `Liaison ${modeName} indisponible (conteneur local déconnecté)`;
+    }
+    if (cloudDot) cloudDot.className = "hidden";
+    if (cloudText) cloudText.textContent = `${modeName} : Inconnu`;
+    if (cfgDiagCloud) {
+      cfgDiagCloud.className = "text-[11px] font-semibold text-gray-400 flex items-center gap-1.5";
+      cfgDiagCloud.innerHTML = `<span class="w-2 h-2 rounded-full bg-gray-500"></span>Inaccessible`;
+    }
+    return;
+  }
+
+  // Cas 2 : Reconnexion / Actualisation Cloud en cours -> Bulle Verte (pulse)
+  if (overrideStatus === "connecting") {
+    if (cloudEl) {
+      cloudEl.className = "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border bg-emerald-600/75 border-emerald-400 text-white shadow-[0_0_10px_rgba(16,185,129,0.45)] animate-pulse flex-shrink-0 cursor-pointer transition-all";
+      cloudEl.title = `Interrogation du ${modeName} en direct...`;
+    }
+    if (cloudDot) cloudDot.className = "hidden";
+    if (cloudText) cloudText.textContent = message || "Sync...";
+    if (cfgDiagCloud) {
+      cfgDiagCloud.className = "text-[11px] font-semibold text-sky-400 flex items-center gap-1.5";
+      cfgDiagCloud.innerHTML = `<span class="w-2 h-2 rounded-full bg-sky-400 animate-pulse"></span>Synchronisation...`;
+    }
+    return;
+  }
+
+  const commStatus = connectionState.commStatus;
+  const isCloudOffline = overrideStatus === "disconnected" ||
+    (commStatus && commStatus.connected === false) ||
+    (st === -1);
+
+  // Cas 3 : Conteneur connecté, mais communication avec le Cloud Nobis / poêle perdue -> Bulle Rouge
+  if (isCloudOffline) {
+    const reason = (commStatus && commStatus.last_error) || "Rupture de communication ou poêle éteint";
+    if (cloudEl) {
+      cloudEl.className = "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border bg-rose-600/85 border-rose-400 text-white shadow-[0_0_10px_rgba(244,63,94,0.45)] animate-pulse flex-shrink-0 cursor-pointer hover:bg-rose-500 transition-all";
+      cloudEl.title = `Perte de communication avec ${modeName} (${reason}) • Cliquer pour forcer l'actualisation`;
+    }
+    if (cloudDot) cloudDot.className = "hidden";
+    if (cloudText) cloudText.textContent = message || `${modeName} HS`;
+    if (cfgDiagCloud) {
+      cfgDiagCloud.className = "text-[11px] font-semibold text-rose-400 flex items-center gap-1.5";
+      cfgDiagCloud.innerHTML = `<span class="w-2 h-2 rounded-full bg-rose-400 animate-pulse"></span>Hors ligne`;
+    }
+    return;
+  }
+
+  // Cas 4 : Tout est connecté et synchronisé avec le Cloud Nobis -> Bulle Verte
+  const lastTime = (commStatus && commStatus.last_sync_time) || latestData.timestamp || "";
+  const lastSyncStr = lastTime ? ` • Synchro : ${lastTime.slice(11, 19)}` : "";
+
+  if (cloudEl) {
+    cloudEl.className = "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border bg-emerald-600/85 border-emerald-400 text-white shadow-[0_0_10px_rgba(16,185,129,0.45)] flex-shrink-0 cursor-pointer hover:bg-emerald-500 transition-all";
+    cloudEl.title = `Liaison ${modeName} active${lastSyncStr} • Cliquer pour forcer l'actualisation`;
+  }
+  if (cloudDot) cloudDot.className = "hidden";
+  if (cloudText) cloudText.textContent = modeName;
+  if (cfgDiagCloud) {
+    cfgDiagCloud.className = "text-[11px] font-semibold text-emerald-400 flex items-center gap-1.5";
+    cfgDiagCloud.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]"></span>Connecté (${activeMode})`;
+  }
+}
+
+// Met à jour les deux indicateurs dissociés (Conteneur & Cloud Nobis)
+function updateConnectionIndicator(overrideStatus, message) {
+  updateContainerConnectionIndicator(overrideStatus, message);
+  updateCloudConnectionIndicator(overrideStatus, message);
+}
+
+// Vérifie l'état de santé du conteneur Nobis.Supervisor (endpoint /health)
+async function checkContainerHealth() {
+  const t0 = performance.now();
+  updateContainerConnectionIndicator("connecting", "Ping...");
+  try {
+    const res = await fetch("/health", { cache: "no-store" });
+    const latency = Math.round(performance.now() - t0);
+    if (res.ok) {
+      const data = await res.json();
+      connectionState.isServerConnected = true;
+      connectionState.containerLatencyMs = latency;
+      if (data.comm_status) {
+        connectionState.commStatus = data.comm_status;
+      }
+      updateContainerConnectionIndicator("connected");
+      updateCloudConnectionIndicator();
+      showToast(`🟢 Conteneur Nobis.Supervisor en ligne (${latency} ms • Mode : ${data.active_mode})`);
+    } else {
+      connectionState.isServerConnected = false;
+      updateContainerConnectionIndicator("disconnected", `HTTP ${res.status}`);
+      updateCloudConnectionIndicator();
+      showToast(`🔴 Erreur conteneur : HTTP ${res.status}`);
+    }
+  } catch (e) {
+    connectionState.isServerConnected = false;
+    updateContainerConnectionIndicator("disconnected", "Réseau KO");
+    updateCloudConnectionIndicator();
+    showToast("🔴 Conteneur Nobis.Supervisor injoignable (serveur arrêté ou réseau coupé)");
+  }
 }
 
 // Mise à jour dynamique du voyant d'état (#hdr-dot avec pictos de la phase en cours à gauche du titre), de la carte État du Poêle et du bandeau d'alerte critique
@@ -693,9 +854,9 @@ function updateStatusIndicatorAndAlerts() {
       if (kpiDot) kpiDot.className = "w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse shrink-0";
       stateEl.className = "text-sm sm:text-base font-bold text-amber-400 leading-tight truncate";
     } else if (st === 5) {
-      if (dot) dot.className = "w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-sm sm:text-base bg-emerald-600 text-white shadow-[0_0_12px_#10b981] flex-shrink-0 cursor-help border border-emerald-400";
-      if (kpiDot) kpiDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0";
-      stateEl.className = "text-sm sm:text-base font-bold text-emerald-400 leading-tight truncate";
+      if (dot) dot.className = "w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-sm sm:text-base bg-orange-600 text-white shadow-[0_0_12px_#ea580c] flex-shrink-0 cursor-pointer border border-orange-400";
+      if (kpiDot) kpiDot.className = "w-2.5 h-2.5 rounded-full bg-orange-500 animate-pulse shrink-0";
+      if (stateEl) stateEl.className = "text-sm sm:text-base font-bold text-orange-400 leading-tight truncate";
     } else if (st === 6) {
       if (dot) dot.className = "w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-sm sm:text-base bg-purple-600 text-white shadow-[0_0_12px_#a855f7] animate-pulse flex-shrink-0 cursor-help border border-purple-400";
       if (kpiDot) kpiDot.className = "w-2.5 h-2.5 rounded-full bg-purple-500 animate-pulse shrink-0";
@@ -720,6 +881,9 @@ function updateStatusIndicatorAndAlerts() {
 
 function applyDashboardState(data, updateSeries = true) {
   latestData = data.latest || latestData || {};
+  if (data.comm_status) {
+    connectionState.commStatus = data.comm_status;
+  }
   if (data.consumption_stats) {
     if (data.consumption_stats.conso_week_kg !== undefined) {
       latestData.conso_week_kg = data.consumption_stats.conso_week_kg;
@@ -816,6 +980,9 @@ function applyDashboardState(data, updateSeries = true) {
   document.getElementById("kpi-w-t").textContent = latestData.weather_temp_ext ?? "--";
   document.getElementById("kpi-w-h").textContent = latestData.weather_humidity ?? "--";
   document.getElementById("kpi-w-w").textContent = latestData.weather_wind_kmh ?? "--";
+  if (typeof renderWeatherModalData === "function") {
+    renderWeatherModalData();
+  }
 
   const fumesEl = document.getElementById("kpi-fumes");
   if (fumesEl) fumesEl.textContent = latestData.temp_fumes ?? "--";
@@ -901,6 +1068,19 @@ function applyDashboardState(data, updateSeries = true) {
   const hoursLeft = Math.round(kgRemaining / effectiveRate);
   document.getElementById("kpi-hop-autonomy").textContent = `~${hoursLeft}h (${kgRemaining.toFixed(1)}kg)`;
 
+  // Mise à jour de l'autonomie au centre du Header principal
+  const hdrHopperEl = document.getElementById("hdr-pellet-hopper");
+  const hdrRunwayEl = document.getElementById("hdr-pellet-runway");
+  if (hdrHopperEl) hdrHopperEl.textContent = `${Math.round(hopPct)}%`;
+  if (hdrRunwayEl) {
+    if (hoursLeft < 24) {
+      hdrRunwayEl.textContent = `~${hoursLeft}h (${kgRemaining.toFixed(1)}kg)`;
+    } else {
+      const d = (hoursLeft / 24.0).toFixed(1);
+      hdrRunwayEl.textContent = `~${d}j (${kgRemaining.toFixed(1)}kg)`;
+    }
+  }
+
   // Prédiction Runway Stock (DJU & Météo)
   const runwayDays = Number(latestData.runway_days_est ?? 15.0);
   const runwayDaysEl = document.getElementById("kpi-pellet-runway-days");
@@ -982,6 +1162,9 @@ function applyDashboardState(data, updateSeries = true) {
   }
 
   updateModeRing();
+  if (typeof renderTriArcCockpit === "function") {
+    renderTriArcCockpit();
+  }
 
   const chrBtn = document.getElementById("ctl-chrono-enable-btn");
   if (chrBtn) {
@@ -1173,6 +1356,9 @@ function initSSEStream() {
       const msg = JSON.parse(evt.data);
       connectionState.isServerConnected = true;
       connectionState.isSSEConnected = true;
+      if (msg.comm_status) {
+        connectionState.commStatus = msg.comm_status;
+      }
       updateConnectionIndicator();
       if (msg.event === "telemetry" || msg.type === "telemetry_update" || msg.type === "register_update") {
         refreshLatestOnly();
@@ -1182,7 +1368,7 @@ function initSSEStream() {
   sseSource.onerror = () => {
     connectionState.isSSEConnected = false;
     try { sseSource.close(); } catch (e) { }
-    updateConnectionIndicator("connecting", "Reconnexion...");
+    updateContainerConnectionIndicator("connecting", "Reconnexion SSE...");
     setTimeout(initSSEStream, 10000);
   };
 }
@@ -2275,9 +2461,9 @@ function promptResetPelletBatch() {
   openActionModal({
     title: "🔄 RAZ Changement de Marque de Granulés",
     message: "Avant de confirmer la remise à zéro :\n" +
-             "1. Aspirez le fond de la trémie (35 kg), le brasero et derrière le coupe-flamme (poêle froid et débranché).\n" +
-             "2. Sur la télécommande Nobis, remettez MENU ▸ MÉLANGE G/A sur PELLET = 00 et PRISE D'AIR = 00.\n\n" +
-             "Indiquez le nom ou la certification du nouveau lot de granulés (ENplus A1 / DINplus) :",
+      "1. Aspirez le fond de la trémie (35 kg), le brasero et derrière le coupe-flamme (poêle froid et débranché).\n" +
+      "2. Sur la télécommande Nobis, remettez MENU ▸ MÉLANGE G/A sur PELLET = 00 et PRISE D'AIR = 00.\n\n" +
+      "Indiquez le nom ou la certification du nouveau lot de granulés (ENplus A1 / DINplus) :",
     showInput: true,
     defaultValue: "Lot DINplus / ENplus A1 - " + new Date().toLocaleDateString("fr-FR"),
     confirmText: "Lancer RAZ (0% & 180 min)",
@@ -2330,7 +2516,7 @@ function resetStoveAlarm() {
       `,
       confirmText: "Compris, je referme la trappe",
       showCancel: false,
-      onConfirm: () => {}
+      onConfirm: () => { }
     });
     return;
   }
@@ -2353,7 +2539,7 @@ function resetStoveAlarm() {
       `,
       confirmText: "Compris, je ferme la porte",
       showCancel: false,
-      onConfirm: () => {}
+      onConfirm: () => { }
     });
     return;
   }
@@ -2398,7 +2584,7 @@ function resetStoveAlarm() {
       confirmText: "Compris (Effectuer sur télécommande)",
       cancelText: "Envoyer OFF bus (170)",
       showCancel: true,
-      onConfirm: () => {},
+      onConfirm: () => { },
       onCancel: async () => {
         await sendCommand("status_code", 170);
       }
@@ -2443,7 +2629,7 @@ function resetStoveAlarm() {
     confirmText: "Compris (Effectuer sur télécommande)",
     cancelText: "Envoyer OFF bus (170)",
     showCancel: true,
-    onConfirm: () => {},
+    onConfirm: () => { },
     onCancel: async () => {
       await sendCommand("status_code", 170);
     }
@@ -2485,6 +2671,9 @@ function formatSilenceCountdown(seconds) {
 
 function updateSilenceButtonState() {
   updateModeRing();
+  if (typeof renderTriArcCockpit === "function") {
+    renderTriArcCockpit();
+  }
 }
 
 // Met à jour l'anneau extérieur des 5 modes de fonctionnement (Silence, 🔥+💨 Auto, BOOST, 💨 Auto, ECO)
@@ -2495,8 +2684,8 @@ function updateModeRing() {
   const isEco = !isSilActive && (Number(getRegVal("standby_set", 0)) === 1);
   const pwfVal = Number(getRegVal("fun_pwf_set", latestData.fun_pwf_set ?? 0));
   const isPsAll = (Number(getRegVal("fan_front_speed", 0)) === 8 &&
-                   Number(getRegVal("duct_left_speed", 0)) === 8 &&
-                   Number(getRegVal("duct_right_speed", 0)) === 8);
+    Number(getRegVal("duct_left_speed", 0)) === 8 &&
+    Number(getRegVal("duct_right_speed", 0)) === 8);
 
   // 1. 🤫 Silence ! (Haut-Gauche)
   const silPath = document.getElementById("ctl-ring-silence-path");
@@ -2830,6 +3019,162 @@ function applyFlowerBannerTheme(phaseCode) {
     : `0 0 16px rgba(${meta.rgb}, 0.22), inset 0 1px 2px rgba(255,255,255,0.06)`;
 }
 
+function svgDjuDeltaDegreeIcon(cls = "w-4 h-4 text-orange-400 inline-block align-middle shrink-0") {
+  return `<svg viewBox="0 0 24 24" class="${cls}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="9.5,6.5 17,20 2,20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" /><circle cx="18.5" cy="6" r="2.2" fill="none" stroke="currentColor" stroke-width="2" /></svg>`;
+}
+
+function showDjuInfoModal(event) {
+  if (event) {
+    if (typeof event.stopPropagation === "function") event.stopPropagation();
+    if (typeof event.preventDefault === "function") event.preventDefault();
+  }
+  showActionModal({
+    title: `<span class="flex items-center gap-2">${svgDjuDeltaDegreeIcon("w-4 h-4 text-orange-400")}<span>Degré Jour Unifié (DJU) — Qu'est-ce que c'est ?</span></span>`,
+    htmlContent: `
+      <div class="space-y-3 text-xs text-gray-200">
+        <p class="leading-relaxed">
+          Le <b class="text-orange-400">DJU (Degré Jour Unifié)</b> est un indicateur thermique et météorologique standardisé qui mesure la <b>rigueur du froid extérieur</b> par rapport au besoin de chauffage du logement.
+        </p>
+
+        <div class="bg-gray-900/90 border border-orange-500/30 rounded-xl p-3 space-y-2">
+          <div class="text-orange-300 font-semibold text-xs flex items-center gap-1.5">
+            <span>🌡️</span><span>Méthode de calcul (Base 19°C)</span>
+          </div>
+          <p class="text-gray-300 text-[11px] leading-relaxed">
+            Il mesure l'écart entre la température extérieure moyenne d'une journée et la consigne de confort intérieur (fixée à <b>19 °C</b>) :
+          </p>
+          <div class="bg-black/50 rounded-lg p-2 text-center font-mono text-orange-200 text-xs border border-orange-900/40">
+            DJU = 19°C − Température extérieure moyenne
+          </div>
+          <ul class="text-[11px] text-gray-400 space-y-1 list-disc list-inside">
+            <li>Si T°ext = 7°C ➔ 19 − 7 = <b class="text-orange-300">12 DJU</b> nécessaires.</li>
+            <li>Si T°ext &ge; 19°C ➔ <b class="text-emerald-400">0 DJU</b> (aucun besoin de chauffage).</li>
+          </ul>
+        </div>
+
+        <div class="bg-gray-900/90 border border-sky-800/40 rounded-xl p-3 space-y-1.5">
+          <div class="text-sky-300 font-semibold text-xs flex items-center gap-1.5">
+            ${svgDjuDeltaDegreeIcon("w-3.5 h-3.5 text-sky-400")}<span>Son rôle dans Nobis.Supervisor</span>
+          </div>
+          <ul class="text-[11px] text-gray-300 space-y-2 leading-relaxed">
+            <li class="flex items-start gap-1.5">
+              <span class="text-orange-400 font-bold">•</span>
+              <span><b>Consommation prédictive :</b> Chaque DJU correspond à environ <b>~0,78 kg de granulés</b> brûlés pour maintenir la maison à température.</span>
+            </li>
+            <li class="flex items-start gap-1.5">
+              <span class="text-emerald-400 font-bold">•</span>
+              <span><b>Autonomie du stock (14 jours) :</b> En croisant les DJU prévus par Open-Meteo avec votre stock de sacs, Nobis anticipe le jour exact d'épuisement des pellets.</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    `,
+    confirmText: "Compris",
+    showCancel: false,
+    onConfirm: () => { }
+  });
+}
+
+function openWeatherModal() {
+  const modal = document.getElementById("weather-modal");
+  if (!modal) return;
+  renderWeatherModalData();
+  modal.classList.remove("hidden");
+}
+
+function closeWeatherModal() {
+  const modal = document.getElementById("weather-modal");
+  if (modal) modal.classList.add("hidden");
+}
+
+function renderWeatherModalData() {
+  const city = (currentSettings && currentSettings.weather_city) || "Bazoches-les-Gallerandes";
+  const lat = (currentSettings && currentSettings.weather_lat) || "48.1636";
+  const lon = (currentSettings && currentSettings.weather_lon) || "2.0436";
+
+  const wDetails = latestData.weather_details || {};
+  const tempExt = latestData.weather_temp_ext ?? wDetails.weather_temp_ext;
+  const humExt = latestData.weather_humidity ?? wDetails.weather_humidity;
+  const windExt = latestData.weather_wind_kmh ?? wDetails.weather_wind_kmh;
+
+  const tNum = tempExt !== undefined && tempExt !== null ? Number(tempExt) : null;
+  const djuNow = tNum !== null && !isNaN(tNum) ? Math.max(0, 19.0 - tNum) : null;
+  const estKg = djuNow !== null ? Math.max(3.5, djuNow * 0.78) : null;
+
+  const cityEl = document.getElementById("w-modal-city");
+  if (cityEl) cityEl.textContent = city;
+  const coordsEl = document.getElementById("w-modal-coords");
+  if (coordsEl) coordsEl.textContent = `(${lat}, ${lon})`;
+
+  const tempEl = document.getElementById("w-modal-temp");
+  if (tempEl) tempEl.textContent = tNum !== null && !isNaN(tNum) ? tNum.toFixed(1) : "--";
+  const humEl = document.getElementById("w-modal-hum");
+  if (humEl) humEl.textContent = humExt !== undefined && humExt !== null ? Number(humExt).toFixed(0) : "--";
+  const windEl = document.getElementById("w-modal-wind");
+  if (windEl) windEl.textContent = windExt !== undefined && windExt !== null ? Number(windExt).toFixed(1) : "--";
+
+  const djuEl = document.getElementById("w-modal-dju");
+  if (djuEl) djuEl.textContent = djuNow !== null ? djuNow.toFixed(1) : "--";
+  const estKgEl = document.getElementById("w-modal-est-kg");
+  if (estKgEl) estKgEl.textContent = estKg !== null ? estKg.toFixed(1) : "--";
+
+  const updatedEl = document.getElementById("w-modal-updated");
+  if (updatedEl) {
+    const ts = latestData.timestamp || "";
+    updatedEl.textContent = ts ? `(${ts})` : "";
+  }
+
+  const listEl = document.getElementById("w-modal-forecast-list");
+  if (!listEl) return;
+
+  const means = Array.isArray(wDetails.forecast_daily_means) ? wDetails.forecast_daily_means : [];
+  const mins = Array.isArray(wDetails.forecast_daily_mins) ? wDetails.forecast_daily_mins : [];
+  const maxs = Array.isArray(wDetails.forecast_daily_maxs) ? wDetails.forecast_daily_maxs : [];
+  const dates = Array.isArray(wDetails.forecast_daily_dates) ? wDetails.forecast_daily_dates : [];
+
+  if (means.length === 0) {
+    listEl.innerHTML = `<div class="py-2 text-gray-500 text-center text-[11px]">Aucune prévision journalière en cache.</div>`;
+    return;
+  }
+
+  const dayNames = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
+  const now = new Date();
+  listEl.innerHTML = means.map((mVal, idx) => {
+    const dObj = dates[idx] ? new Date(dates[idx] + "T12:00:00") : new Date(now.getTime() + idx * 86400000);
+    const dayLbl = idx === 0
+      ? "Aujourd'hui"
+      : `${dayNames[dObj.getDay()]} ${String(dObj.getDate()).padStart(2, "0")}/${String(dObj.getMonth() + 1).padStart(2, "0")}`;
+    const meanT = Number(mVal);
+    const minT = mins[idx] !== undefined ? Number(mins[idx]) : (meanT - 3.2);
+    const maxT = maxs[idx] !== undefined ? Number(maxs[idx]) : (meanT + 3.2);
+    const djuDay = Math.max(0, 19.0 - meanT);
+    const kgDay = Math.max(3.5, djuDay * 0.78);
+
+    return `
+      <div class="py-1.5 flex items-center justify-between gap-2 tabular-nums">
+        <span class="font-medium ${idx === 0 ? 'text-sky-300 font-bold' : 'text-gray-300'} w-24 truncate">${dayLbl}</span>
+        <span class="text-[11px] text-gray-400">
+          <b class="text-cyan-400">${minT.toFixed(1)}°</b> / <b class="text-white">${meanT.toFixed(1)}°</b> / <b class="text-amber-400">${maxT.toFixed(1)}°</b>
+        </span>
+        <span class="text-[11px] text-orange-300 font-semibold text-right">Δ° ${djuDay.toFixed(1)} (~${kgDay.toFixed(1)}kg)</span>
+      </div>
+    `;
+  }).join("");
+}
+
+function openLifecycleFlowerModal() {
+  const modal = document.getElementById("lifecycle-flower-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  updateDynamicPowerButton();
+  restoreFlowerPetalPreview();
+}
+
+function closeLifecycleFlowerModal() {
+  const modal = document.getElementById("lifecycle-flower-modal");
+  if (modal) modal.classList.add("hidden");
+}
+
 function previewFlowerPetal(phaseCode, isExplicitAction = false) {
   if (flowerPreviewResetTimer) {
     clearTimeout(flowerPreviewResetTimer);
@@ -2840,6 +3185,10 @@ function previewFlowerPetal(phaseCode, isExplicitAction = false) {
   const stateEl = document.getElementById("hdr-state");
   if (stateEl && meta) {
     stateEl.textContent = meta.label;
+  }
+  const descEl = document.getElementById("flower-status-desc");
+  if (descEl && meta) {
+    descEl.textContent = meta.desc || "";
   }
   applyFlowerBannerTheme(phaseCode);
   const st = Number(latestData.status_code ?? 0);
@@ -2884,15 +3233,20 @@ function restoreFlowerPetalPreview() {
   if (document.activeElement && typeof document.activeElement.blur === "function") {
     document.activeElement.blur();
   }
-  const stateEl = document.getElementById("hdr-state");
-  if (stateEl) {
-    stateEl.textContent = latestData.status_label || "--";
-  }
   const st = Number(latestData.status_code ?? 0);
   const alarm = Number(latestData.alarm_code ?? 0);
   const blackout = Number(latestData.blackout_popup ?? 0);
   const isAlarm = (st === 10 || st === 11 || alarm > 0 || blackout > 0);
   const bannerThemeCode = isAlarm ? (st === 11 ? 11 : 10) : st;
+  const curMeta = getPhaseMeta(bannerThemeCode);
+  const stateEl = document.getElementById("hdr-state");
+  if (stateEl) {
+    stateEl.textContent = latestData.status_label || (curMeta ? curMeta.label : "--");
+  }
+  const descEl = document.getElementById("flower-status-desc");
+  if (descEl) {
+    descEl.textContent = curMeta ? (curMeta.desc || "") : "";
+  }
   applyFlowerBannerTheme(defaultFlowerFooterState.code ?? bannerThemeCode);
   renderLifecycleFlower(st, isAlarm);
 }
@@ -3011,6 +3365,9 @@ function updateDynamicPowerButton() {
 
   renderLifecycleFlower(st, isAlarm);
   updateModeRing();
+  if (typeof renderTriArcCockpit === "function") {
+    renderTriArcCockpit();
+  }
 
   const baseBtnClasses = "absolute w-[54px] h-[54px] sm:w-[62px] sm:h-[62px] rounded-full font-bold text-xs shadow-2xl flex flex-col items-center justify-center gap-0.5 transition-all duration-200 cursor-pointer hover:scale-105 active:scale-95 text-white border-2 z-10 ";
 
@@ -3216,15 +3573,22 @@ function exportLogsCSV() {
 async function pollNow() {
   const btn = document.getElementById("btn-poll-now");
   if (btn) btn.textContent = "⏳ Lecture...";
-  updateConnectionIndicator("connecting", "Actualisation...");
+  updateCloudConnectionIndicator("connecting", "Sync Cloud...");
   try {
-    await fetch("/api/poll-now", { method: "POST" });
+    const res = await fetch("/api/poll-now", { method: "POST" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.comm_status) {
+      connectionState.commStatus = data.comm_status;
+    }
     await refreshLatestOnly();
-    showToast("Données du poêle actualisées en direct !");
+    showToast("☁️ Données Cloud Nobis actualisées en direct !");
   } catch (e) {
-    updateConnectionIndicator("disconnected", "Échec actualisation");
+    updateCloudConnectionIndicator("disconnected", "Échec Cloud");
+    showToast("⚠️ Échec d'interrogation du Cloud Nobis");
   } finally {
     if (btn) btn.textContent = "⟳ Actualiser";
+    updateCloudConnectionIndicator();
   }
 }
 
@@ -3328,52 +3692,6 @@ window.addEventListener("unhandledrejection", (e) => {
   reportClientError("PROMISE", e.reason?.message || String(e.reason));
 });
 
-function scrollToMobileCard(index) {
-  const container = document.getElementById("tab-control-cards");
-  if (!container) return;
-  const cards = container.querySelectorAll(":scope > .card");
-  if (cards && cards[index]) {
-    cards[index].scrollIntoView({ behavior: "smooth", block: "start" });
-    updateMobileCardIndicator(index);
-  }
-}
-
-function updateMobileCardIndicator(index) {
-  [0, 1, 2].forEach(i => {
-    const btn = document.getElementById("mob-dot-" + i);
-    if (btn) {
-      if (i === index) {
-        btn.className = "px-2.5 py-0.5 rounded-full bg-orange-600 text-white font-bold transition-all shadow-sm";
-      } else {
-        btn.className = "px-2.5 py-0.5 rounded-full text-gray-400 hover:text-white transition-all";
-      }
-    }
-  });
-}
-
-function initMobileCardObserver() {
-  const container = document.getElementById("tab-control-cards");
-  if (!container) return;
-  const cards = container.querySelectorAll(":scope > .card");
-  if (!cards.length) return;
-
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
-        const idx = Array.from(cards).indexOf(entry.target);
-        if (idx !== -1) {
-          updateMobileCardIndicator(idx);
-        }
-      }
-    });
-  }, {
-    root: container,
-    threshold: 0.5
-  });
-
-  cards.forEach(c => observer.observe(c));
-}
-
 async function loadLogs(sev) {
   currentLogSeverity = sev || "ALL";
 
@@ -3465,7 +3783,9 @@ async function refreshMatterStatus(showFeedback = false) {
 }
 
 function renderMatterStatus(data) {
+  const matterBtn = document.getElementById("hdr-matter-btn");
   const dot = document.getElementById("hdr-matter-dot");
+  const cfgDot = document.getElementById("cfg-matter-status-dot");
   const badge = document.getElementById("matter-status-badge");
   const qrBox = document.getElementById("matter-qr-box");
   const codeEl = document.getElementById("matter-manual-code");
@@ -3478,15 +3798,31 @@ function renderMatterStatus(data) {
   const isCommissioned = Boolean(data && data.commissioned);
   const fabricsCount = Number(data?.fabricsCount || 0);
 
-  if (dot) {
+  if (cfgDot) {
     if (!isRunning) {
-      dot.className = "w-2 h-2 rounded-full bg-rose-400";
+      cfgDot.className = "w-2.5 h-2.5 rounded-full bg-rose-500 shadow-[0_0_6px_#f43f5e] inline-block";
+      cfgDot.title = "Pont Matter hors ligne";
     } else if (isCommissioned) {
-      dot.className = "w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]";
+      cfgDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399] inline-block";
+      cfgDot.title = `Pont Matter actif et appairé (${fabricsCount} hub${fabricsCount > 1 ? "s" : ""})`;
     } else {
-      dot.className = "w-2 h-2 rounded-full bg-cyan-400 animate-pulse";
+      cfgDot.className = "w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_8px_#38bdf8] inline-block";
+      cfgDot.title = "Pont Matter prêt à appairer";
     }
   }
+
+  if (matterBtn) {
+    if (!isRunning) {
+      matterBtn.className = "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border bg-rose-600/85 border-rose-400 text-white shadow-[0_0_10px_rgba(244,63,94,0.45)] flex-shrink-0 cursor-pointer hover:bg-rose-500 transition-all";
+      matterBtn.title = "Pont Matter hors ligne • Cliquer pour configurer";
+    } else {
+      matterBtn.className = "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border bg-emerald-600/85 border-emerald-400 text-white shadow-[0_0_10px_rgba(16,185,129,0.45)] flex-shrink-0 cursor-pointer hover:bg-emerald-500 transition-all";
+      matterBtn.title = isCommissioned
+        ? `Pont Matter actif et appairé (${fabricsCount} hub${fabricsCount > 1 ? "s" : ""}) • Cliquer pour afficher`
+        : "Pont Matter en ligne (prêt à appairer) • Cliquer pour afficher le QR Code";
+    }
+  }
+  if (dot) dot.className = "hidden";
 
   if (badge) {
     if (!isRunning) {
@@ -3578,14 +3914,1257 @@ function confirmResetMatterPairing() {
   });
 }
 
+// =============================================================================
+// COCKPIT TRI-ARC V10 (ONGLET PILOTAGE : SX ⇄ POÊLE ⇄ DX, JAUGES & BULLES)
+// =============================================================================
+let triArcZone = "AMB"; // "SX" | "AMB" | "DX"
+let triArcExpandedMode = null; // null | "silence" | "auto" | "boost"
+let triArcDragging = null; // { zone, arcType, value }
+let triArcOptimisticValues = {}; // { key: { val, expires } }
+let triArcPendingChanges = {}; // { reg_key: { reg_key, label, oldVal, newVal, fmtFn } }
+let triArcBatchTimer = null;
+
+const TRIARC_REG_META = {
+  temp_amb_setpoint: { label: "🌡️ Consigne T° Poêle ( Principal )", fmt: fmtTriArcTempSp },
+  duct_left_setpoint: { label: "🌡️ Consigne T° Soufflerie SX", fmt: fmtTriArcTempSp },
+  duct_right_setpoint: { label: "🌡️ Consigne T° Soufflerie DX", fmt: fmtTriArcTempSp },
+  fan_front_speed: { label: "🌀 Ventilation Poêle ( Frontale )", fmt: fmtTriArcFan },
+  duct_left_speed: { label: "🌀 Ventilation Soufflerie SX", fmt: fmtTriArcFan },
+  duct_right_speed: { label: "🌀 Ventilation Soufflerie DX", fmt: fmtTriArcFan },
+  power_level: { label: "🔥 Puissance de combustion", fmt: (v) => `P${v}` },
+  fun_pwf_set: { label: "🚀 Mode Boost (Puissance)", fmt: (v) => (Number(v) === 1 ? "🚀 ON" : (Number(v) === 2 ? "⏱️ PROG" : "OFF")) },
+  fun_auto_set: { label: "🔥+🌀 Mode Automatique", fmt: (v) => (Number(v) === 1 ? "ACTIF" : "OFF") },
+  standby_set: { label: "💤 Mode Éco (Stand-by)", fmt: (v) => (Number(v) === 1 ? "ACTIF" : "OFF") }
+};
+
+function setTriArcOptimistic(key, val, durationMs = 30000) {
+  triArcOptimisticValues[key] = { val: Number(val), expires: Date.now() + durationMs };
+}
+
+function clearTriArcOptimistic(keys) {
+  (keys || Object.keys(triArcOptimisticValues)).forEach(k => {
+    delete triArcOptimisticValues[k];
+  });
+}
+
+function getTriArcLiveOrOpt(key, fallbackVal) {
+  const opt = triArcOptimisticValues[key];
+  if (opt && Date.now() < opt.expires) {
+    return opt.val;
+  }
+  return Number(fallbackVal);
+}
+
+function getTriArcRawBaseline(reg_key) {
+  if (reg_key === "fun_pwf_set") return Number(getRegVal("fun_pwf_set", latestData.fun_pwf_set ?? 0));
+  if (reg_key === "fun_auto_set") return Number(getRegVal("fun_auto_set", latestData.fun_auto_set ?? 0));
+  if (reg_key === "standby_set") return Number(getRegVal("standby_set", latestData.standby_set ?? 0));
+  if (reg_key === "power_level") return Number(getRegVal("power_level", latestData.power_level ?? 4));
+  return Number(getRegVal(reg_key, 0));
+}
+
+function queueTriArcChanges(changesList) {
+  if (!Array.isArray(changesList) || changesList.length === 0) return;
+
+  changesList.forEach(({ reg_key, value }) => {
+    const newVal = Number(value);
+    const existing = triArcPendingChanges[reg_key];
+    const oldVal = existing ? existing.oldVal : getTriArcRawBaseline(reg_key);
+    const meta = TRIARC_REG_META[reg_key] || { label: reg_key, fmt: (v) => String(v) };
+
+    setTriArcOptimistic(reg_key, newVal, 30000);
+
+    if (newVal === oldVal) {
+      delete triArcPendingChanges[reg_key];
+      delete triArcOptimisticValues[reg_key];
+    } else {
+      triArcPendingChanges[reg_key] = {
+        reg_key,
+        label: meta.label,
+        oldVal,
+        newVal,
+        fmt: meta.fmt
+      };
+    }
+  });
+
+  renderTriArcCockpit();
+
+  if (triArcBatchTimer) {
+    clearTimeout(triArcBatchTimer);
+    triArcBatchTimer = null;
+  }
+
+  if (Object.keys(triArcPendingChanges).length > 0) {
+    triArcBatchTimer = setTimeout(() => {
+      triArcBatchTimer = null;
+      promptTriArcBatchValidation();
+    }, 1000);
+  }
+}
+
+function promptTriArcBatchValidation() {
+  if (triArcDragging) {
+    triArcBatchTimer = setTimeout(promptTriArcBatchValidation, 600);
+    return;
+  }
+  const items = Object.values(triArcPendingChanges);
+  if (items.length === 0) return;
+
+  const rowsHtml = items.map(item => `
+    <div class="flex items-center justify-between gap-2 bg-slate-950/90 border border-slate-800 rounded-xl px-3 py-2 text-xs">
+      <span class="font-semibold text-slate-200">${escapeHtml(item.label)}</span>
+      <span class="font-mono font-bold whitespace-nowrap">
+        <span class="text-slate-400">${escapeHtml(item.fmt(item.oldVal))}</span>
+        <span class="text-orange-400 mx-1">➔</span>
+        <span class="text-emerald-400">${escapeHtml(item.fmt(item.newVal))}</span>
+      </span>
+    </div>
+  `).join("");
+
+  const htmlContent = `
+    <div class="space-y-2.5">
+      <p class="text-xs text-slate-300">Confirmez-vous l'application ${items.length > 1 ? `de ces <strong>${items.length} modifications</strong>` : "de cette modification"} sur le poêle ?</p>
+      <div class="space-y-1.5 max-h-60 overflow-y-auto pr-0.5">${rowsHtml}</div>
+    </div>
+  `;
+
+  openActionModal({
+    title: `✅ Validation (${items.length} réglage${items.length > 1 ? "s" : ""})`,
+    htmlContent,
+    confirmText: "Valider et Appliquer",
+    cancelText: "Annuler",
+    onConfirm: async () => {
+      const toSend = Object.values(triArcPendingChanges).map(it => ({
+        reg_key: it.reg_key,
+        value: Number(it.newVal)
+      }));
+      triArcPendingChanges = {};
+      if (toSend.length === 0) return;
+
+      toSend.forEach(c => setTriArcOptimistic(c.reg_key, c.value, 6000));
+
+      if (silenceModeState && silenceModeState.active && toSend.some(c => SILENCE_OVERRIDABLE_KEYS[c.reg_key])) {
+        await deactivateSilenceMode(toSend);
+        return;
+      }
+
+      if (toSend.length === 1) {
+        await sendCommand(toSend[0].reg_key, toSend[0].value);
+      } else {
+        showToast(`Application groupée de ${toSend.length} réglages...`);
+        try {
+          const res = await fetch("/api/command-batch", {
+            method: "POST",
+            headers: getInstallerHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify({ commands: toSend })
+          });
+          if (res.ok) {
+            showToast(`${toSend.length} réglages appliqués avec succès !`);
+          } else {
+            const err = await res.json().catch(() => ({}));
+            showToast("Erreur batch : " + (err.detail || res.statusText), true);
+          }
+        } catch (e) {
+          showToast("Erreur réseau : " + e.message, true);
+        }
+        await refreshLatestOnly();
+      }
+    },
+    onCancel: () => {
+      const keys = Object.keys(triArcPendingChanges);
+      triArcPendingChanges = {};
+      clearTriArcOptimistic(keys);
+      renderTriArcCockpit();
+      showToast("Modifications annulées.");
+    }
+  });
+}
+
+function nobisStovePaths() {
+  return `
+    <path fill-rule="evenodd" d="M 43 4 H 57 Q 59 4 59 6 V 19 Q 64 19 66 22 L 67.5 27 Q 69 31 73 31 Q 81 31 84 35 Q 86 39 86 48 V 104 V 112 Q 86 114 83 114 H 74 Q 71.5 114 70 111 L 66 105 H 34 L 30 111 Q 28.5 114 26 114 H 17 Q 14 114 14 112 V 104 V 48 Q 14 39 16 35 Q 19 31 27 31 Q 31 31 32.5 27 L 34 22 Q 36 19 41 19 V 6 Q 41 4 43 4 Z M 29 42 H 71 Q 73 42 73 44 V 78 Q 73 80 71 80 H 29 Q 27 80 27 78 V 44 Q 27 42 29 42 Z M 25 88 H 75 Q 77 88 77 90.5 Q 77 93 75 93 H 25 Q 23 93 23 90.5 Q 23 88 25 88 Z M 33 80 C 32 72 34 65 37 60 C 40 66 43 68 45 67 C 46 58 48 45 52 44 C 55 52 56 61 58 63 C 60 59 63 54 65 56 C 68 62 69 71 67 80 Z" />
+  `;
+}
+
+function svgNobisStoveIcon(cls = "w-5 h-5 inline-block", color = "currentColor") {
+  return `<svg viewBox="10 0 80 120" class="${cls}" fill="${color}">${nobisStovePaths()}</svg>`;
+}
+
+function formatPhaseTwoLines(phaseLabel, meta) {
+  if (!phaseLabel) return { line1: "ÉTAT", line2: "Inconnu" };
+  const raw = String(phaseLabel).trim();
+  const parenMatch = raw.match(/^([^(]+)\s*\(([^)]+)\)$/);
+  if (parenMatch) {
+    return {
+      line1: parenMatch[1].trim(),
+      line2: parenMatch[2].trim()
+    };
+  }
+  const parts = raw.split(/\s+/);
+  if (parts.length >= 2) {
+    return {
+      line1: parts[0],
+      line2: parts.slice(1).join(" ")
+    };
+  }
+  return {
+    line1: raw,
+    line2: meta ? (meta.short || "") : ""
+  };
+}
+
+function svgPropellerFanIcon(cls = "w-4 h-4 inline-block", color = "currentColor") {
+  return `<svg viewBox="0 0 24 24" class="${cls}" fill="${color}">
+    <circle cx="12" cy="12" r="2.3"/>
+    <path d="M12 9.2c-1.6-2.5-1.2-6.2 1.8-6.7 2.4-.4 4.1 1.8 3.1 4.3-.7 1.7-2.4 2.3-4.9 2.4z"/>
+    <path d="M14.4 13.4c2.9.2 5.9 2.4 4.9 5.2-.9 2.3-3.6 2.7-5.3.6-1.1-1.4-.8-3.2.4-5.8z"/>
+    <path d="M9.6 13.4c-1.3 2.6-2.6 4.5-4.7 3.8-2.3-.7-2.6-3.5-.6-5.2 1.5-1.3 3.4-1 5.3 1.4z"/>
+  </svg>`;
+}
+
+function fmtTriArcTempSp(val) {
+  const v = Math.round(Number(val));
+  if (v <= 7) return "❄️";
+  if (v >= 41) return "MAX";
+  return `${v}°`;
+}
+
+function fmtTriArcFan(val) {
+  const v = Math.round(Number(val));
+  if (v <= 0) return "OFF";
+  if (v >= 8) return "AUTO";
+  return String(v);
+}
+
+// Échelle non-linéaire dilatée autour de 19° (avec 19° à l'apogée 270°)
+function triArcTempToAngle(t) {
+  const num = Number(t);
+  const val = isNaN(num) ? 19 : num;
+  const v = Math.max(7, Math.min(41, val));
+  if (v <= 17) {
+    return 135 + ((v - 7) / 10) * 75; // 7°->135°, 17°->210°
+  } else if (v <= 19) {
+    return 210 + ((v - 17) / 2) * 60; // 17°->210°, 19°->270° (apogée)
+  } else if (v <= 23) {
+    return 270 + ((v - 19) / 4) * 70; // 19°->270°, 23°->340°
+  } else {
+    return 340 + ((v - 23) / 18) * 65; // 23°->340°, 41°->405°
+  }
+}
+
+function triArcAngleToTemp(angleDeg) {
+  const a = Math.max(135, Math.min(405, Number(angleDeg)));
+  if (a <= 210) {
+    return Math.round(7 + ((a - 135) / 75) * 10);
+  } else if (a <= 270) {
+    return Math.round(17 + ((a - 210) / 60) * 2);
+  } else if (a <= 340) {
+    return Math.round(19 + ((a - 270) / 70) * 4);
+  } else {
+    const raw = 23 + ((a - 340) / 65) * 18;
+    return raw >= 40.5 ? 41 : Math.round(raw);
+  }
+}
+
+function triArcPtOnCircle(cx, cy, r, deg) {
+  const rad = (deg * Math.PI) / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+
+function triArcPath(cx, cy, r, startDeg, endDeg, ccw = false) {
+  if (Math.abs(endDeg - startDeg) < 0.3) return "";
+  const s = triArcPtOnCircle(cx, cy, r, startDeg);
+  const e = triArcPtOnCircle(cx, cy, r, endDeg);
+  const diff = ccw ? (startDeg - endDeg) : (endDeg - startDeg);
+  const largeArc = Math.abs(diff) > 180 ? 1 : 0;
+  const sweep = ccw ? 0 : 1;
+  return `M ${s.x.toFixed(1)} ${s.y.toFixed(1)} A ${r} ${r} 0 ${largeArc} ${sweep} ${e.x.toFixed(1)} ${e.y.toFixed(1)}`;
+}
+
+function goToTriArcZone(z) {
+  triArcZone = z;
+  triArcExpandedMode = null;
+  renderTriArcCockpit();
+}
+
+function closeTriArcOptionBubble() {
+  triArcExpandedMode = null;
+  renderTriArcCockpit();
+}
+
+function toggleTriArcOptionBubble(modeName) {
+  triArcExpandedMode = (triArcExpandedMode === modeName) ? null : modeName;
+  renderTriArcCockpit();
+}
+
+function getTriArcTelemetryState() {
+  const st = Number(latestData.status_code ?? 0);
+  const alarm = Number(latestData.alarm_code ?? 0);
+  const blackout = Number(latestData.blackout_popup ?? 0);
+  const isAlarm = (st === 10 || st === 11 || alarm > 0 || blackout > 0);
+  const meta = typeof getPhaseMeta === "function" ? getPhaseMeta(isAlarm ? (st === 11 ? 11 : 10) : st) : null;
+  const phaseLabelRaw = latestData.status_label || (meta ? meta.label : (st === 0 ? "Éteint" : `Phase #${st}`));
+  const phaseIcon = meta ? meta.icon : (st === 0 ? "⚫" : "🔥");
+  const phaseColor = meta ? meta.hex : (st === 5 ? "#ea580c" : "#94a3b8");
+
+  const realAmb = Number(latestData.temp_ambient ?? 20.0).toFixed(1);
+  const realSx = Number(latestData.duct_left_temp ?? 19.5).toFixed(1);
+  const realDx = Number(latestData.duct_right_temp ?? 19.0).toFixed(1);
+
+  let spAmb = getTriArcLiveOrOpt("temp_amb_setpoint", getRegVal("temp_amb_setpoint", 20));
+  let spSx = getTriArcLiveOrOpt("duct_left_setpoint", getRegVal("duct_left_setpoint", 20));
+  let spDx = getTriArcLiveOrOpt("duct_right_setpoint", getRegVal("duct_right_setpoint", 20));
+
+  let fanAmb = getTriArcLiveOrOpt("fan_front_speed", getRegVal("fan_front_speed", 3));
+  let fanSx = getTriArcLiveOrOpt("duct_left_speed", getRegVal("duct_left_speed", 0));
+  let fanDx = getTriArcLiveOrOpt("duct_right_speed", getRegVal("duct_right_speed", 0));
+
+  const realFanAmb = getActualFanButtonVal(latestData.vent_front_actual, fanAmb);
+  const realFanSx = getActualFanButtonVal(latestData.duct_left_actual, fanSx);
+  const realFanDx = getActualFanButtonVal(latestData.duct_right_actual, fanDx);
+
+  const pwfVal = getTriArcLiveOrOpt("fun_pwf_set", getRegVal("fun_pwf_set", latestData.fun_pwf_set ?? 0));
+  const pwrSetVal = getTriArcLiveOrOpt("power_level", getRegVal("power_level", 4));
+  // L'activation du mode Boost (POWERFUL) ne passe pas la consigne de puissance à 8 (celle-ci reste celle choisie par l'utilisateur)
+  let pwrSp = pwrSetVal;
+  const realPwr = Number(latestData.power_actual ?? pwrSp);
+
+  // Surcharge en direct pendant le glisser tactile
+  if (triArcDragging) {
+    if (triArcDragging.arcType === "temp") {
+      if (triArcDragging.zone === "AMB") spAmb = triArcDragging.value;
+      else if (triArcDragging.zone === "SX") spSx = triArcDragging.value;
+      else if (triArcDragging.zone === "DX") spDx = triArcDragging.value;
+    } else if (triArcDragging.arcType === "fan") {
+      if (triArcDragging.zone === "AMB") fanAmb = triArcDragging.value;
+      else if (triArcDragging.zone === "SX") fanSx = triArcDragging.value;
+      else if (triArcDragging.zone === "DX") fanDx = triArcDragging.value;
+    } else if (triArcDragging.arcType === "pwr") {
+      pwrSp = triArcDragging.value;
+    }
+  }
+
+  const autoVal = getTriArcLiveOrOpt("fun_auto_set", getRegVal("fun_auto_set", latestData.fun_auto_set ?? 0));
+  const isPsAll = (fanAmb === 8 && fanSx === 8 && fanDx === 8);
+  const autoIdx = autoVal === 1 ? 2 : (isPsAll ? 1 : 0);
+
+  const isSilActive = Boolean(silenceModeState && silenceModeState.active);
+  const remSec = silenceModeState ? Math.max(0, Math.round(silenceModeState.end_epoch - Date.now() / 1000)) : 0;
+  const isEco = !isSilActive && (getTriArcLiveOrOpt("standby_set", getRegVal("standby_set", 0)) === 1);
+
+  return {
+    st, isAlarm, phaseIcon, phaseLabel: phaseLabelRaw, phaseColor,
+    realAmb, spAmb, fanAmb, realFanAmb,
+    realSx, spSx, fanSx, realFanSx,
+    realDx, spDx, fanDx, realFanDx,
+    pwrSp, realPwr, pwfVal, autoIdx, isSilActive, remSec, isEco
+  };
+}
+
+function renderTriArcTopHeader(zone, T) {
+  // Chevron SVG Gauche (pointe à gauche ◄) avec contours doux et arrondis
+  const svgChevronLeftBg = (borderColor, fillColor = "#0b1222") => `
+    <svg class="absolute inset-0 w-full h-full pointer-events-none" preserveAspectRatio="none" viewBox="0 0 100 50">
+      <path d="M 22 2 L 88 2 Q 97 2 97 10 L 97 40 Q 97 48 88 48 L 22 48 Q 14 48 9.5 41.5 L 3.5 28.5 Q 1.5 25 3.5 21.5 L 9.5 8.5 Q 14 2 22 2 Z" fill="${fillColor}" fill-opacity="0.94" stroke="${borderColor}" stroke-width="2" stroke-linejoin="round" />
+    </svg>
+  `;
+
+  // Chevron SVG Droite (pointe à droite ►) avec contours doux et arrondis
+  const svgChevronRightBg = (borderColor, fillColor = "#0b1222") => `
+    <svg class="absolute inset-0 w-full h-full pointer-events-none" preserveAspectRatio="none" viewBox="0 0 100 50">
+      <path d="M 12 2 Q 3 2 3 10 L 3 40 Q 3 48 12 48 L 78 48 Q 86 48 90.5 41.5 L 96.5 28.5 Q 98.5 25 96.5 21.5 L 90.5 8.5 Q 86 2 78 2 Z" fill="${fillColor}" fill-opacity="0.94" stroke="${borderColor}" stroke-width="2" stroke-linejoin="round" />
+    </svg>
+  `;
+
+  // Écran AMB : Bouton SX (Chevron gauche ◄, hauteur fixe h-14)
+  const chevronSX = `
+    <button type="button" onclick="goToTriArcZone('SX')"
+      class="flex-1 h-14 relative py-1 pl-3.5 pr-2 flex items-center justify-between text-left transition hover:brightness-125 shadow cursor-pointer group">
+      ${svgChevronLeftBg("#06b6d4")}
+      <div class="relative z-10 flex items-center font-black text-cyan-300 text-xs my-auto pl-1">
+        <span>SX</span>
+      </div>
+      <div class="relative z-10 flex flex-col items-end gap-0.5 tabular-nums">
+        <span class="flex items-center gap-1 text-cyan-300 font-black text-[11px]">
+          ${svgPropellerFanIcon("w-3.5 h-3.5", "#22d3ee")}
+          <span>${fmtTriArcFan(T.fanSx)}</span>
+        </span>
+        <span class="text-[11px] font-black text-white pt-0.5 border-t border-slate-700/80">
+          ${T.realSx}° <span class="text-cyan-400">→</span> <span class="text-cyan-200">${fmtTriArcTempSp(T.spSx)}</span>
+        </span>
+      </div>
+    </button>
+  `;
+
+  // Écran AMB : Bouton DX (Chevron droite ►, hauteur fixe h-14)
+  const chevronDX = `
+    <button type="button" onclick="goToTriArcZone('DX')"
+      class="flex-1 h-14 relative py-1 pl-2 pr-3.5 flex items-center justify-between text-right transition hover:brightness-125 shadow cursor-pointer group">
+      ${svgChevronRightBg("#0284c7")}
+      <div class="relative z-10 flex flex-col items-start gap-0.5 tabular-nums">
+        <span class="flex items-center gap-1 text-sky-300 font-black text-[11px]">
+          ${svgPropellerFanIcon("w-3.5 h-3.5", "#38bdf8")}
+          <span>${fmtTriArcFan(T.fanDx)}</span>
+        </span>
+        <span class="text-[11px] font-black text-white pt-0.5 border-t border-slate-700/80">
+          ${T.realDx}° <span class="text-sky-400">→</span> <span class="text-sky-200">${fmtTriArcTempSp(T.spDx)}</span>
+        </span>
+      </div>
+      <div class="relative z-10 flex items-center font-black text-sky-300 text-xs my-auto pr-1">
+        <span>DX</span>
+      </div>
+    </button>
+  `;
+
+  // Écran SX : Le bouton SX devient un rectangle élargi (hauteur fixe h-14)
+  const expandedRectSX = `
+    <div class="flex-1 min-w-0 h-14 py-1.5 px-3 sm:px-3.5 rounded-2xl bg-cyan-950/70 border-2 border-cyan-400 flex items-center justify-between text-left transition shadow box-border">
+      <div class="flex items-center gap-1 font-bold text-cyan-300 text-xs my-auto truncate">
+        <span>Canal. SX</span>
+      </div>
+      <div class="flex flex-col items-end gap-0.5 tabular-nums shrink-0">
+        <span class="flex items-center gap-1 text-cyan-300 font-black text-xs">
+          ${svgPropellerFanIcon("w-3.5 h-3.5", "#22d3ee")}
+          <span>${fmtTriArcFan(T.fanSx)}</span>
+        </span>
+        <span class="text-xs font-black text-white whitespace-nowrap pt-0.5 border-t border-slate-700/80">
+          ${T.realSx}° <span class="text-cyan-400">→</span> <span class="text-cyan-200">${fmtTriArcTempSp(T.spSx)}</span>
+        </span>
+      </div>
+    </div>
+  `;
+
+  // Écran DX : Le bouton DX devient un rectangle élargi (hauteur fixe h-14)
+  const expandedRectDX = `
+    <div class="flex-1 min-w-0 h-14 py-1.5 px-3 sm:px-3.5 rounded-2xl bg-sky-950/70 border-2 border-sky-400 flex items-center justify-between text-right transition shadow box-border">
+      <div class="flex flex-col items-start gap-0.5 tabular-nums shrink-0">
+        <span class="flex items-center gap-1 text-sky-300 font-black text-xs">
+          ${svgPropellerFanIcon("w-3.5 h-3.5", "#38bdf8")}
+          <span>${fmtTriArcFan(T.fanDx)}</span>
+        </span>
+        <span class="text-xs font-black text-white whitespace-nowrap pt-0.5 border-t border-slate-700/80">
+          ${T.realDx}° <span class="text-sky-400">→</span> <span class="text-sky-200">${fmtTriArcTempSp(T.spDx)}</span>
+        </span>
+      </div>
+      <div class="flex items-center gap-1 font-bold text-sky-300 text-xs my-auto truncate">
+        <span>Canal. DX</span>
+      </div>
+    </div>
+  `;
+
+  // Bouton retour Poêle (Colorisé selon l'état du poêle, élargi pour garder T° et consigne sur une seule ligne)
+  const chevronStoveReturn = (direction) => {
+    const isReturnFromSx = (direction === "right");
+    return `
+      <button type="button" onclick="goToTriArcZone('AMB')"
+        class="flex-1 min-w-0 h-14 relative py-1 ${isReturnFromSx ? 'pl-2.5 pr-4' : 'pl-4 pr-2.5'} flex items-center justify-between transition hover:brightness-125 shadow cursor-pointer group">
+        ${isReturnFromSx ? svgChevronRightBg(T.phaseColor, "#0b1222") : svgChevronLeftBg(T.phaseColor, "#0b1222")}
+        ${isReturnFromSx ? `
+          <div class="relative z-10 flex flex-col items-start gap-0.5 tabular-nums min-w-0 pr-1">
+            <span class="flex items-center gap-1 font-black text-[11px]" style="color:${T.phaseColor}">
+              ${svgPropellerFanIcon("w-3 h-3", T.phaseColor)}
+              <span>${fmtTriArcFan(T.fanAmb)}</span>
+            </span>
+            <span class="text-xs sm:text-[13px] font-black text-white whitespace-nowrap pt-0.5 border-t border-slate-700/80">
+              ${T.realAmb}° <span style="color:${T.phaseColor}">→</span> <span style="color:${T.phaseColor}">${fmtTriArcTempSp(T.spAmb)}</span>
+            </span>
+          </div>
+          <div class="relative z-10 flex items-center justify-center my-auto pr-1 shrink-0" title="Retour Poêle">
+            ${svgNobisStoveIcon("w-6 h-6", T.phaseColor)}
+          </div>
+        ` : `
+          <div class="relative z-10 flex items-center justify-center my-auto pl-1 shrink-0" title="Retour Poêle">
+            ${svgNobisStoveIcon("w-6 h-6", T.phaseColor)}
+          </div>
+          <div class="relative z-10 flex flex-col items-end gap-0.5 tabular-nums min-w-0 pl-1">
+            <span class="flex items-center gap-1 font-black text-[11px]" style="color:${T.phaseColor}">
+              ${svgPropellerFanIcon("w-3 h-3", T.phaseColor)}
+              <span>${fmtTriArcFan(T.fanAmb)}</span>
+            </span>
+            <span class="text-xs sm:text-[13px] font-black text-white whitespace-nowrap pt-0.5 border-t border-slate-700/80">
+              ${T.realAmb}° <span style="color:${T.phaseColor}">→</span> <span style="color:${T.phaseColor}">${fmtTriArcTempSp(T.spAmb)}</span>
+            </span>
+          </div>
+        `}
+      </button>
+    `;
+  };
+
+  let pwrBtnCls = "bg-orange-600/90 border-orange-400 text-white shadow-[0_0_14px_rgba(234,88,12,0.5)]";
+  if (T.isAlarm) {
+    pwrBtnCls = "bg-rose-700 border-rose-300 text-white shadow-[0_0_16px_rgba(244,63,94,0.65)] animate-pulse";
+  } else if (T.st === 0) {
+    pwrBtnCls = "bg-rose-950/90 border-rose-500 text-rose-200";
+  }
+
+  const centerPowerBtn = `
+    <button type="button" onclick="handleDynamicPowerAction()"
+      title="Bouton Marche / Arrêt Poêle"
+      class="h-14 w-14 aspect-square rounded-2xl border-2 flex items-center justify-center shrink-0 transition shadow-lg cursor-pointer ${pwrBtnCls}">
+      <svg viewBox="0 0 24 24" class="w-6 h-6 drop-shadow" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2v10" />
+        <path d="M18.4 6.6a9 9 0 1 1-12.77.04" />
+      </svg>
+    </button>
+  `;
+
+  if (zone === "AMB") {
+    return `<div class="flex items-stretch justify-between gap-2">${chevronSX}${centerPowerBtn}${chevronDX}</div>`;
+  } else if (zone === "SX") {
+    return `<div class="flex items-stretch justify-between gap-2">${expandedRectSX}${chevronStoveReturn("right")}</div>`;
+  } else {
+    return `<div class="flex items-stretch justify-between gap-2">${chevronStoveReturn("left")}${expandedRectDX}</div>`;
+  }
+}
+
+function renderTriArcSvgForZone(zone, T) {
+  const isDuct = (zone === "SX" || zone === "DX");
+  const realT = zone === "AMB" ? T.realAmb : (zone === "SX" ? T.realSx : T.realDx);
+  const spT = zone === "AMB" ? T.spAmb : (zone === "SX" ? T.spSx : T.spDx);
+  const fanSp = zone === "AMB" ? T.fanAmb : (zone === "SX" ? T.fanSx : T.fanDx);
+  const fanReal = zone === "AMB" ? T.realFanAmb : (zone === "SX" ? T.realFanSx : T.realFanDx);
+  const pwrSp = T.pwrSp;
+  const pwrReal = T.realPwr;
+
+  const CX = 160, CY = 128;
+  const R_TEMP = 74;
+  const R_OUTER = 112;
+
+  const angTempSp = triArcTempToAngle(spT);
+  const angTempReal = triArcTempToAngle(realT);
+  const posTempSp = triArcPtOnCircle(CX, CY, R_TEMP, angTempSp);
+  const posTempReal = triArcPtOnCircle(CX, CY, R_TEMP, angTempReal);
+  const trackTemp = triArcPath(CX, CY, R_TEMP, 135, 405, false);
+  const fillTemp = triArcPath(CX, CY, R_TEMP, 135, angTempSp, false);
+
+  const fanGaugeVal = Math.max(0, Math.min(8, Number(fanReal > 0 ? fanReal : fanSp)));
+  const angFanSp = 142 + (Math.max(0, Math.min(8, fanSp)) / 8) * 76;
+  const angFanReal = 142 + (Math.max(0, Math.min(8, fanReal)) / 8) * 76;
+  const angFanGauge = 142 + (fanGaugeVal / 8) * 76;
+  const posFanSp = triArcPtOnCircle(CX, CY, R_OUTER, angFanSp);
+  const posFanReal = triArcPtOnCircle(CX, CY, R_OUTER, angFanReal);
+  const trackFan = triArcPath(CX, CY, R_OUTER, 142, 218, false);
+  const fillFan = triArcPath(CX, CY, R_OUTER, 142, angFanGauge, false);
+
+  const pwrGaugeVal = Math.max(0, Math.min(8, Number(pwrReal > 0 ? pwrReal : pwrSp)));
+  const angPwrSp = 38 - (Math.max(0, Math.min(8, pwrSp)) / 8) * 76;
+  const angPwrReal = 38 - (Math.max(0, Math.min(8, pwrReal)) / 8) * 76;
+  const angPwrGauge = 38 - (pwrGaugeVal / 8) * 76;
+  const posPwrSp = triArcPtOnCircle(CX, CY, R_OUTER, angPwrSp);
+  const posPwrReal = triArcPtOnCircle(CX, CY, R_OUTER, angPwrReal);
+  const trackPwr = triArcPath(CX, CY, R_OUTER, 38, -38, true);
+  const fillPwr = triArcPath(CX, CY, R_OUTER, 38, angPwrGauge, true);
+
+  let fanTicks = "";
+  for (let i = 0; i <= 8; i++) {
+    const a = 142 + (i / 8) * 76;
+    const pLbl = triArcPtOnCircle(CX, CY, R_OUTER + 18, a);
+    const lbl = i === 0 ? "OFF" : (i === 8 ? "AUTO" : String(i));
+    const isAct = (i === Math.round(fanGaugeVal)) || (i === Math.round(fanSp));
+    fanTicks += `<text x="${pLbl.x.toFixed(1)}" y="${(pLbl.y + 3).toFixed(1)}" text-anchor="middle" font-size="${i === 0 || i === 8 ? '8.5' : '9'}" font-weight="${isAct ? '900' : '600'}" fill="${isAct ? '#38bdf8' : '#64748b'}">${lbl}</text>`;
+  }
+
+  let pwrTicks = "";
+  for (let i = 0; i <= 8; i++) {
+    const a = 38 - (i / 8) * 76;
+    const pLbl = triArcPtOnCircle(CX, CY, R_OUTER + 20, a);
+    const lbl = i === 0 ? "0 Eco" : String(i);
+    const isAct = !isDuct && ((i === Math.round(pwrGaugeVal)) || (i === Math.round(pwrSp)));
+    pwrTicks += `<text x="${pLbl.x.toFixed(1)}" y="${(pLbl.y + 3).toFixed(1)}" text-anchor="middle" font-size="${i === 0 ? '8.5' : '9'}" font-weight="${isAct ? '900' : '600'}" fill="${isAct ? '#ea580c' : '#64748b'}">${lbl}</text>`;
+  }
+
+  const bgAnimClass = T.isAlarm ? "triarc-bg-alarm" : (T.st === 0 ? "" : "triarc-bg-breath");
+  const phaseLines = formatPhaseTwoLines(T.phaseLabel, typeof getPhaseMeta === "function" ? getPhaseMeta(T.st) : null);
+
+  return `
+    <svg id="tri-arc-svg-${zone}" data-zone="${zone}" viewBox="14 20 292 198" class="tri-arc-svg w-full mx-auto overflow-visible">
+      <defs>
+        <linearGradient id="gradTemp-${zone}" x1="0%" y1="100%" x2="100%" y2="0%">
+          <stop offset="0%" stop-color="#38bdf8" />
+          <stop offset="45%" stop-color="#f59e0b" />
+          <stop offset="75%" stop-color="#ea580c" />
+          <stop offset="100%" stop-color="#e11d48" />
+        </linearGradient>
+        <linearGradient id="gradFan-${zone}" x1="0%" y1="100%" x2="0%" y2="0%">
+          <stop offset="0%" stop-color="#0284c7" />
+          <stop offset="50%" stop-color="#38bdf8" />
+          <stop offset="100%" stop-color="#fde047" />
+        </linearGradient>
+        <linearGradient id="gradPwr-${zone}" x1="0%" y1="100%" x2="0%" y2="0%">
+          <stop offset="0%" stop-color="#38bdf8" />
+          <stop offset="50%" stop-color="#f97316" />
+          <stop offset="100%" stop-color="#ea580c" />
+        </linearGradient>
+        <radialGradient id="gradPhaseBg-${zone}" cx="50%" cy="50%" r="60%">
+          <stop offset="0%" stop-color="${T.phaseColor}" stop-opacity="${T.st === 0 ? '0.12' : '0.42'}" />
+          <stop offset="65%" stop-color="${T.phaseColor}" stop-opacity="${T.st === 0 ? '0.04' : '0.16'}" />
+          <stop offset="100%" stop-color="#0b101d" stop-opacity="0.95" />
+        </radialGradient>
+      </defs>
+
+      <!-- Fond du cadran central + Animation de la phase du poêle -->
+      <circle cx="${CX}" cy="${CY}" r="68" fill="#0b101d" stroke="#1e293b" stroke-width="1" />
+      <circle cx="${CX}" cy="${CY}" r="66" fill="url(#gradPhaseBg-${zone})" class="${bgAnimClass} pointer-events-none" />
+      ${T.st !== 0 ? `<circle cx="${CX}" cy="${CY}" r="54" fill="none" stroke="${T.phaseColor}" stroke-width="1.5" class="triarc-bg-ripple pointer-events-none" />` : ""}
+
+      <!-- LOGO EN ARRIÈRE-PLAN : POÊLE SUR AMB, VENTILATEUR EN FILIGRANE GRISÉ SUR SX & DX -->
+      ${zone === "AMB" ? `
+        <g transform="translate(${CX - 28}, ${CY - 38}) scale(0.56)" fill="${T.phaseColor}" opacity="0.18" class="pointer-events-none">
+          ${nobisStovePaths()}
+        </g>
+      ` : `
+        <g transform="translate(${CX - 50.4}, ${CY - 50.4}) scale(4.2)" fill="#94a3b8" opacity="0.14" class="pointer-events-none">
+          <circle cx="12" cy="12" r="2.3"/>
+          <path d="M12 9.2c-1.6-2.5-1.2-6.2 1.8-6.7 2.4-.4 4.1 1.8 3.1 4.3-.7 1.7-2.4 2.3-4.9 2.4z"/>
+          <path d="M14.4 13.4c2.9.2 5.9 2.4 4.9 5.2-.9 2.3-3.6 2.7-5.3.6-1.1-1.4-.8-3.2.4-5.8z"/>
+          <path d="M9.6 13.4c-1.3 2.6-2.6 4.5-4.7 3.8-2.3-.7-2.6-3.5-.6-5.2 1.5-1.3 3.4-1 5.3 1.4z"/>
+        </g>
+      `}
+
+      <!-- 1. CERCLE CENTRAL TRONQUÉ : TEMPÉRATURE (SANS MARQUES 17°/23°) -->
+      <path d="${trackTemp}" fill="none" stroke="#1e293b" stroke-width="8" stroke-linecap="round" />
+      ${fillTemp ? `<path d="${fillTemp}" fill="none" stroke="url(#gradTemp-${zone})" stroke-width="8" stroke-linecap="round" />` : ""}
+      <path d="${trackTemp}" fill="none" stroke="transparent" stroke-width="28" class="arc-hit" data-arc="temp" />
+
+      <!-- Uniquement ❄️, 19° et MAX (19° à l'apogée 270°) -->
+      <text x="105" y="202" text-anchor="middle" font-size="11" fill="#38bdf8" font-weight="bold">❄️</text>
+      <text x="${CX}" y="46" text-anchor="middle" font-size="9.5" fill="#f97316" font-weight="bold">19°</text>
+      <text x="215" y="202" text-anchor="middle" font-size="9" fill="#fb7185" font-weight="bold">MAX</text>
+
+      <!-- MARQUEUR DU RÉEL SUR L'ARC TEMPÉRATURE -->
+      <g transform="translate(${posTempReal.x}, ${posTempReal.y})">
+        <circle cx="0" cy="0" r="5.5" fill="#090d16" stroke="#38bdf8" stroke-width="2.2" />
+        <circle cx="0" cy="0" r="2" fill="#38bdf8" />
+      </g>
+
+      <!-- CURSEUR PICTOGRAMME TEMPÉRATURE (🌡️) -->
+      <g transform="translate(${posTempSp.x}, ${posTempSp.y})" class="pointer-events-none">
+        <circle cx="0" cy="0" r="11" fill="#0f172a" stroke="#ea580c" stroke-width="2.2" />
+        <text x="0" y="1" text-anchor="middle" dominant-baseline="central" font-size="11.5">🌡️</text>
+      </g>
+
+      <!-- LIBELLÉ DISCRET DU VOLET / ZONE (CANALISATION SX / DX, SANS SALON) -->
+      <text x="${CX}" y="79" text-anchor="middle" font-size="8.5" font-weight="800" fill="${zone === "SX" ? "#22d3ee" : (zone === "DX" ? "#38bdf8" : "#94a3b8")}" letter-spacing="0.5">${zone === "AMB" ? "" : (zone === "SX" ? "CANAL. SX" : "CANAL. DX")}</text>
+
+      <!-- T° RÉELLE REDESCENDUE DANS LE CADRAN CENTRAL + FLÈCHE → CONSIGNE -->
+      <text x="${CX - 13}" y="134" text-anchor="middle" font-size="34" font-weight="900" fill="#ffffff">${realT}°</text>
+      <text x="${CX + 28}" y="124" text-anchor="start" font-size="12" font-weight="bold" fill="#fb923c">→ ${fmtTriArcTempSp(spT)}</text>
+
+      <!-- BULLE D'ÉTAT DU POÊLE (UNIQUEMENT SUR L'ÉCRAN CENTRAL AMB, DISPARAÎT SUR SX & DX) -->
+      ${zone === "AMB" ? `
+        <g onclick="openLifecycleFlowerModal()" class="triarc-phase-hit cursor-pointer" role="button" aria-label="Cycle de vie du poêle">
+          <rect x="${CX - 44}" y="148" width="88" height="30" rx="9" fill="#0f172a" fill-opacity="0.88" stroke="${T.phaseColor}" stroke-opacity="0.75" stroke-width="1.2" />
+          <text x="${CX}" y="159" text-anchor="middle" font-size="8.5" font-weight="900" fill="${T.phaseColor}">${T.phaseIcon} ${escapeHtml(phaseLines.line1)}</text>
+          <text x="${CX}" y="171" text-anchor="middle" font-size="7.5" font-weight="700" fill="#cbd5e1">${escapeHtml(phaseLines.line2)}</text>
+        </g>
+      ` : ""}
+
+      <!-- 2. ARC GAUCHE : VENTILATION (OFF ➔ 1..7 ➔ AUTO) -->
+      ${(() => {
+        const isFanAuto = (T.autoIdx === 1 || T.autoIdx === 2 || fanSp === 8);
+        return `
+          <g class="${isFanAuto ? 'pointer-events-none opacity-60' : ''}">
+            <path d="${trackFan}" fill="none" stroke="#1e293b" stroke-width="9" stroke-linecap="round" />
+            ${fillFan ? `<path d="${fillFan}" fill="none" stroke="url(#gradFan-${zone})" stroke-width="9" stroke-linecap="round" />` : ""}
+            ${!isFanAuto ? `<path d="${trackFan}" fill="none" stroke="transparent" stroke-width="28" class="arc-hit cursor-pointer" data-arc="fan" />` : ""}
+            ${fanTicks}
+
+            <g transform="translate(${posFanReal.x}, ${posFanReal.y})">
+              <circle cx="0" cy="0" r="5.5" fill="#090d16" stroke="#38bdf8" stroke-width="2.2" />
+              <circle cx="0" cy="0" r="2" fill="#38bdf8" />
+            </g>
+            ${!isFanAuto ? `
+            <g transform="translate(${posFanSp.x}, ${posFanSp.y})" class="pointer-events-none">
+              <circle cx="0" cy="0" r="11" fill="#0f172a" stroke="#38bdf8" stroke-width="2.2" />
+              <g transform="translate(-7.5, -7.5) scale(0.625)" fill="#38bdf8">
+                <circle cx="12" cy="12" r="2.3"/>
+                <path d="M12 9.2c-1.6-2.5-1.2-6.2 1.8-6.7 2.4-.4 4.1 1.8 3.1 4.3-.7 1.7-2.4 2.3-4.9 2.4z"/>
+                <path d="M14.4 13.4c2.9.2 5.9 2.4 4.9 5.2-.9 2.3-3.6 2.7-5.3.6-1.1-1.4-.8-3.2.4-5.8z"/>
+                <path d="M9.6 13.4c-1.3 2.6-2.6 4.5-4.7 3.8-2.3-.7-2.6-3.5-.6-5.2 1.5-1.3 3.4-1 5.3 1.4z"/>
+              </g>
+            </g>
+            ` : ""}
+          </g>
+        `;
+      })()}
+
+      <!-- 3. ARC DROIT : PUISSANCE (0 Eco ➔ 1..7 ➔ 8, GRISÉ SUR SX/DX, NON CLIQUABLE SI AUTO COMPLET) -->
+      ${(() => {
+        const isPwrAuto = (T.autoIdx === 2);
+        const isDisabled = isDuct || isPwrAuto;
+        return `
+          <g opacity="${isDuct ? '0.22' : (isPwrAuto ? '0.60' : '1')}" class="${isDisabled ? 'pointer-events-none' : ''}">
+            <path d="${trackPwr}" fill="none" stroke="#1e293b" stroke-width="9" stroke-linecap="round" />
+            ${fillPwr ? `<path d="${fillPwr}" fill="none" stroke="${isDuct ? '#475569' : `url(#gradPwr-${zone})`}" stroke-width="9" stroke-linecap="round" />` : ""}
+            ${!isDisabled ? `<path d="${trackPwr}" fill="none" stroke="transparent" stroke-width="28" class="arc-hit cursor-pointer" data-arc="pwr" />` : ""}
+            ${pwrTicks}
+
+            <g transform="translate(${posPwrReal.x}, ${posPwrReal.y})">
+              <circle cx="0" cy="0" r="5.5" fill="#090d16" stroke="${isDuct ? '#64748b' : '#ea580c'}" stroke-width="2.2" />
+              <circle cx="0" cy="0" r="2" fill="${isDuct ? '#64748b' : '#ea580c'}" />
+            </g>
+            ${!isPwrAuto ? `
+            <g transform="translate(${posPwrSp.x}, ${posPwrSp.y})" class="pointer-events-none">
+              <circle cx="0" cy="0" r="11" fill="#0f172a" stroke="${isDuct ? '#64748b' : '#ea580c'}" stroke-width="2.2" />
+              <text x="0" y="1" text-anchor="middle" dominant-baseline="central" font-size="11.5">🔥</text>
+            </g>
+            ` : ""}
+          </g>
+        `;
+      })()}
+    </svg>
+  `;
+}
+
+function renderTriArcDailyChronoFrise(zone = "AMB") {
+  const now = new Date();
+  const todayJsDay = now.getDay();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+
+  const isChronoEnabled = Boolean(Number(getRegVal("chrono_week_enable_set", latestData.chrono_week_enable ?? 0)));
+
+  // Couleurs vives pour les 4 programmes (1: Vert, 2: Ambre, 3: Cyan, 4: Violet)
+  const progColors = isChronoEnabled ? {
+    1: "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)]",
+    2: "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.7)]",
+    3: "bg-cyan-400 shadow-[0_0_6px_rgba(34,211,238,0.7)]",
+    4: "bg-purple-400 shadow-[0_0_6px_rgba(192,132,252,0.7)]"
+  } : {
+    1: "bg-slate-600",
+    2: "bg-slate-600",
+    3: "bg-slate-600",
+    4: "bg-slate-600"
+  };
+
+  const fmtChronoFan = (v) => {
+    const n = Number(v);
+    if (n <= 0) return "OFF";
+    if (n >= 8) return "Auto";
+    return String(n);
+  };
+
+  // Fenêtre glissante de 24h centrée sur Maintenant (Now - 12h à Now + 12h)
+  const HALF_WINDOW = 720; // 12 heures en minutes
+
+  // Segments par programme (1 à 4) sur 4 pistes distinctes pour éviter toute superposition
+  const tracksSegments = { 1: "", 2: "", 3: "", 4: "" };
+
+  for (let p = 1; p <= 4; p++) {
+    const startSlot = Number(getRegVal(`chrono_p${p}_start_set`, latestData[`chrono_p${p}_start`] ?? 144));
+    const stopSlot = Number(getRegVal(`chrono_p${p}_stop_set`, latestData[`chrono_p${p}_stop`] ?? 144));
+    const mask = Number(getRegVal(`chrono_p${p}_days_mask`, latestData[`chrono_p${p}_days`] ?? 0));
+
+    if (startSlot >= 144 || stopSlot >= 144 || startSlot === stopSlot) continue;
+
+    let temp = 19;
+    let subLabel = "";
+    if (zone === "SX") {
+      temp = Number(getRegVal(`chrono_p${p}_tcanl_set`, latestData[`chrono_p${p}_tcanl`] ?? latestData[`chrono_p${p}_temp`] ?? 20));
+      const ventSx = Number(getRegVal(`chrono_p${p}_canl_set`, latestData[`chrono_p${p}_canl`] ?? 0));
+      subLabel = `V${fmtChronoFan(ventSx)}`;
+    } else if (zone === "DX") {
+      temp = Number(getRegVal(`chrono_p${p}_tcanr_set`, latestData[`chrono_p${p}_tcanr`] ?? latestData[`chrono_p${p}_temp`] ?? 20));
+      const ventDx = Number(getRegVal(`chrono_p${p}_canr_set`, latestData[`chrono_p${p}_canr`] ?? 0));
+      subLabel = `V${fmtChronoFan(ventDx)}`;
+    } else {
+      temp = Number(getRegVal(`chrono_p${p}_temperature_set`, latestData[`chrono_p${p}_temp`] ?? 19));
+      const pwr = Number(getRegVal(`chrono_p${p}_power_set`, latestData[`chrono_p${p}_power`] ?? 4));
+      const ventAmb = Number(getRegVal(`chrono_p${p}_fan_front_set`, latestData[`chrono_p${p}_fan_front`] ?? 0));
+      subLabel = `P${pwr} · V${fmtChronoFan(ventAmb)}`;
+    }
+
+    // Parcourir hier (-1), aujourd'hui (0) et demain (+1)
+    [-1, 0, 1].forEach(dOffset => {
+      const targetJsDay = (todayJsDay + dOffset + 7) % 7;
+      const dayObj = GANTT_DAYS.find(d => d.jsDay === targetJsDay) || GANTT_DAYS[0];
+      const isDayActive = (mask & dayObj.bit) !== 0;
+      if (!isDayActive) return;
+
+      const dayBaseMin = dOffset * 1440;
+      const subRanges = [];
+
+      if (stopSlot > startSlot) {
+        subRanges.push([dayBaseMin + startSlot * 10, dayBaseMin + stopSlot * 10]);
+      } else {
+        // Traverse minuit
+        subRanges.push([dayBaseMin + startSlot * 10, dayBaseMin + 1440]);
+        subRanges.push([dayBaseMin + 1440, dayBaseMin + 1440 + stopSlot * 10]);
+      }
+
+      subRanges.forEach(([t1, t2]) => {
+        const relStart = t1 - nowMin;
+        const relStop = t2 - nowMin;
+        const cStart = Math.max(-HALF_WINDOW, relStart);
+        const cStop = Math.min(HALF_WINDOW, relStop);
+
+        if (cStop > cStart) {
+          const leftPct = (50 + (cStart / HALF_WINDOW) * 50).toFixed(2);
+          const widthPct = (((cStop - cStart) / HALF_WINDOW) * 50).toFixed(2);
+          tracksSegments[p] += `
+            <div style="left:${leftPct}%;width:${widthPct}%"
+              class="absolute inset-y-0 rounded-full ${progColors[p]}"
+              title="Programme ${p} (${zone}) : ${temp}°C | ${subLabel} ${!isChronoEnabled ? '(Chrono désactivé)' : ''}">
+            </div>
+          `;
+        }
+      });
+    });
+  }
+
+  // Graduations d'heures dynamiques glissantes toutes les 3 heures
+  let ticksHtml = "";
+  [-1, 0, 1].forEach(dOffset => {
+    for (let h = 0; h < 24; h += 3) {
+      const tMin = dOffset * 1440 + h * 60;
+      const rel = tMin - nowMin;
+      if (rel >= -HALF_WINDOW + 25 && rel <= HALF_WINDOW - 25) {
+        if (Math.abs(rel) > 40) {
+          const xPct = (50 + (rel / HALF_WINDOW) * 50).toFixed(1);
+          ticksHtml += `<span style="left:${xPct}%;" class="absolute -translate-x-1/2">${String(h).padStart(2, "0")}h</span>`;
+        }
+      }
+    }
+  });
+
+  return `
+    <button type="button" onclick="switchTab('tab-chrono')"
+      title="Ouvrir l'onglet Programmes (🕒 Chrono)"
+      class="w-full text-left bg-slate-900/90 hover:bg-slate-800/90 border border-slate-800/90 hover:border-orange-500/60 rounded-2xl px-3 py-1 space-y-1 shadow-md transition cursor-pointer select-none ${!isChronoEnabled ? 'opacity-60' : ''}">
+      <!-- 4 pistes distinctes superposées (P1 à P4) : traits de couleur sans superposition -->
+      <div class="relative w-full h-8 bg-slate-950 rounded-xl border border-slate-800 overflow-hidden flex flex-col justify-between py-1.5 px-1">
+        <div class="relative w-full h-1 bg-slate-900/60 rounded-full overflow-hidden">
+          ${tracksSegments[1]}
+        </div>
+        <div class="relative w-full h-1 bg-slate-900/60 rounded-full overflow-hidden">
+          ${tracksSegments[2]}
+        </div>
+        <div class="relative w-full h-1 bg-slate-900/60 rounded-full overflow-hidden">
+          ${tracksSegments[3]}
+        </div>
+        <div class="relative w-full h-1 bg-slate-900/60 rounded-full overflow-hidden">
+          ${tracksSegments[4]}
+        </div>
+        <!-- Trait rouge fixe au centre (50%) symbolisant Maintenant -->
+        <div style="left:50%;" class="absolute inset-y-0 w-0.5 bg-rose-500 z-10 shadow-[0_0_10px_#f43f5e] -translate-x-1/2 pointer-events-none"></div>
+      </div>
+      <!-- Échelle horaire glissante -->
+      <div class="relative w-full h-3.5 text-[9.5px] text-slate-500 font-mono leading-none">
+        ${ticksHtml}
+      </div>
+    </button>
+  `;
+}
+
+function renderTriArcBottomModes(T) {
+  const silActive = T.isSilActive && T.remSec > 0;
+  const silTimerTxt = silActive
+    ? `${Math.floor(T.remSec / 3600)}h${String(Math.floor((T.remSec % 3600) / 60)).padStart(2, "0")}`
+    : "";
+
+  let autoBtnCls = "bg-slate-900/90 border-slate-700 text-slate-400 hover:border-cyan-400";
+  let autoBadge = "";
+  if (T.autoIdx === 1) {
+    autoBtnCls = "bg-cyan-950/80 border-cyan-400 text-cyan-200 shadow-[0_0_12px_rgba(6,182,212,0.35)]";
+    autoBadge = `<span class="text-[9.5px] font-black uppercase text-cyan-300 mt-0.5">Ventil</span>`;
+  } else if (T.autoIdx === 2) {
+    autoBtnCls = "bg-orange-950/80 border-orange-400 text-orange-200 shadow-[0_0_12px_rgba(249,115,22,0.35)]";
+    autoBadge = `<span class="text-[9.5px] font-black uppercase text-orange-300 mt-0.5">Auto</span>`;
+  }
+
+  return `
+    <div class="grid grid-cols-4 gap-2 pt-1 pb-1">
+      <!-- 1. Silence (🤫) -->
+      <button type="button" onclick="toggleTriArcOptionBubble('silence')"
+        title="Mode Silence (Timer)"
+        class="h-14 sm:h-15 min-h-[54px] rounded-2xl border-2 flex flex-col items-center justify-center transition cursor-pointer ${silActive ? 'bg-purple-950/75 border-purple-400 text-white shadow-[0_0_12px_rgba(168,85,247,0.35)]' : 'bg-slate-900/90 border-slate-700 text-slate-400 hover:border-purple-400'}">
+        <span class="text-2xl leading-none">🤫</span>
+        ${silActive ? `<span class="text-[10px] font-black mt-0.5 tabular-nums text-purple-200">${silTimerTxt}</span>` : ""}
+      </button>
+
+      <!-- 2. Auto (Cliquable avec modal/popup 3 positions : OFF, Ventil seule, Auto complet) -->
+      <button type="button" onclick="toggleTriArcOptionBubble('auto')"
+        title="Mode Auto (OFF / Ventilation / Auto complet)"
+        class="h-14 sm:h-15 min-h-[54px] rounded-2xl border-2 flex flex-col items-center justify-center transition cursor-pointer ${autoBtnCls}">
+        <span class="text-lg leading-none flex items-center justify-center gap-0.5">
+          <span>🔥</span><span class="text-base font-bold">+</span>${svgPropellerFanIcon("w-4 h-4", "currentColor")}
+        </span>
+        ${autoBadge}
+      </button>
+
+      <!-- 3. Boost (🚀 : désactivé=fusée colorée, actif=fusée allumée avec halo, programmé=fusée allumée + horloge) -->
+      ${(() => {
+        let boostBtnCls = "bg-slate-900/90 border-slate-700 text-slate-300 hover:border-rose-400";
+        let boostIcon = `<span class="text-2xl leading-none">🚀</span>`;
+        if (T.pwfVal === 1) {
+          boostBtnCls = "bg-rose-950/80 border-rose-400 text-rose-200 shadow-[0_0_14px_rgba(244,63,94,0.45)]";
+          boostIcon = `<span class="text-2xl leading-none drop-shadow-[0_0_8px_rgba(244,63,94,0.8)]">🚀</span>`;
+        } else if (T.pwfVal === 2) {
+          boostBtnCls = "bg-amber-950/80 border-amber-400 text-amber-200 shadow-[0_0_14px_rgba(245,158,11,0.45)]";
+          boostIcon = `
+            <div class="relative inline-flex items-center justify-center">
+              <span class="text-2xl leading-none drop-shadow-[0_0_8px_rgba(245,158,11,0.8)]">🚀</span>
+              <span class="absolute -bottom-1 -right-1.5 text-xs leading-none">⏱️</span>
+            </div>
+          `;
+        }
+        return `
+          <button type="button" onclick="toggleTriArcOptionBubble('boost')"
+            title="Mode Boost / POWERFUL (1=Actif, 2=Programmé)"
+            class="h-14 sm:h-15 min-h-[54px] rounded-2xl border-2 flex flex-col items-center justify-center transition cursor-pointer ${boostBtnCls}">
+            ${boostIcon}
+          </button>
+        `;
+      })()}
+
+      <!-- 4. Eco / Stand-by (💤 : CONFORT MODE Nobis) -->
+      <button type="button" onclick="toggleTriArcOptionBubble('eco')"
+        title="Mode Éco / Confort Mode (Stand-by)"
+        class="h-14 sm:h-15 min-h-[54px] rounded-2xl border-2 flex flex-col items-center justify-center transition cursor-pointer ${T.isEco ? 'bg-emerald-950/75 border-emerald-400 text-emerald-200 shadow-[0_0_12px_rgba(16,185,129,0.35)]' : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:border-emerald-400'}">
+        <span class="text-2xl leading-none">💤</span>
+      </button>
+    </div>
+  `;
+}
+
+function toggleTriArcEcoOption() {
+  const curEco = Number(getTriArcLiveOrOpt("standby_set", getRegVal("standby_set", 0)));
+  queueTriArcChanges([{ reg_key: "standby_set", value: curEco === 1 ? 0 : 1 }]);
+}
+
+function setTriArcEcoOption(val) {
+  closeTriArcOptionBubble();
+  queueTriArcChanges([{ reg_key: "standby_set", value: Number(val) }]);
+}
+
+function setTriArcAutoOption(idx) {
+  closeTriArcOptionBubble();
+  if (idx === 0) {
+    // Désactivation complète du mode Auto : fun_auto_set = 0 et réinitialisation des vitesses de ventilateurs si elles étaient en Auto (8)
+    const changes = [{ reg_key: "fun_auto_set", value: 0 }];
+    const curFanAmb = Number(getTriArcLiveOrOpt("fan_front_speed", getRegVal("fan_front_speed", 3)));
+    const curFanSx = Number(getTriArcLiveOrOpt("duct_left_speed", getRegVal("duct_left_speed", 0)));
+    const curFanDx = Number(getTriArcLiveOrOpt("duct_right_speed", getRegVal("duct_right_speed", 0)));
+    if (curFanAmb >= 8) changes.push({ reg_key: "fan_front_speed", value: 3 });
+    if (curFanSx >= 8) changes.push({ reg_key: "duct_left_speed", value: 0 });
+    if (curFanDx >= 8) changes.push({ reg_key: "duct_right_speed", value: 0 });
+    queueTriArcChanges(changes);
+  } else if (idx === 1) {
+    queueTriArcChanges([
+      { reg_key: "fun_auto_set", value: 0 },
+      { reg_key: "fan_front_speed", value: 8 },
+      { reg_key: "duct_left_speed", value: 8 },
+      { reg_key: "duct_right_speed", value: 8 }
+    ]);
+  } else if (idx === 2) {
+    queueTriArcChanges([
+      { reg_key: "fun_auto_set", value: 1 },
+      { reg_key: "fan_front_speed", value: 8 },
+      { reg_key: "duct_left_speed", value: 8 },
+      { reg_key: "duct_right_speed", value: 8 }
+    ]);
+  }
+}
+
+async function setTriArcBoostOption(val) {
+  closeTriArcOptionBubble();
+  const v = Number(val);
+  // Le mode Boost désactive le mode silence s'il est actif
+  if (v > 0 && silenceModeState && silenceModeState.active) {
+    await deactivateSilenceMode();
+  }
+  // Ne désactive pas les fonctions auto
+  queueTriArcChanges([{ reg_key: "fun_pwf_set", value: v }]);
+}
+
+async function setTriArcSilenceHours(hours) {
+  closeTriArcOptionBubble();
+  if (hours <= 0) {
+    await deactivateSilenceMode();
+  } else {
+    selectedSilenceHours = Number(hours);
+    await confirmActivateSilence();
+  }
+}
+
+function renderTriArcFloatingOptionBubble(T) {
+  if (!triArcExpandedMode) return "";
+
+  if (triArcExpandedMode === "auto") {
+    return `
+      <div class="bg-slate-900 border-2 border-cyan-400 rounded-3xl p-3.5 space-y-2.5 shadow-[0_10px_40px_rgba(0,0,0,0.9)]">
+        <div class="flex items-center justify-between text-xs border-b border-slate-800 pb-2">
+          <span class="font-bold text-cyan-300 flex items-center gap-1.5">🔥+${svgPropellerFanIcon("w-4 h-4", "#22d3ee")} Mode Auto (3 positions)</span>
+          <button type="button" onclick="closeTriArcOptionBubble()" class="w-6 h-6 rounded-full bg-slate-800 text-slate-300 font-bold cursor-pointer">✕</button>
+        </div>
+        <div class="grid grid-cols-3 gap-2 text-xs font-bold">
+          <button type="button" onclick="setTriArcAutoOption(0)" class="py-2.5 rounded-2xl border cursor-pointer ${T.autoIdx === 0 ? 'bg-slate-700 border-white text-white' : 'bg-slate-950 border-slate-800 text-slate-400'}">OFF</button>
+          <button type="button" onclick="setTriArcAutoOption(1)" class="py-2.5 rounded-2xl border flex items-center justify-center gap-1 cursor-pointer ${T.autoIdx === 1 ? 'bg-cyan-600 border-cyan-300 text-white' : 'bg-slate-950 border-slate-800 text-slate-300'}">${svgPropellerFanIcon("w-4 h-4")}<span>Ventil</span></button>
+          <button type="button" onclick="setTriArcAutoOption(2)" class="py-2.5 rounded-2xl border flex items-center justify-center gap-1 cursor-pointer ${T.autoIdx === 2 ? 'bg-orange-600 border-orange-300 text-white' : 'bg-slate-950 border-slate-800 text-slate-300'}"><span>🔥+</span>${svgPropellerFanIcon("w-4 h-4")}</button>
+        </div>
+        <div class="space-y-1.5 text-[11px] leading-tight text-slate-300 bg-slate-950/70 border border-slate-800 rounded-xl p-2.5">
+          <p class="font-semibold text-cyan-300">Fonctionnement du mode Auto</p>
+          <ul class="space-y-1.5 list-disc list-inside text-slate-300">
+            <li><strong>OFF</strong> : Manuel intégral. Vous réglez la ventilation et la puissance de chauffe à votre convenance.</li>
+            <li><strong>Ventil (${svgPropellerFanIcon("w-3.5 h-3.5 inline text-cyan-400")})</strong> : Ventilation modulée automatiquement selon l'écart entre la température ambiante et la consigne pour un confort silencieux.</li>
+            <li><strong>Auto Total (🔥+Ventil)</strong> : Régulation 100% autonome conjointe de la flamme et de la ventilation par le poêle Nobis selon votre température cible.</li>
+          </ul>
+        </div>
+      </div>
+    `;
+  }
+
+  if (triArcExpandedMode === "boost") {
+    return `
+      <div class="bg-slate-900 border-2 border-rose-400 rounded-3xl p-3.5 space-y-2.5 shadow-[0_10px_40px_rgba(0,0,0,0.9)]">
+        <div class="flex items-center justify-between text-xs border-b border-slate-800 pb-2">
+          <span class="font-bold text-rose-300 flex items-center gap-1.5"><span class="text-base">🚀</span> Mode Boost (POWERFUL Nobis)</span>
+          <button type="button" onclick="closeTriArcOptionBubble()" class="w-6 h-6 rounded-full bg-slate-800 text-slate-300 font-bold cursor-pointer">✕</button>
+        </div>
+        <div class="grid grid-cols-3 gap-2 text-xs font-bold">
+          <button type="button" onclick="setTriArcBoostOption(0)" class="py-2.5 rounded-2xl border cursor-pointer ${T.pwfVal === 0 ? 'bg-slate-700 border-white text-white' : 'bg-slate-950 border-slate-800 text-slate-400'}">OFF</button>
+          <button type="button" onclick="setTriArcBoostOption(1)" class="py-2.5 rounded-2xl border flex items-center justify-center gap-1 cursor-pointer ${T.pwfVal === 1 ? 'bg-rose-600 border-rose-300 text-white' : 'bg-slate-950 border-slate-800 text-slate-300'}"><span class="text-sm">🚀</span><span>ACTIF</span></button>
+          <button type="button" onclick="setTriArcBoostOption(2)" class="py-2.5 rounded-2xl border flex items-center justify-center gap-1 cursor-pointer ${T.pwfVal === 2 ? 'bg-amber-600 border-amber-300 text-white' : 'bg-slate-950 border-slate-800 text-slate-300'}"><span class="text-sm">⏱️</span><span>PROG</span></button>
+        </div>
+        <div class="space-y-1.5 text-[11px] leading-tight text-slate-300 bg-slate-950/70 border border-slate-800 rounded-xl p-2.5">
+          <p class="font-semibold text-rose-300">Fonctionnement du mode Powerful</p>
+          <p>Dans l'environnement Nobis, cette fonction s'appelle <strong>POWERFUL</strong>. Elle enclenche temporairement la ventilation et la puissance de chauffe à leur niveau maximum pour réchauffer très rapidement la pièce, tout en conservant votre consigne habituelle de puissance (qui ne passe pas à 8).</p>
+        </div>
+        <div class="text-[11px] leading-tight text-amber-300/90 bg-amber-950/40 border border-amber-500/30 rounded-xl p-2 flex items-start gap-1.5">
+          <span class="text-sm leading-none shrink-0">⚠️</span>
+          <div>
+            <p class="font-bold text-amber-200 mb-0.5">Chemin de programmation sur la télécommande :</p>
+            <p><strong>Menu &gt; Réglages / Set Poêle &gt; Powerful &gt; Programmation horaire</strong></p>
+            <p class="mt-1 text-[10px] text-amber-300/80">La programmation horaire ne peut pas être effectuée depuis l'application : elle doit obligatoirement être configurée depuis la télécommande physique. Merci Nobis !</p>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  if (triArcExpandedMode === "eco") {
+    return `
+      <div class="bg-slate-900 border-2 border-emerald-400 rounded-3xl p-3.5 space-y-2.5 shadow-[0_10px_40px_rgba(0,0,0,0.9)]">
+        <div class="flex items-center justify-between text-xs border-b border-slate-800 pb-2">
+          <span class="font-bold text-emerald-300 flex items-center gap-1.5"><span class="text-base">💤</span> Mode Éco (CONFORT MODE Nobis)</span>
+          <button type="button" onclick="closeTriArcOptionBubble()" class="w-6 h-6 rounded-full bg-slate-800 text-slate-300 font-bold cursor-pointer">✕</button>
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-xs font-bold">
+          <button type="button" onclick="setTriArcEcoOption(0)" class="py-2.5 rounded-2xl border cursor-pointer ${!T.isEco ? 'bg-slate-700 border-white text-white' : 'bg-slate-950 border-slate-800 text-slate-400'}">OFF (Désactivé)</button>
+          <button type="button" onclick="setTriArcEcoOption(1)" class="py-2.5 rounded-2xl border flex items-center justify-center gap-1.5 cursor-pointer ${T.isEco ? 'bg-emerald-600 border-emerald-300 text-white' : 'bg-slate-950 border-slate-800 text-slate-300'}"><span class="text-sm">💤</span><span>ACTIF</span></button>
+        </div>
+        <div class="space-y-1.5 text-[11px] leading-tight text-slate-300 bg-slate-950/70 border border-slate-800 rounded-xl p-2.5">
+          <p class="font-semibold text-emerald-300">À quoi sert ce mode ?</p>
+          <p>Le mode Éco correspond au <strong>Confort Mode</strong> (Stand-by) de Nobis. Lorsque la température de la pièce dépasse votre consigne cible, le poêle passe en phase d'extinction automatique (<strong>ECO STOP</strong>) pour ne pas surchauffer et économiser les granulés. Dès que la température redescend sous la consigne, le poêle redémarre tout seul.</p>
+        </div>
+        <div class="text-[11px] leading-tight text-amber-300/90 bg-amber-950/40 border border-amber-500/30 rounded-xl p-2 flex items-start gap-1.5">
+          <span class="text-sm leading-none shrink-0">⚠️</span>
+          <div>
+            <p class="font-bold text-amber-200 mb-0.5">Configuration sur la télécommande physique :</p>
+            <p><strong>Menu &gt; Réglages / Set Poêle &gt; Confort Mode</strong></p>
+            <p class="mt-1 text-[10px] text-amber-300/80">La configuration des paramètres de ce mode (seuil d'extinction Delta T° et temporisation en minutes) ne peut être réalisée que depuis la télécommande physique Nobis. Merci une nouvelle fois à Nobis !</p>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  if (triArcExpandedMode === "silence") {
+    const silActive = T.isSilActive && T.remSec > 0;
+    const remStr = silActive ? formatSilenceCountdown(T.remSec) : "OFF";
+    return `
+      <div class="bg-slate-900 border-2 border-purple-400 rounded-3xl p-3.5 space-y-2.5 shadow-[0_10px_40px_rgba(0,0,0,0.9)]">
+        <div class="flex items-center justify-between text-xs border-b border-slate-800 pb-2">
+          <span class="font-bold text-purple-300">🤫 Timer Silence (${remStr})</span>
+          <button type="button" onclick="closeTriArcOptionBubble()" class="w-6 h-6 rounded-full bg-slate-800 text-slate-300 font-bold cursor-pointer">✕</button>
+        </div>
+        <div class="grid grid-cols-5 gap-1.5 text-xs font-bold">
+          <button type="button" onclick="setTriArcSilenceHours(0)" class="py-2.5 rounded-2xl border cursor-pointer ${!silActive ? 'bg-slate-700 border-white text-white' : 'bg-slate-950 border-slate-800 text-slate-400'}">OFF</button>
+          <button type="button" onclick="setTriArcSilenceHours(1)" class="py-2.5 rounded-2xl border cursor-pointer bg-slate-950 border-slate-800 hover:border-purple-400 text-purple-200">1h</button>
+          <button type="button" onclick="setTriArcSilenceHours(2)" class="py-2.5 rounded-2xl border cursor-pointer bg-purple-700/80 border-purple-300 text-white">2h</button>
+          <button type="button" onclick="setTriArcSilenceHours(3)" class="py-2.5 rounded-2xl border cursor-pointer bg-slate-950 border-slate-800 hover:border-purple-400 text-purple-200">3h</button>
+          <button type="button" onclick="setTriArcSilenceHours(4)" class="py-2.5 rounded-2xl border cursor-pointer bg-slate-950 border-slate-800 hover:border-purple-400 text-purple-200">4h</button>
+        </div>
+        <div class="space-y-1.5 text-[11px] leading-tight text-slate-300 bg-slate-950/70 border border-slate-800 rounded-xl p-2.5">
+          <p class="font-semibold text-purple-300">Fonctionnement du mode Silence</p>
+          <p>Le mode <strong>Silence</strong> coupe ou abaisse au seuil de convection naturelle les ventilateurs d'air chaud et modère la puissance de chauffe pour un fonctionnement ultra-silencieux.</p>
+          <p class="text-slate-400">À la fin du décompte programmé, le poêle reprendra automatiquement son régime de ventilation précédent. L'activation du mode Boost (Powerful) désactive automatiquement le Silence.</p>
+        </div>
+      </div>
+    `;
+  }
+  return "";
+}
+
+function renderTriArcCockpit() {
+  const track = document.getElementById("triarc-carousel-track");
+  if (!track) return;
+
+  const T = getTriArcTelemetryState();
+  const targetZones = triArcDragging ? [triArcDragging.zone] : ["SX", "AMB", "DX"];
+
+  targetZones.forEach(z => {
+    const slideEl = document.getElementById(`triarc-slide-${z}`);
+    if (slideEl) {
+      slideEl.innerHTML = `
+        <div class="shrink-0 w-full">
+          ${renderTriArcTopHeader(z, T)}
+        </div>
+        <div class="flex-1 min-h-0 flex flex-col justify-center items-center gap-1 sm:gap-2 my-auto w-full">
+          <div class="w-full flex-1 min-h-0 max-h-[300px] sm:max-h-[350px] flex items-center justify-center">
+            ${renderTriArcSvgForZone(z, T)}
+          </div>
+          <div class="w-full shrink-0">
+            ${renderTriArcDailyChronoFrise(z)}
+          </div>
+        </div>
+        <div class="shrink-0 w-full pb-0.5">
+          ${renderTriArcBottomModes(T)}
+        </div>
+      `;
+    }
+  });
+
+  const overlay = document.getElementById("triarc-floating-overlay");
+  const bubble = document.getElementById("triarc-floating-bubble");
+  if (overlay && bubble) {
+    if (triArcExpandedMode) {
+      overlay.classList.remove("hidden");
+      bubble.innerHTML = renderTriArcFloatingOptionBubble(T);
+    } else {
+      overlay.classList.add("hidden");
+      bubble.innerHTML = "";
+    }
+  }
+
+  const offset = triArcZone === "SX" ? "0%" : (triArcZone === "AMB" ? "-100%" : "-200%");
+  track.style.transform = `translateX(${offset})`;
+
+  const dSx = document.getElementById("triarc-dot-sx");
+  const dAmb = document.getElementById("triarc-dot-amb");
+  const dDx = document.getElementById("triarc-dot-dx");
+  if (dSx && dAmb && dDx) {
+    dSx.className = triArcZone === "SX" ? "w-4 h-2 rounded-full bg-cyan-400 transition-all cursor-pointer" : "w-2 h-2 rounded-full bg-slate-700 transition-all cursor-pointer";
+    dAmb.className = triArcZone === "AMB" ? "w-4 h-2 rounded-full bg-orange-500 transition-all cursor-pointer" : "w-2 h-2 rounded-full bg-slate-700 transition-all cursor-pointer";
+    dDx.className = triArcZone === "DX" ? "w-4 h-2 rounded-full bg-sky-400 transition-all cursor-pointer" : "w-2 h-2 rounded-full bg-slate-700 transition-all cursor-pointer";
+  }
+}
+
+function updateTriArcValueFromPoint(svgEl, arcType, clientX, clientY) {
+  const rect = svgEl.getBoundingClientRect();
+  const x = 14 + (clientX - rect.left) * (292 / rect.width);
+  const y = 20 + (clientY - rect.top) * (198 / rect.height);
+  const dx = x - 160;
+  const dy = y - 128;
+  let deg = (Math.atan2(dy, dx) * 180) / Math.PI; // -180..180
+
+  const zone = svgEl.dataset.zone || triArcZone;
+  const T = getTriArcTelemetryState();
+  const fanSp = zone === "AMB" ? T.fanAmb : (zone === "SX" ? T.fanSx : T.fanDx);
+
+  if (arcType === "temp") {
+    let a = deg < 0 ? deg + 360 : deg;
+    if (a < 90) a += 360;
+    a = Math.max(135, Math.min(405, a));
+    return triArcAngleToTemp(a);
+  } else if (arcType === "fan") {
+    // Si la ventilation est en mode Auto, l'arc n'est pas cliquable/modifiable
+    const isFanAuto = (T.autoIdx === 1 || T.autoIdx === 2 || fanSp === 8);
+    if (isFanAuto) return null;
+
+    let a = deg < 0 ? deg + 360 : deg;
+    a = Math.max(142, Math.min(218, a));
+    return Math.round(((a - 142) / 76) * 8);
+  } else if (arcType === "pwr") {
+    // Si la puissance est en mode Auto complet (2) ou s'il s'agit d'un écran canalisation, l'arc n'est pas cliquable
+    if (zone === "SX" || zone === "DX" || T.autoIdx === 2) return null;
+
+    let a = Math.max(-38, Math.min(38, deg));
+    const rawVal = Math.round(((38 - a) / 76) * 8);
+    // Le niveau 8 (Boost) n'est pas sélectionnable avec le curseur (plage consigne 0..7)
+    return Math.min(7, Math.max(0, rawVal));
+  }
+  return null;
+}
+
+function commitTriArcDrag(dragState) {
+  if (!dragState) return;
+  const { zone, arcType, value } = dragState;
+  const v = Number(value);
+
+  if (arcType === "temp") {
+    const key = zone === "AMB" ? "temp_amb_setpoint" : (zone === "SX" ? "duct_left_setpoint" : "duct_right_setpoint");
+    queueTriArcChanges([{ reg_key: key, value: v }]);
+  } else if (arcType === "fan") {
+    const key = zone === "AMB" ? "fan_front_speed" : (zone === "SX" ? "duct_left_speed" : "duct_right_speed");
+    const changes = [{ reg_key: key, value: v }];
+    queueTriArcChanges(changes);
+  } else if (arcType === "pwr" && zone === "AMB") {
+    if (v === 8) {
+      queueTriArcChanges([{ reg_key: "fun_pwf_set", value: 1 }]);
+    } else if (v === 0) {
+      renderTriArcCockpit();
+      showToast("P0 (Éco) est un ralenti automatique enclenché lorsque la température atteint la consigne.");
+    } else {
+      const changes = [{ reg_key: "power_level", value: v }];
+      const pwfCur = Number(getTriArcLiveOrOpt("fun_pwf_set", getRegVal("fun_pwf_set", latestData.fun_pwf_set ?? 0)));
+      if (pwfCur > 0) {
+        changes.unshift({ reg_key: "fun_pwf_set", value: 0 });
+      }
+      // Ne désactive pas les fonctions auto lors du changement de puissance
+      queueTriArcChanges(changes);
+    }
+  }
+}
+
+function initTriArcInteractions() {
+  const vp = document.getElementById("triarc-carousel-viewport");
+  if (!vp) return;
+
+  // Gestion du glisser sur les arcs (consigne température, ventilation, puissance)
+  window.addEventListener("pointerdown", (e) => {
+    const hit = e.target.closest ? e.target.closest(".arc-hit") : null;
+    if (!hit) return;
+    const svg = hit.closest("svg");
+    if (!svg) return;
+    e.preventDefault();
+    const arcType = hit.dataset.arc;
+    const zone = svg.dataset.zone || triArcZone;
+    const val = updateTriArcValueFromPoint(svg, arcType, e.clientX, e.clientY);
+    if (val !== null) {
+      triArcDragging = { zone, arcType, value: val };
+      renderTriArcCockpit();
+    }
+  });
+
+  window.addEventListener("pointermove", (e) => {
+    if (!triArcDragging) return;
+    const svg = document.getElementById(`tri-arc-svg-${triArcDragging.zone}`);
+    if (!svg) return;
+    const val = updateTriArcValueFromPoint(svg, triArcDragging.arcType, e.clientX, e.clientY);
+    if (val !== null && val !== triArcDragging.value) {
+      triArcDragging.value = val;
+      renderTriArcCockpit();
+    }
+  });
+
+  window.addEventListener("pointerup", () => {
+    if (!triArcDragging) return;
+    const finished = { ...triArcDragging };
+    triArcDragging = null;
+    commitTriArcDrag(finished);
+  });
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   initThreePaneCockpit();
+  initTriArcInteractions();
+  renderTriArcCockpit();
   switchTab("tab-control"); // Pilotage affiché par défaut à gauche
   updateDynamicPowerButton();
   loadDashboard();
   initSSEStream();
   refreshMatterStatus(false);
-  initMobileCardObserver();
   // Filet de sécurité léger toutes les 60s si l'onglet navigateur a été mis en veille
   setInterval(refreshLatestOnly, 60000);
   // Rafraîchissement précis 1 Hz du compte à rebours Mode Silence ! dans le bouton

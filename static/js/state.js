@@ -104,37 +104,37 @@ const STOVE_PHASE_META = {
   },
   1: {
     code: 1, family: "IGNITION", short: "Check-up", label: "ATTENTE (Check-up)", icon: "🔍",
-    hex: "#f59e0b", rgb: "245, 158, 11",
-    bgClass: "bg-amber-600/85 text-white",
-    badgeClass: "bg-amber-950/90 border-amber-500 text-amber-300",
+    hex: "#facc15", rgb: "250, 204, 21",
+    bgClass: "bg-yellow-500/85 text-gray-950",
+    badgeClass: "bg-yellow-950/90 border-yellow-500 text-yellow-300",
     desc: "Phase 1/4 d'allumage : Diagnostic des sondes, pressostat Pa et balayage initial du foyer."
   },
   2: {
-    code: 2, family: "IGNITION", short: "Préchauff.", label: "DÉBUT (Préchauffage)", icon: "⚡",
-    hex: "#f59e0b", rgb: "245, 158, 11",
-    bgClass: "bg-amber-500/90 text-gray-950",
+    code: 2, family: "IGNITION", short: "Préchauff.", label: "DÉBUT (Préchauffage)", icon: "➰",
+    hex: "#fbbf24", rgb: "251, 191, 36",
+    bgClass: "bg-amber-400/90 text-gray-950",
     badgeClass: "bg-amber-950/90 border-amber-400 text-amber-200",
     desc: "Phase 2/4 d'allumage : Bougie de préchauffage incandescente active avant chute des granulés."
   },
   3: {
-    code: 3, family: "IGNITION", short: "Chargement", label: "DÉBUT (Chargement pellet)", icon: "🌾",
-    hex: "#fbbf24", rgb: "251, 191, 36",
-    bgClass: "bg-yellow-500/90 text-gray-950",
-    badgeClass: "bg-yellow-950/90 border-yellow-400 text-yellow-200",
+    code: 3, family: "IGNITION", short: "Chargement", label: "DÉBUT (Chargement pellet)", icon: "🪵",
+    hex: "#f59e0b", rgb: "245, 158, 11",
+    bgClass: "bg-amber-500/90 text-gray-950",
+    badgeClass: "bg-amber-950/90 border-amber-500 text-amber-200",
     desc: "Phase 3/4 d'allumage : Remplissage de la dose initiale de granulés dans le brasier sur bougie chaude."
   },
   4: {
-    code: 4, family: "IGNITION", short: "Allumage", label: "DÉBUT (Allumage flamme)", icon: "🔥",
-    hex: "#fb923c", rgb: "251, 146, 60",
+    code: 4, family: "IGNITION", short: "Allumage", label: "DÉBUT (Allumage flamme)", icon: "🪔",
+    hex: "#f97316", rgb: "249, 115, 22",
     bgClass: "bg-orange-500/90 text-white",
     badgeClass: "bg-orange-950/90 border-orange-400 text-orange-200",
     desc: "Phase 4/4 d'allumage : Apparition de la flamme et montée en température (Sonde K & Fumées)."
   },
   5: {
-    code: 5, family: "WORK", short: "Travail", label: "TRAVAIL (Normal)", icon: "🟢",
-    hex: "#10b981", rgb: "16, 185, 129",
-    bgClass: "bg-emerald-500/90 text-white",
-    badgeClass: "bg-emerald-950/90 border-emerald-500 text-emerald-300",
+    code: 5, family: "WORK", short: "Travail", label: "TRAVAIL (Normal)", icon: "🔥",
+    hex: "#ea580c", rgb: "234, 88, 12",
+    bgClass: "bg-orange-600/90 text-white",
+    badgeClass: "bg-orange-950/90 border-orange-500 text-orange-300",
     desc: "Régime nominal stabilisé : Modulation de puissance P1..P7 (ou P0 Éco / Risparmio) et soufflerie active."
   },
   6: {
@@ -152,7 +152,7 @@ const STOVE_PHASE_META = {
     desc: "Extinction en cours : Vis granulés arrêtée, ventilation forcée jusqu'au refroidissement sécurisé."
   },
   8: {
-    code: 8, family: "STANDBY", short: "Eco-Stop", label: "ECO STOP (Stand-by actif)", icon: "❄️",
+    code: 8, family: "STANDBY", short: "Eco-Stop", label: "ECO STOP (Stand-by actif)", icon: "⏳",
     hex: "#06b6d4", rgb: "6, 182, 212",
     bgClass: "bg-cyan-500/85 text-gray-950",
     badgeClass: "bg-cyan-950/90 border-cyan-400 text-cyan-200",

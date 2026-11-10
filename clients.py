@@ -179,7 +179,10 @@ class WeatherService:
             "weather_humidity": 66.0,
             "weather_wind_kmh": 13.7,
             "forecast_daily_means": [7.0, 6.0, 8.0, 6.5, 6.5, 7.0, 7.5, 7.0, 6.8, 6.5, 7.0, 7.2, 7.0, 6.8],
-            "forecast_daily_dates": []
+            "forecast_daily_mins": [3.5, 2.8, 4.2, 3.0, 3.1, 3.8, 4.0, 3.5, 3.2, 3.0, 3.5, 3.8, 3.5, 3.2],
+            "forecast_daily_maxs": [10.5, 9.2, 11.8, 10.0, 9.9, 10.2, 11.0, 10.5, 10.4, 10.0, 10.5, 10.6, 10.5, 10.4],
+            "forecast_daily_dates": [],
+            "last_update_epoch": 0
         }
         self.last_fetch_ts: float = 0.0
         self.last_coords: tuple = ("", "")
@@ -206,13 +209,18 @@ class WeatherService:
                 data = payload.get("current", {})
                 daily = payload.get("daily", {})
                 means = [float(x) for x in daily.get("temperature_2m_mean", []) if x is not None]
+                mins = [float(x) for x in daily.get("temperature_2m_min", []) if x is not None]
+                maxs = [float(x) for x in daily.get("temperature_2m_max", []) if x is not None]
                 dates = [str(x) for x in daily.get("time", [])]
                 self.last_weather = {
                     "weather_temp_ext": float(data.get("temperature_2m", self.last_weather["weather_temp_ext"])),
                     "weather_humidity": float(data.get("relative_humidity_2m", self.last_weather["weather_humidity"])),
                     "weather_wind_kmh": float(data.get("wind_speed_10m", self.last_weather["weather_wind_kmh"])),
                     "forecast_daily_means": means if means else self.last_weather.get("forecast_daily_means", []),
-                    "forecast_daily_dates": dates if dates else self.last_weather.get("forecast_daily_dates", [])
+                    "forecast_daily_mins": mins if mins else self.last_weather.get("forecast_daily_mins", []),
+                    "forecast_daily_maxs": maxs if maxs else self.last_weather.get("forecast_daily_maxs", []),
+                    "forecast_daily_dates": dates if dates else self.last_weather.get("forecast_daily_dates", []),
+                    "last_update_epoch": int(now)
                 }
                 self.last_fetch_ts = now
                 self.last_coords = coords

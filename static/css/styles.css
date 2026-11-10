@@ -273,5 +273,74 @@ input[type="range"]::-webkit-slider-thumb {
   box-shadow: 0 0 10px rgba(249, 115, 22, 0.5) !important;
 }
 
+/* ========================================================================== */
+/* CARROUSEL TRI-ARC (SWIPE HORIZONTAL SX ⇄ POÊLE ⇄ DX)                       */
+/* ========================================================================== */
+.triarc-carousel-viewport {
+  overflow: hidden !important;
+  width: 100% !important;
+  position: relative !important;
+  touch-action: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  overscroll-behavior: none !important;
+}
+
+#tab-control {
+  touch-action: none;
+  overscroll-behavior: none;
+}
+
+@media (max-width: 640px) {
+  #tab-control {
+    overflow-y: hidden;
+    height: calc(100dvh - 128px);
+    max-height: calc(100dvh - 128px);
+    display: flex;
+    flex-direction: column;
+  }
+  #triarc-cockpit-card {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .triarc-carousel-viewport {
+    flex: 1 1 0%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .triarc-carousel-track {
+    height: 100%;
+    flex: 1 1 0%;
+    min-height: 0;
+  }
+  .triarc-carousel-slide {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+}
+
+.triarc-carousel-track {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  width: 100% !important;
+  transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  will-change: transform !important;
+}
+
+.triarc-carousel-slide {
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
+  flex: 0 0 100% !important;
+  box-sizing: border-box !important;
+}
+
+
 
 

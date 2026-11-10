@@ -46,6 +46,44 @@ from matter_service import matter_manager
 _stove_io_lock = asyncio.Lock()
 sse_subscribers: Set[asyncio.Queue] = set()
 
+# État de communication avec le Cloud Nobis / Passerelle physique (dissocié de l'état du conteneur)
+_comm_status: Dict[str, Any] = {
+    "connected": True,
+    "last_sync_time": None,
+    "last_sync_epoch": None,
+    "last_error": None,
+    "comm_mode": "agua_cloud",
+}
+
+
+def get_comm_status() -> Dict[str, Any]:
+    """Retourne l'état de communication instantané du conteneur avec le Cloud Nobis ou la passerelle."""
+    global _comm_status
+    mode = get_active_mode()
+    # Si non initialisé depuis le démarrage, charger l'état depuis le dernier enregistrement en base
+    if _comm_status.get("last_sync_time") is None:
+        try:
+            conn = get_db(mode)
+            try:
+                row = conn.execute("SELECT epoch, timestamp, status_code, comm_mode FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
+                if row:
+                    r_dict = dict(row)
+                    st = int(r_dict.get("status_code", 0))
+                    _comm_status["connected"] = (st != -1)
+                    _comm_status["last_sync_time"] = r_dict.get("timestamp")
+                    _comm_status["last_sync_epoch"] = r_dict.get("epoch")
+                    _comm_status["comm_mode"] = r_dict.get("comm_mode") or mode
+                    if st == -1:
+                        _comm_status["last_error"] = "Poêle hors ligne (perte de liaison)"
+                else:
+                    _comm_status["comm_mode"] = mode
+                    _comm_status["connected"] = (mode == "simulation")
+            finally:
+                conn.close()
+        except Exception:
+            _comm_status["comm_mode"] = mode
+    return dict(_comm_status)
+
 
 async def broadcast_sse_event(event_type: str, payload: Dict[str, Any]):
     if not sse_subscribers:
@@ -840,6 +878,7 @@ def enrich_telemetry_record(conn: Any, record: Dict[str, Any]) -> Dict[str, Any]
     pellet_q, exhaust_q = evaluate_batch_combustion_and_trim(conn, record)
     record["pellet_quality"] = pellet_q
     record["exhaust_quality"] = exhaust_q
+    record["weather_details"] = weather_service.last_weather
 
     return record
 
@@ -896,20 +935,31 @@ async def _collect_telemetry_unlocked(force_mode: Optional[str] = None) -> Dict[
     r_val = {k: float(v["current_val"]) for k, v in regs.items()}
 
     raw_buf: Dict[int, float] = {}
+    cloud_error: Optional[str] = None
 
-    if comm_mode == "agua_cloud" and settings.get("agua_email") and settings.get("agua_password"):
-        try:
-            raw_buf = await agua_client.read_buffer(settings)
-        except Exception as e:
-            db_log("ERROR", "AGUA_CLOUD", f"Échec lecture buffer Agua IOT : {str(e)}", "agua_cloud")
+    if comm_mode == "agua_cloud":
+        if settings.get("agua_email") and settings.get("agua_password"):
+            try:
+                raw_buf = await agua_client.read_buffer(settings)
+            except Exception as e:
+                cloud_error = str(e)
+                db_log("ERROR", "AGUA_CLOUD", f"Échec lecture buffer Agua IOT : {str(e)}", "agua_cloud")
+        else:
+            cloud_error = "Identifiants Cloud Nobis Agua IOT non renseignés"
     elif comm_mode == "local_gateway":
         gw_url = settings.get("local_gateway_url", "http://192.168.1.150")
         try:
             raw_buf = await local_gateway_client.read_buffer(gw_url)
         except Exception as e:
+            cloud_error = str(e)
             db_log("ERROR", "LOCAL_GATEWAY", f"Échec lecture passerelle UART : {str(e)}", "local_gateway")
 
     if raw_buf:
+        _comm_status["connected"] = True
+        _comm_status["last_sync_time"] = now_str
+        _comm_status["last_sync_epoch"] = int(now.timestamp())
+        _comm_status["last_error"] = None
+        _comm_status["comm_mode"] = comm_mode
         if prev.get("status_code") == -1:
             db_log("INFO", "COMMUNICATION", f"Communication avec le poêle rétablie avec succès ({comm_mode}).", comm_mode)
 
@@ -1169,8 +1219,11 @@ async def _collect_telemetry_unlocked(force_mode: Optional[str] = None) -> Dict[
     elif comm_mode != "simulation":
         # En mode réel (agua_cloud / local_gateway), une absence de buffer correspond à une perte de connexion :
         # on enregistre des valeurs NULL sur les courbes du poêle pour créer un espace vide (rupture) sur les graphiques.
+        _comm_status["connected"] = False
+        _comm_status["last_error"] = cloud_error or f"Poêle injoignable ({comm_mode}) : rupture de communication ou absence de trame reçue."
+        _comm_status["comm_mode"] = comm_mode
         if prev.get("status_code") != -1:
-            db_log("ERROR", "COMMUNICATION", f"Poêle injoignable ({comm_mode}) : rupture de communication ou absence de trame reçue.", comm_mode)
+            db_log("ERROR", "COMMUNICATION", _comm_status["last_error"], comm_mode)
         prev_hopper = float(prev.get("pellet_hopper_pct") or 78.0)
         prev_date_str = str(prev.get("timestamp") or "")[:10]
         daily_kg = float(prev.get("pellet_daily_kg") or 0.0) if prev_date_str == now_str[:10] else 0.0
@@ -1199,6 +1252,11 @@ async def _collect_telemetry_unlocked(force_mode: Optional[str] = None) -> Dict[
             "raw_buffer_json": "{}"
         })
     else:
+        _comm_status["connected"] = True
+        _comm_status["last_sync_time"] = now_str
+        _comm_status["last_sync_epoch"] = int(now.timestamp())
+        _comm_status["last_error"] = None
+        _comm_status["comm_mode"] = "simulation"
         cmd_on = int(r_val.get("status_code", 85))
         sp_amb = float(r_val.get("temp_amb_setpoint", 19.0))
         prev_amb = float(prev.get("temp_ambient") or 19.5)
@@ -1458,6 +1516,7 @@ async def _collect_telemetry_unlocked(force_mode: Optional[str] = None) -> Dict[
         "active_mode": comm_mode,
         "active_db_file": os.path.basename(MODE_DB_PATHS[comm_mode]),
         "latest": record,
+        "comm_status": get_comm_status(),
         "settings": get_public_settings_dict(),
         "registers": get_registers_dict(comm_mode),
         "consumption_stats": consumption_stats,

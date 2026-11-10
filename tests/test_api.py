@@ -14,6 +14,8 @@ class TestAPIEndpoints(unittest.TestCase):
         data = resp.json()
         self.assertEqual(data["status"], "healthy")
         self.assertIn("active_mode", data)
+        self.assertIn("comm_status", data)
+        self.assertIn("connected", data["comm_status"])
 
     def test_api_latest(self):
         resp = self.client.get("/api/latest")
@@ -21,6 +23,7 @@ class TestAPIEndpoints(unittest.TestCase):
         data = resp.json()
         self.assertIn("active_mode", data)
         self.assertIn("latest", data)
+        self.assertIn("comm_status", data)
         self.assertIn("registers", data)
         self.assertIn("consumption_stats", data)
 
@@ -29,6 +32,7 @@ class TestAPIEndpoints(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertIn("series", data)
+        self.assertIn("comm_status", data)
         self.assertIn("consumption_stats", data)
 
     def test_silence_status(self):
@@ -43,6 +47,25 @@ class TestAPIEndpoints(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertIn("enabled", data)
+
+    def test_comm_status_dissociation(self):
+        # Vérifie que l'état de connexion conteneur (/health -> status: healthy)
+        # est bien dissocié de l'état de liaison au cloud / passerelle (comm_status)
+        resp = self.client.get("/health")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["status"], "healthy")
+        self.assertIn("comm_status", data)
+        comm = data["comm_status"]
+        self.assertIn("connected", comm)
+        self.assertIn("comm_mode", comm)
+
+        # Vérification sur /api/poll-now
+        poll_resp = self.client.post("/api/poll-now")
+        self.assertEqual(poll_resp.status_code, 200)
+        poll_data = poll_resp.json()
+        self.assertEqual(poll_data["status"], "ok")
+        self.assertIn("comm_status", poll_data)
 
     def test_client_error_logging(self):
         payload = {
