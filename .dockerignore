@@ -11,8 +11,7 @@ __pycache__
 *.db
 *.db-wal
 *.db-shm
-data/*.db*
-data/matter_storage/
+data/
 matter_bridge/node_modules
 Dockerfile.txt
 
