@@ -2,7 +2,7 @@
 
 > **Cockpit de supervision haute fidélité, télémétrie temps réel et passerelle domotique Matter locale pour poêles à granulés Nobis (gamme A10 / A8 C Light Style Coax - électronique Micronova).**
 
-[![Release](https://img.shields.io/badge/Release-v1.0.0-blueviolet.svg)](https://github.com/malexxx/nobis-a10-supervisor/releases/tag/v1.0)
+[![Release](https://img.shields.io/badge/Release-v1.0.0-blueviolet.svg)](https://github.com/malexxx/Nobis.Supervisor/releases/tag/v1.0)
 [![Python Version](https://img.shields.io/badge/Python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-1.0.0-009688.svg)](https://fastapi.tiangolo.com/)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-green.svg)](https://nodejs.org/)
@@ -14,24 +14,112 @@
 
 ---
 
-## 📸 Aperçu du Cockpit v1.0
+## 🖥️ Visite Guidée des Écrans
+
+Découvrez l'interface de **Nobis.Supervisor v1.0**, pensée pour offrir une expérience réactive, moderne et épurée sur PC, tablette et smartphone :
+
+---
+
+### 1. 🎛️ Écran Pilotage Thermique — Cockpit Tri-Arc
+> *Le centre névralgique de commande du poêle avec triple jauge circulaire interactive, suivi d'état en direct et accès immédiat aux fonctions de confort.*
 
 <p align="center">
-  <img src="docs/screenshots/cockpit_triarc_v1.0.png" alt="Cockpit Tri-Arc Nobis Supervisor v1.0" width="420" style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="docs/screenshots/cockpit_timeline_v1.0.png" alt="Frise Chrono 4 pistes Nobis Supervisor v1.0" width="420" style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
+  <img src="docs/screenshots/01_pilotage_cockpit.png" alt="Écran Pilotage Thermique - Cockpit Tri-Arc" width="950" style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
 </p>
 
+- **Triple Jauge Tri-Arc haute précision** : manipulation fluide à la souris ou au doigt de la **Consigne de Température** (7 à 40°C), de la **Puissance de chauffe** (P1 à P7) et de la **Vitesse de ventilation frontale** (0=OFF, 1 à 7, ou 8=Auto/PS).
+- **Affichage Double-État** : distinction visuelle claire entre la consigne désirée (marqueur lumineux) et la valeur réelle instantanée mesurée par les thermocouples et capteurs de la carte mère.
+- **Bandeau de Statut & Sécurité** : état temps réel du poêle (Allumage, Travail, Nettoyage, Arrêt, Alarme) avec bouton Marche/Arrêt sécurisé.
+- **Accès Rapide Confort** : activation en 1 clic du **Mode Silence !** temporisé, des bascules **Modulation Auto**, **Mode ECO (Stand-by)** et **BOOST (PWF)**.
+- **Canalisations Séparées** : volets dédiés pour la gestion indépendante des ventilateurs de canalisation d'air chaud Gauche (SX) et Droite (DX).
+- **Mini-Frise Hebdomadaire intégrée** : projection miniature des plages programmées avec ligne rouge centrale marquant l'heure courante.
+
+---
+
+### 2. 🪵 Écran Pellets, Trémie & Autonomie Météo
+> *Suivi précis du combustible restant, ravitaillement express et calcul d'autonomie corrélé aux températures extérieures.*
+
 <p align="center">
-  <em>Gauche : Cockpit Tri-Arc interactif (Température, Puissance de flamme, Ventilation avec distinction Consigne / Réel).<br>
-  Droite : Frise chronologique hebdomadaire à 4 pistes distinctes (P1 émeraude, P2 ambre, P3 cyan, P4 violet) avec repère temps réel.</em>
+  <img src="docs/screenshots/02_pellets_tremie.png" alt="Écran Pellets Trémie et Météo" width="950" style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
 </p>
+
+- **Jauge de Réservoir Granulés (30 kg)** : niveau en temps réel affiché en pourcentage (%) et en kilogrammes restants avec alerte visuelle sous le seuil critique de réserve.
+- **Ravitaillement en 1 clic** : bouton **"+ Sac 15 kg"** pour ajouter rapidement un sac lors du rechargement avec plafonnement automatique à 30 kg et mise à jour de l'historique.
+- **Météo Locale en Direct (Open-Meteo)** : température extérieure, vitesse du vent, humidité relative et conditions atmosphériques locales sans clé API.
+- **Prédiction d'Autonomie (Runway)** : estimation dynamique du nombre de jours de chauffage restants selon la consommation réelle de la vis sans fin d'alimentation (`auger_duty_pct`) et la rigueur climatique prévue sur les 7 prochains jours.
+
+---
+
+### 3. 📅 Écran Chrono — Programmation Hebdomadaire 4 Pistes
+> *Planification fine du chauffage avec frise chronologique 4 pistes non superposées et synchronisation d'horloge NTP.*
+
+<p align="center">
+  <img src="docs/screenshots/03_chrono_hebdomadaire.png" alt="Écran Programmation Chrono Hebdomadaire" width="950" style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
+</p>
+
+- **Frise Visuelle 4 Pistes Indépendantes** :
+  - **P1** (Vert Émeraude)
+  - **P2** (Ambre Chaleureux)
+  - **P3** (Cyan Lumineux)
+  - **P4** (Violet Moderne)
+- **Repère Temporel Central** : ligne verticale rouge à 50% matérialisant l'instant présent sur une fenêtre glissante de 24h (12h passées / 12h à venir) sans encombrement textuel superflu.
+- **Édition Intuitive des Programmes** :
+  - Sélection des jours actifs de la semaine (Lundi au Dimanche).
+  - Plages de début et de fin par incréments de 10 minutes.
+  - Consignes thermiques dédiées par programme : température d'ambiance, puissance de flamme et ventilation.
+- **Synchronisation NTP en 1 Clic** : bouton permettant d'aligner l'horloge interne de la carte mère Micronova avec la seconde exacte de votre serveur ou box domotique.
+
+---
+
+### 4. 📈 Écran Supervision & Télémétrie Graphique
+> *Tableau de bord thermodynamique haute fidélité avec graphiques Chart.js et indicateurs de santé du foyer.*
+
+<p align="center">
+  <img src="docs/screenshots/04_supervision_graphiques.png" alt="Écran Supervision et Télémétrie Graphique" width="950" style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
+</p>
+
+- **Graphiques Historiques Interactifs** : sélecteur de portée temporelle multi-échelle (**1h, 6h, 12h, 24h, 7 jours, 30 jours**).
+- **Courbes Thermiques & Aérauliques** :
+  - Température des fumées (°C) vs régime de l'extracteur (RPM).
+  - Température ambiante mesurée vs température de consigne.
+  - Dépression du foyer en Pascal (Pa) pour la surveillance du tirage du conduit coaxial.
+- **Qualité de Combustion** : indicateur temps réel corrélant la température du thermocouple flamme K aux débits théoriques attendus.
+- **Compteur de Maintenance CAT** : suivi du temps de fonctionnement résiduel avant le passage obligatoire d'entretien préventif des 2500 heures.
+
+---
+
+### 5. 🔧 Écran Paramètres, Pont Matter & Installateur
+> *Gestion de la connectivité Matter, choix du mode de communication matériel, sauvegardes EEPROM et diagnostic des alarmes.*
+
+<p align="center">
+  <img src="docs/screenshots/05_installateur_matter.png" alt="Écran Installateur et Pont Matter" width="950" style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
+</p>
+
+- **Passerelle Matter Locale** : affichage du **QR Code SVG** haute résolution et du code manuel d'appairage local (sans cloud) pour Google Home, Apple Maison / Siri, Amazon Alexa et Home Assistant.
+- **Bascule de Mode de Communication** : passage à chaud entre `simulation` (jumeau numérique physique), `agua_cloud` (API Cloud Micronova) et `local_gateway` (passerelle locale UART/RS485).
+- **Instantanés de Configuration (Snapshots)** : sauvegarde complète de tous les registres RAM et EEPROM en base SQLite avec restauration totale en 1 clic.
+- **Audit des Ordres & Rollback** : journal horodaté de toutes les commandes émises avec possibilité de rollback unitaire en cas d'erreur de manipulation.
+- **Gestionnaire d'Alarmes & Défauts** : diagnostic immédiat parmi les 29 codes de sécurité Micronova (AL01 à AL29) et commande de réarmement à distance.
+
+---
+
+### 📱 Vue Mobile Dédiée (PWA Installable)
+> *Une expérience d'application native sur iOS et Android sans passer par les stores d'applications.*
+
+<p align="center">
+  <img src="docs/screenshots/00_cockpit_mobile.png" alt="Cockpit Mobile PWA Nobis Supervisor" width="380" style="border-radius: 18px; box-shadow: 0 15px 35px rgba(0,0,0,0.6);" />
+</p>
+
+- **Format Standalone** : plein écran sans barre d'adresse ni boutons de navigation du navigateur.
+- **Ergonomie Touch Optimisée** : zones de saisie agrandies pour un confort parfait au pouce et navigation tactile par barre d'onglets inférieure.
+- **Support Hors-Ligne & Cache Rapide** : Service Worker v1.0 avec mise en cache locale des assets.
 
 ---
 
 ## 📖 Sommaire
 
 - [Aperçu & Objectifs](#-aperçu--objectifs)
+- [Visite Guidée des Écrans](#-visite-guidée-des-écrans)
 - [Nouveautés de la Version 1.0](#-nouveautés-de-la-version-10)
 - [Fonctionnalités Principales](#-fonctionnalités-principales)
   - [Pilotage Thermique & Cockpit Tri-Arc](#-pilotage-thermique--cockpit-tri-arc)
@@ -253,8 +341,8 @@ Le déploiement sous Docker est la solution la plus simple et la plus fiable. L'
 
 1. **Cloner le dépôt Git :**
    ```bash
-   git clone https://github.com/malexxx/nobis-a10-supervisor.git
-   cd nobis-a10-supervisor
+   git clone https://github.com/malexxx/Nobis.Supervisor.git
+   cd Nobis.Supervisor
    ```
 
 2. **Lancer le conteneur avec Docker Compose :**
@@ -283,8 +371,8 @@ Le déploiement sous Docker est la solution la plus simple et la plus fiable. L'
 
 1. **Cloner le dépôt :**
    ```bash
-   git clone https://github.com/malexxx/nobis-a10-supervisor.git
-   cd nobis-a10-supervisor
+   git clone https://github.com/malexxx/Nobis.Supervisor.git
+   cd Nobis.Supervisor
    ```
 
 2. **Configurer l'environnement virtuel Python :**
