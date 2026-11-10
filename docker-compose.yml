@@ -1,17 +1,21 @@
-version: "3.9"
-
 services:
-  nobis-supervisor:
-    build: .
-    image: nobis.supervisor:latest
+  nobis.supervisor:
+    image: ghcr.io/malexxx/nobis.supervisor:latest
     container_name: nobis.supervisor
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "1221:8080"
       - "5540:5540/udp"
-      - "5540:5540/tcp"
     volumes:
-      - ./data:/app/data
+      - /volume1/docker/nobis.supervisor/data:/app/data
     environment:
       - TZ=Europe/Paris
       - DB_PATH=/app/data/nobis_a10.db
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 3600 --cleanup nobis.supervisor
