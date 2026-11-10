@@ -1,0 +1,31 @@
+{
+    admin off
+}
+
+# ==============================================================================
+# MODE 1 (Par défaut) : Accès local par IP avec certificat interne automatique
+# ==============================================================================
+# Port 1221 en HTTPS : Caddy génère son propre certificat local (tls internal).
+# Note : Pour éviter l'avertissement de sécurité sur mobile, installez le certificat
+# racine de Caddy sur Android ou passez au MODE 2 avec un nom de domaine.
+:1221 {
+    tls internal
+
+    reverse_proxy nobis.supervisor:8080 {
+        # Streaming instantané pour les événements SSE (Server-Sent Events)
+        flush_interval -1
+    }
+}
+
+# ==============================================================================
+# MODE 2 (Recommandé pour PWA Android avec certificat officiel Let's Encrypt)
+# ==============================================================================
+# Si vous possédez un nom de domaine ou DDNS gratuit (ex: DuckDNS, synology.me),
+# décommentez le bloc ci-dessous et commentez le bloc :1221 ci-dessus :
+#
+# nobis.votre-domaine.fr {
+#     reverse_proxy nobis.supervisor:8080 {
+#         flush_interval -1
+#     }
+# }
+

@@ -4,13 +4,27 @@ services:
     container_name: nobis.supervisor
     restart: unless-stopped
     ports:
-      - "1221:8080"
       - "5540:5540/udp"
+      # Accès HTTP direct conservé en secours sur le port 1220 si besoin :
+      - "1220:8080"
     volumes:
       - /volume1/docker/nobis.supervisor/data:/app/data
     environment:
       - TZ=Europe/Paris
       - DB_PATH=/app/data/nobis_a10.db
+
+  caddy:
+    image: caddy:alpine
+    container_name: nobis.caddy
+    restart: unless-stopped
+    ports:
+      - "1221:1221"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /volume1/docker/nobis.supervisor/caddy_data:/data
+      - /volume1/docker/nobis.supervisor/caddy_config:/config
+    depends_on:
+      - nobis.supervisor
 
   watchtower:
     image: containrrr/watchtower
