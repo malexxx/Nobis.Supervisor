@@ -195,6 +195,90 @@ class TestNobisA10Calibration(unittest.TestCase):
         self.assertEqual(eeprom_memory[70], engine.result.recommended_offset_70)
         self.assertEqual(eeprom_memory[71], engine.result.recommended_offset_71)
 
+    def test_engine_serialization_roundtrip_persistence(self):
+        """Vérifie que le moteur peut être sérialisé et restauré depuis SQLite sans perte."""
+        engine = NobisA10CalibrationEngine()
+        engine.start_process(CalibrationMode.COMBINED_BOTH)
+        s0 = make_sample(0.0, phase=StoveOperationalPhase.ALARM, alarm="AL-03")
+        engine.confirm_initial_al03(s0)
+        s_off = make_sample(60.0, phase=StoveOperationalPhase.OFF)
+        engine.confirm_stove_off_and_load_charge(s_off, weighed_bag_kg=15.0, priming_aspirated_kg=0.2)
+
+        # Ingestion de quelques échantillons
+        ts = 100.0
+        engine.ingest_telemetry(make_sample(ts, phase=StoveOperationalPhase.STARTING, rpm_actual=425.0))
+        ts += 300.0
+        engine.ingest_telemetry(make_sample(ts, phase=StoveOperationalPhase.WORK, power=4, smoke_c=136.0))
+
+        # Sérialisation
+        dump = engine.to_dict()
+        self.assertEqual(dump["state"], CalibrationState.RUNNING_ACQUISITION.value)
+        self.assertEqual(dump["weighed_mass_kg"], 15.0)
+        self.assertEqual(dump["priming_extracted_mass_kg"], 0.2)
+
+        # Restauration
+        restored = NobisA10CalibrationEngine.from_dict(dump)
+        self.assertEqual(restored.state, CalibrationState.RUNNING_ACQUISITION)
+        self.assertEqual(restored.weighed_mass_kg, 15.0)
+        self.assertEqual(restored.priming_extracted_mass_kg, 0.2)
+        self.assertAlmostEqual(
+            restored.get_current_estimated_consumed_mass_kg(),
+            engine.get_current_estimated_consumed_mass_kg(),
+            places=3
+        )
+
+    def test_calibration_service_background_flow(self):
+        """Vérifie que NobisCalibrationService gère les étapes et persiste en tâche de fond."""
+        from src.calibration.calibration_service import get_calibration_service
+        service = get_calibration_service()
+        service.reset_session()
+
+        status_idle = service.get_status()
+        self.assertEqual(status_idle["step"], 1)
+        self.assertEqual(status_idle["state"], "IDLE")
+
+        # Step 1
+        s0 = make_sample(0.0, phase=StoveOperationalPhase.ALARM, alarm="AL-03", pwf_mode="OFF")
+        r1 = service.start_preflight("COMBINED_BOTH", s0)
+        self.assertTrue(r1["success"])
+        self.assertEqual(service.active_step, 2)
+
+        # Step 2
+        r2 = service.confirm_initial_al03(s0)
+        self.assertTrue(r2["success"])
+        self.assertEqual(service.active_step, 3)
+
+        # Step 3
+        s_off = make_sample(60.0, phase=StoveOperationalPhase.OFF)
+        r3 = service.load_weighed_charge(s_off, weighed_bag_kg=15.0, aspirated_priming_g=0.0)
+        self.assertTrue(r3["success"])
+        self.assertEqual(service.active_step, 4)
+
+        # Simulation cycle télémétrie en arrière-plan
+        rec = {
+            "epoch": 200,
+            "status_code": 5,
+            "power_actual": 4,
+            "temp_probe_k": 620.0,
+            "temp_fumes": 140.0,
+            "depression_pa": 17.5,
+            "exhaust_rpm": 1850,
+            "alarm_code": 0
+        }
+        service.process_telemetry_record(rec)
+
+        # Vérification qu'une nouvelle instance du service recharge l'état exact depuis SQLite
+        from src.calibration.calibration_service import NobisCalibrationService
+        new_instance = NobisCalibrationService()
+        self.assertEqual(new_instance.active_step, 4)
+        self.assertEqual(new_instance.engine.state, CalibrationState.RUNNING_ACQUISITION)
+        self.assertEqual(new_instance.engine.weighed_mass_kg, 15.0)
+
+        # Reset
+        service.reset_session()
+        self.assertEqual(service.active_step, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
+

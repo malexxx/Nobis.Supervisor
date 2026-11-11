@@ -13,6 +13,7 @@ from .nobis_calibration import (
     NobisA10CalibrationEngine,
 )
 from .calibration_wizard import NobisCalibrationWizard
+from .calibration_service import NobisCalibrationService, get_calibration_service
 
 __all__ = [
     "CalibrationMode",
@@ -23,4 +24,6 @@ __all__ = [
     "CalibrationResult",
     "NobisA10CalibrationEngine",
     "NobisCalibrationWizard",
+    "NobisCalibrationService",
+    "get_calibration_service",
 ]

@@ -188,14 +188,14 @@ Le poêle à pellets étanche et coaxial **Nobis A10 C Light Style Coax** (comme
   - **Mode ECO (Stand-by)** : coupure et réallumage automatiques dès que la température de consigne est atteinte.
   - **Mode BOOST (PWF)** : surpuissance temporaire pour réchauffer rapidement la pièce.
 
-### 🤫 Mode Silence ! Temporisé
+### 🤫 Mode Silence ! Intelligent & Temporisé
 Une exclusivité conçue pour les moments de repos ou de lecture :
-- **Activation en 1 clic** : bascule immédiatement le poêle en **convection naturelle 100% silencieuse**.
-- Bride la puissance sur **P1** et coupe l'intégralité des ventilateurs (Frontale, Canalisations SX et DX à 0).
-- Désactive temporairement les modes Auto, ECO et BOOST.
-- **Temporisation réglable** : présélections rapides 1h, **2h (défaut)**, 3h, 4h ou saisie personnalisée en minutes/heures.
-- Compte à rebours dynamique affiché sur le bouton de commande.
-- **Restauration automatique** : à la fin du timer, les réglages initiaux de puissance et de ventilation sont automatiquement rétablis.
+- **Activation en 1 clic** avec temporisation réglable (présélections rapides 1h, **2h par défaut**, 3h, 4h ou durée libre).
+- **Régulation intelligente selon l'état du poêle** :
+  - **Si le poêle est éteint** : bascule immédiatement toutes les consignes de température (Ambiance Salon, Canalisation Gauche SX, Canalisation Droite DX) en **hors gel (7°C)**.
+  - **Si le poêle est allumé** : désactive le mode **BOOST**, le **Mode Éco (Stand-by)** et la **programmation horaire (Chrono)**, active le **Mode Auto total** et passe toutes les consignes en **hors gel (7°C)**. Le poêle régule ainsi automatiquement en puissance minimale **P0** et ventilation **Ventil 0** (convection 100% silencieuse) **sans jamais s'éteindre**.
+- **Compte à rebours dynamique** affiché en temps réel dans l'interface et sur le bouton de commande.
+- **Restauration automatique intégrale** : à l'échéance du timer ou lors d'une modification manuelle, l'ensemble des consignes et paramètres initiaux sont fidèlement rétablis.
 
 ### 📅 Chrono Hebdomadaire (P1 à P4)
 - **4 plages programmables indépendantes** (P1, P2, P3, P4).
@@ -467,8 +467,8 @@ Le superviseur met à disposition une API REST moderne et documentée, accessibl
 | `GET` | `/api/dashboard?range_key=24h` | Historique agrégé pour les courbes graphiques (1h, 6h, 12h, 24h, 7j, 30j) |
 | `POST` | `/api/command` | Écriture d'un registre (`reg_key`, `new_val`) |
 | `POST` | `/api/command-batch` | Écriture groupée de plusieurs registres en une seule requête |
-| `POST` | `/api/silence/activate` | Activation du mode Silence ! avec durée en heures |
-| `POST` | `/api/silence/deactivate` | Fin anticipée du mode Silence ! et restauration des paramètres |
+| `POST` | `/api/silence/activate` | Activation du mode Silence intelligent avec durée en heures |
+| `POST` | `/api/silence/deactivate` | Fin anticipée du mode Silence intelligent et restauration intégrale des consignes |
 | `GET` | `/api/silence/status` | Statut du mode Silence et compte à rebours restant |
 | `GET` | `/api/matter/status` | Statut du pont Matter, QR Code d'appairage et code manuel |
 | `POST` | `/api/matter/restart` | Redémarrage du sous-processus pont Matter |

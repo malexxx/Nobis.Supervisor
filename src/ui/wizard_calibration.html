@@ -32,7 +32,24 @@
 </head>
 
 <body class="min-h-screen flex flex-col p-4 md:p-8">
-  <div class="max-w-5xl w-full mx-auto space-y-6">
+  <div class="max-w-5xl w-full mx-auto space-y-5">
+
+    <!-- BANNIÈRE PERSISTANCE ARRIÈRE-PLAN -->
+    <div class="card p-3 bg-emerald-950/40 border border-emerald-600/50 text-xs flex flex-wrap items-center justify-between gap-3 shadow-lg">
+      <div class="flex items-center gap-2 text-emerald-300">
+        <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span class="font-bold">Mode Arrière-Plan Persistant Actif :</span>
+        <span class="text-gray-300">L'acquisition tourne en continu sur le serveur. Vous pouvez fermer cette page ou quitter votre navigateur à tout moment sans rien perdre.</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <a href="/" class="px-2.5 py-1 rounded bg-gray-900 hover:bg-gray-800 text-gray-300 border border-gray-700 font-semibold transition text-[11px]">
+          ⬅ Retour Cockpit
+        </a>
+        <button type="button" onclick="confirmResetCalibration()" class="px-2.5 py-1 rounded bg-red-950/60 hover:bg-red-900 text-red-300 border border-red-800/80 font-semibold transition text-[11px]" title="Effacer la session active et recommencer à zéro">
+          🔄 Réinitialiser
+        </button>
+      </div>
+    </div>
 
     <!-- EN-TÊTE DU WIZARD -->
     <header class="card p-5 border-l-4 border-l-orange-500 shadow-xl flex flex-wrap items-center justify-between gap-4">
@@ -52,7 +69,7 @@
       </div>
       <div class="flex items-center gap-2">
         <span id="global-badge-status" class="px-3 py-1 text-xs font-bold rounded-full bg-gray-800 text-gray-300 border border-gray-700">
-          État : EN ATTENTE
+          État : CHARGEMENT...
         </span>
       </div>
     </header>
@@ -150,7 +167,7 @@
       </div>
 
       <div class="flex justify-end pt-3 border-t border-gray-800">
-        <button type="button" onclick="executeStep1()" class="px-5 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold shadow-lg transition">
+        <button type="button" id="btn-step1" onclick="executeStep1()" class="px-5 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold shadow-lg transition">
           Lancer le Pré-contrôle ➔
         </button>
       </div>
@@ -180,7 +197,7 @@
 
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-center text-xs tabular-nums font-mono">
         <div class="card p-3 bg-gray-900/60">
-          <span class="text-[10px] text-gray-400 block font-sans">Alarme courante</span>
+          <span class="text-[10px] text-gray-400 block font-sans">Alarme poêle</span>
           <span id="st2-alarm" class="font-bold text-amber-400 text-sm">--</span>
         </div>
         <div class="card p-3 bg-gray-900/60">
@@ -201,7 +218,7 @@
         <button type="button" onclick="goToStep(1)" class="px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold">
           ⬅ Retour
         </button>
-        <button type="button" onclick="executeStep2()" class="px-5 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold shadow-lg transition">
+        <button type="button" id="btn-step2" onclick="executeStep2()" class="px-5 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold shadow-lg transition">
           Confirmer AL-03 & Réarmer ➔
         </button>
       </div>
@@ -252,7 +269,7 @@
         <button type="button" onclick="goToStep(2)" class="px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-semibold">
           ⬅ Retour
         </button>
-        <button type="button" onclick="executeStep3()" class="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg transition">
+        <button type="button" id="btn-step3" onclick="executeStep3()" class="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg transition">
           Verrouiller la Charge & Démarrer l'Acquisition ➔
         </button>
       </div>
@@ -266,7 +283,7 @@
             <span>📡</span> Étape 4 : Suivi Télémétrique & Traitement des Phases en Direct
           </h2>
           <p class="text-xs text-gray-400 mt-0.5">
-            L'acquisition tourne en continu jusqu'à la panne sèche finale validée par AL-03.
+            L'acquisition tourne en tâche de fond jusqu'à la panne sèche finale validée par AL-03.
           </p>
         </div>
         <div class="flex items-center gap-2">
@@ -326,6 +343,11 @@
         <div id="st4-tier-hours" class="grid grid-cols-3 sm:grid-cols-9 gap-2 text-center text-xs font-mono tabular-nums">
           <!-- Injecté dynamiquement -->
         </div>
+      </div>
+
+      <div class="p-3 rounded-lg bg-gray-900/70 border border-gray-800 text-[11px] text-gray-400 flex items-center justify-between">
+        <span>🔄 L'acquisition continue automatiquement sur le serveur toutes les 60 secondes.</span>
+        <span id="st4-sync-label" class="font-mono text-emerald-400">Synchronisé</span>
       </div>
     </section>
 
@@ -435,10 +457,10 @@
   </div>
 
   <script>
-    // ÉTAT LOCAL DU WIZARD POUR L'INTERFACE
     let currentStep = 1;
-    let selectedMode = "COMBINED_BOTH";
+    let pollTimer = null;
 
+    // Navigation d'onglets visuelle
     function goToStep(step) {
       currentStep = step;
       for (let i = 1; i <= 5; i++) {
@@ -459,60 +481,233 @@
       }
     }
 
-    function executeStep1() {
-      const modeRadio = document.querySelector('input[name="calib_mode"]:checked');
-      selectedMode = modeRadio ? modeRadio.value : "COMBINED_BOTH";
-      document.getElementById('global-badge-status').textContent = "État : PRÉ-CONTRÔLE VALIDÉ";
-      document.getElementById('global-badge-status').className = "px-3 py-1 text-xs font-bold rounded-full bg-orange-950 text-orange-400 border border-orange-800";
-      goToStep(2);
-      // Simulation / mise à jour des valeurs
-      document.getElementById('st2-alarm').textContent = "AL-03";
-      document.getElementById('st2-phase').textContent = "ALARME";
-      document.getElementById('st2-curr').textContent = "0 mA";
-      document.getElementById('st2-flame').textContent = "42 °C";
+    // Récupération de l'état persistant depuis le backend
+    async function fetchCalibrationStatus() {
+      try {
+        const res = await fetch('/api/calibration/status');
+        if (!res.ok) return;
+        const data = await res.json();
+        updateUIWithState(data);
+      } catch (e) {
+        console.warn("Échec récupération statut calibration:", e);
+      }
     }
 
-    function executeStep2() {
-      document.getElementById('global-badge-status').textContent = "État : PRÊT POUR CHARGE";
-      document.getElementById('global-badge-status').className = "px-3 py-1 text-xs font-bold rounded-full bg-amber-950 text-amber-400 border border-amber-800";
-      goToStep(3);
+    function updateUIWithState(data) {
+      if (!data) return;
+
+      const badge = document.getElementById('global-badge-status');
+      if (data.state === "IDLE") {
+        badge.textContent = "État : PRÊT (IDLE)";
+        badge.className = "px-3 py-1 text-xs font-bold rounded-full bg-gray-800 text-gray-300 border border-gray-700";
+      } else if (data.state === "WAITING_INITIAL_AL03") {
+        badge.textContent = "État : ATTENTE CUVE VIDE (AL-03)";
+        badge.className = "px-3 py-1 text-xs font-bold rounded-full bg-amber-950 text-amber-400 border border-amber-800";
+      } else if (data.state === "RUNNING_ACQUISITION") {
+        badge.textContent = "État : ACQUISITION ARRIÈRE-PLAN";
+        badge.className = "px-3 py-1 text-xs font-bold rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800";
+      } else if (data.state === "COMPLETED_LOCKED") {
+        badge.textContent = "État : CLÔTURÉ (AL-03)";
+        badge.className = "px-3 py-1 text-xs font-bold rounded-full bg-sky-950 text-sky-400 border border-sky-800";
+      }
+
+      // Synchronisation de l'étape active
+      if (data.step && data.step !== currentStep) {
+        goToStep(data.step);
+      }
+
+      // Étape 4 : Métriques d'acquisition
+      if (data.step === 4 || data.state === "RUNNING_ACQUISITION") {
+        document.getElementById('st4-progress-pct').textContent = `${data.progress_pct}%`;
+        document.getElementById('st4-progress-bar').style.width = `${Math.min(100, Math.max(0, data.progress_pct))}%`;
+        document.getElementById('st4-consumed-kg').textContent = data.estimated_consumed_kg.toFixed(3);
+        document.getElementById('st4-remaining-kg').textContent = data.estimated_remaining_kg.toFixed(3);
+
+        const phaseBadge = document.getElementById('st4-phase-badge');
+        phaseBadge.textContent = `${data.current_phase || 'TRAVAIL'} ${data.current_power_tier || ''}`;
+
+        if (data.phase_breakdown) {
+          document.getElementById('st4-ign-count').textContent = data.phase_breakdown.ignition_cycles_count || 0;
+          document.getElementById('st4-ign-mass').textContent = (data.phase_breakdown.startup_estimated_mass_kg || 0).toFixed(3);
+          document.getElementById('st4-warmup-samples').textContent = data.phase_breakdown.warmup_filtered_combustion_samples || 0;
+          document.getElementById('st4-starve-min').textContent = (data.phase_breakdown.starvation_pre_al03_ignored_min || 0).toFixed(1);
+        }
+        document.getElementById('st4-valid-samples').textContent = data.valid_combustion_samples_count || 0;
+
+        renderTierHours(data.hours_per_tier || {});
+      }
+
+      // Étape 5 : Résultats
+      if (data.result && (data.step === 5 || data.state === "COMPLETED_LOCKED")) {
+        const r = data.result;
+        document.getElementById('res-k-factor').textContent = r.intrinsic_k_factor.toFixed(4);
+        const deltaPct = ((r.intrinsic_k_factor - 1.0) * 100.0);
+        document.getElementById('res-k-delta').textContent = `(${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)} %)`;
+        document.getElementById('res-smoke-delta').textContent = `${r.mean_smoke_temp_delta_c >= 0 ? '+' : ''}${r.mean_smoke_temp_delta_c.toFixed(1)} °C`;
+        document.getElementById('res-prs-delta').textContent = `${r.mean_pressure_error_pct >= 0 ? '+' : ''}${r.mean_pressure_error_pct.toFixed(1)} %`;
+
+        document.getElementById('res-cur-70').textContent = `${r.current_offset_70 >= 0 ? '+' : ''}${r.current_offset_70} %`;
+        document.getElementById('res-rec-70').textContent = `${r.recommended_offset_70 >= 0 ? '+' : ''}${r.recommended_offset_70} %`;
+        document.getElementById('res-cur-71').textContent = `${r.current_offset_71 >= 0 ? '+' : ''}${r.current_offset_71} %`;
+        document.getElementById('res-rec-71').textContent = `${r.recommended_offset_71 >= 0 ? '+' : ''}${r.recommended_offset_71} %`;
+
+        renderFlowsTable(r.before_flows_kgh, r.measured_raw_flows_kgh, r.coupled_effective_flows_kgh);
+      }
     }
 
-    function executeStep3() {
-      const bagKg = parseFloat(document.getElementById('input-bag-kg').value) || 15.0;
-      const aspG = parseFloat(document.getElementById('input-aspirated-g').value) || 0;
-      const netKg = bagKg - (aspG / 1000.0);
-
-      document.getElementById('st4-remaining-kg').textContent = netKg.toFixed(3);
-      document.getElementById('global-badge-status').textContent = "État : EN ACQUISITION";
-      document.getElementById('global-badge-status').className = "px-3 py-1 text-xs font-bold rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800";
-      
-      initTierHoursDisplay();
-      goToStep(4);
-    }
-
-    function initTierHoursDisplay() {
+    function renderTierHours(hoursMap) {
       const container = document.getElementById('st4-tier-hours');
       container.innerHTML = "";
       for (let k = 0; k <= 8; k++) {
+        const key = `P${k}`;
+        const h = hoursMap[key] || 0.0;
         const div = document.createElement('div');
         div.className = "card p-2 bg-gray-950/70 border border-gray-800";
-        div.innerHTML = `<span class="text-[9px] text-gray-500 block">P${k}</span><b class="text-gray-200">0.0h</b>`;
+        div.innerHTML = `<span class="text-[9px] text-gray-500 block">P${k}</span><b class="text-gray-200">${h.toFixed(1)}h</b>`;
         container.appendChild(div);
       }
     }
 
-    function executeStep5() {
+    function renderFlowsTable(beforeMap, rawMap, coupledMap) {
+      const tbody = document.getElementById('res-flows-table');
+      tbody.innerHTML = "";
+      for (let k = 0; k <= 8; k++) {
+        const label = k === 0 ? "P0 (RIS)" : (k === 8 ? "P8 (PWF)" : `P${k}`);
+        const nom = (beforeMap[k] || 0).toFixed(3);
+        const raw = (rawMap[k] || 0).toFixed(3);
+        const eff = (coupledMap[k] || 0).toFixed(3);
+
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-gray-800/40 transition";
+        tr.innerHTML = `
+          <td class="py-1.5 font-bold text-white">${label}</td>
+          <td class="py-1.5 text-gray-400">${nom} kg/h</td>
+          <td class="py-1.5 text-orange-300">${raw} kg/h</td>
+          <td class="py-1.5 font-bold text-emerald-400">${eff} kg/h</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function executeStep1() {
+      const modeRadio = document.querySelector('input[name="calib_mode"]:checked');
+      const mode = modeRadio ? modeRadio.value : "COMBINED_BOTH";
+      const btn = document.getElementById('btn-step1');
+      btn.disabled = true;
+      btn.textContent = "Pré-contrôle en cours...";
+
+      try {
+        const res = await fetch('/api/calibration/step1-start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode })
+        });
+        const data = await res.json();
+        if (data.success) {
+          await fetchCalibrationStatus();
+        } else {
+          alert("Erreur pré-contrôle: " + (data.message || "Échec"));
+        }
+      } catch (e) {
+        alert("Erreur communication serveur: " + e);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Lancer le Pré-contrôle ➔";
+      }
+    }
+
+    async function executeStep2() {
+      const btn = document.getElementById('btn-step2');
+      btn.disabled = true;
+      btn.textContent = "Vérification AL-03...";
+
+      try {
+        const res = await fetch('/api/calibration/step2-confirm-al03', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          await fetchCalibrationStatus();
+        } else {
+          alert("Vérification AL-03 : " + (data.message || "Alarme non confirmée"));
+        }
+      } catch (e) {
+        alert("Erreur communication: " + e);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Confirmer AL-03 & Réarmer ➔";
+      }
+    }
+
+    async function executeStep3() {
+      const bagKg = parseFloat(document.getElementById('input-bag-kg').value) || 15.0;
+      const aspG = parseFloat(document.getElementById('input-aspirated-g').value) || 0;
+      const btn = document.getElementById('btn-step3');
+      btn.disabled = true;
+      btn.textContent = "Verrouillage de la charge...";
+
+      try {
+        const res = await fetch('/api/calibration/step3-load-charge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ weighed_bag_kg: bagKg, aspirated_priming_grams: aspG })
+        });
+        const data = await res.json();
+        if (data.success) {
+          await fetchCalibrationStatus();
+        } else {
+          alert("Erreur charge étalon : " + (data.message || "Échec"));
+        }
+      } catch (e) {
+        alert("Erreur communication: " + e);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Verrouiller la Charge & Démarrer l'Acquisition ➔";
+      }
+    }
+
+    async function executeStep5() {
       const btn = document.getElementById('btn-apply-offsets');
       const feedback = document.getElementById('res-apply-feedback');
       btn.disabled = true;
-      btn.textContent = "Écriture EEPROM en cours...";
-      setTimeout(() => {
-        btn.textContent = "✓ Offsets 70 & 71 appliqués avec succès !";
-        btn.className = "px-6 py-2.5 rounded-lg bg-gray-800 text-emerald-400 text-xs font-bold border border-emerald-700/60";
-        feedback.textContent = "Vérification Read-After-Write réussie dans la carte mère Micronova.";
-      }, 700);
+      btn.textContent = "Écriture EEPROM Micronova en cours...";
+
+      try {
+        const res = await fetch('/api/calibration/step5-apply', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          btn.textContent = "✓ Offsets 70 & 71 appliqués avec succès !";
+          btn.className = "px-6 py-2.5 rounded-lg bg-gray-800 text-emerald-400 text-xs font-bold border border-emerald-700/60";
+          feedback.textContent = data.message || "Vérification Read-After-Write réussie dans la carte mère.";
+          await fetchCalibrationStatus();
+        } else {
+          btn.disabled = false;
+          btn.textContent = "Réessayer l'application";
+          feedback.textContent = data.message || "Échec d'application.";
+        }
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = "Erreur de connexion";
+        feedback.textContent = "" + e;
+      }
     }
+
+    async function confirmResetCalibration() {
+      if (!confirm("Voulez-vous vraiment réinitialiser la calibration en cours ? Toute l'acquisition enregistrée sera remise à zéro.")) {
+        return;
+      }
+      try {
+        await fetch('/api/calibration/reset', { method: 'POST' });
+        await fetchCalibrationStatus();
+        goToStep(1);
+      } catch (e) {
+        alert("Erreur réinitialisation : " + e);
+      }
+    }
+
+    // Polling régulier pour rafraîchir les métriques d'arrière-plan
+    document.addEventListener("DOMContentLoaded", () => {
+      fetchCalibrationStatus();
+      pollTimer = setInterval(fetchCalibrationStatus, 3000);
+    });
   </script>
 </body>
 

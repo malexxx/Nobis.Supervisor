@@ -292,8 +292,24 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 /* ========================================================================== */
-/* DÉGAGEMENT NAVIGATION MOBILE (ÉVITE QUE LE CONTENU PASSE SOUS LES ONGLETS) */
+/* GESTION NAVIGATION & MASQUAGE DES ONGLETS (DESKTOP & MOBILE)               */
 /* ========================================================================== */
+/* Masquage strict des sections d'onglets inactives uniquement (sans impacter les classes utilitaires responsive comme hidden md:flex) */
+#tab-control.hidden,
+#tab-pellets.hidden,
+#tab-chrono.hidden,
+#tab-dashboard.hidden,
+#tab-installer.hidden {
+  display: none !important;
+}
+
+/* Garantie d'affichage de la barre d'onglets desktop sur grand écran */
+@media (min-width: 768px) {
+  nav.md\:flex {
+    display: flex !important;
+  }
+}
+
 @media (max-width: 767px) {
   body {
     padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px)) !important;
@@ -316,12 +332,15 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 @media (max-width: 640px) {
-  #tab-control {
+  #tab-control:not(.hidden) {
     overflow-y: hidden;
     height: calc(100dvh - 128px - env(safe-area-inset-bottom, 0px));
     max-height: calc(100dvh - 128px - env(safe-area-inset-bottom, 0px));
     display: flex;
     flex-direction: column;
+  }
+  #tab-control.hidden {
+    display: none !important;
   }
   #triarc-cockpit-card {
     height: 100%;
@@ -364,6 +383,34 @@ input[type="range"]::-webkit-slider-thumb {
   flex: 0 0 100% !important;
   box-sizing: border-box !important;
 }
+
+/* ========================================================================== */
+/* STYLES DU MENU PARAMÈTRES & OBSERVABILITÉ (SOUS-ONGLETS & CONSOLE LOGS)     */
+/* ========================================================================== */
+.subtab-installer-btn {
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.subtab-installer-btn.subtab-active {
+  background: #ea580c !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 10px rgba(234, 88, 12, 0.45) !important;
+}
+
+#logs-container::-webkit-scrollbar {
+  width: 6px;
+}
+#logs-container::-webkit-scrollbar-track {
+  background: #090d16;
+}
+#logs-container::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border-radius: 9999px;
+}
+#logs-container::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
 
 
 
