@@ -1520,6 +1520,20 @@ function updateAutoControlLock(isAutoActive) {
 }
 
 let isCatalogCollapsed = false;
+let currentMemoryFilter = "ALL";
+
+function setMemoryFilter(type) {
+  currentMemoryFilter = type;
+  document.querySelectorAll(".mem-tab-btn").forEach(btn => {
+    btn.classList.remove("active", "bg-gray-800", "text-white");
+  });
+  const activeBtn = document.getElementById("mem-filter-" + type.toLowerCase());
+  if (activeBtn) {
+    activeBtn.classList.add("active", "bg-gray-800", "text-white");
+  }
+  const searchInp = document.getElementById("catalog-search");
+  filterCatalogTable(searchInp ? searchInp.value : "");
+}
 
 function toggleCatalogCollapse() {
   const wrap = document.getElementById("catalog-table-wrap");
@@ -1527,11 +1541,13 @@ function toggleCatalogCollapse() {
   if (!wrap) return;
   isCatalogCollapsed = !isCatalogCollapsed;
   if (isCatalogCollapsed) {
-    wrap.style.display = "none";
-    if (btn) btn.innerHTML = "↕️ Déplier (masqué)";
-  } else {
-    wrap.style.display = "block";
+    wrap.classList.remove("max-h-[380px]");
+    wrap.classList.add("max-h-[850px]");
     if (btn) btn.innerHTML = "↕️ Réduire";
+  } else {
+    wrap.classList.remove("max-h-[850px]");
+    wrap.classList.add("max-h-[380px]");
+    if (btn) btn.innerHTML = "↕️ Déplier";
   }
 }
 
@@ -1541,13 +1557,18 @@ function filterCatalogTable(query) {
   let visibleCount = 0;
   rows.forEach(tr => {
     const text = tr.textContent.toLowerCase();
-    const match = !q || text.includes(q);
+    const rowMemType = tr.dataset.memType || "";
+    const typeMatch = (currentMemoryFilter === "ALL") || (rowMemType === currentMemoryFilter);
+    const searchMatch = !q || text.includes(q);
+    const match = typeMatch && searchMatch;
     tr.style.display = match ? "" : "none";
     if (match) visibleCount++;
   });
   const countEl = document.getElementById("catalog-reg-count");
   if (countEl) {
-    countEl.textContent = q ? `${visibleCount} / ${rows.length}` : `${rows.length} registres`;
+    countEl.textContent = (q || currentMemoryFilter !== "ALL")
+      ? `${visibleCount} / ${rows.length} affichés`
+      : `${rows.length} adresses`;
   }
 }
 
@@ -1556,35 +1577,162 @@ function renderEepromTable() {
   if (!tbody) return;
   if (document.activeElement && tbody.contains(document.activeElement)) return;
   tbody.innerHTML = "";
-  const regs = Object.values(registersCatalog);
-  const countEl = document.getElementById("catalog-reg-count");
-  if (countEl) countEl.textContent = `${regs.length} registres`;
 
-  regs.forEach(r => {
+  let rawObj = {};
+  try {
+    rawObj = JSON.parse(latestData.raw_buffer_json || "{}");
+  } catch (e) {}
+
+  const combinedMap = new Map();
+
+  // 1. Registres du catalogue officiel (EEPROM et commandes RAM)
+  Object.values(registersCatalog).forEach(r => {
+    const offNum = Number(r.offset);
+    const memType = r.mem_type || (offNum >= 32768 ? "EEPROM" : "RAM");
+    const liveVal = (rawObj[offNum] !== undefined) ? rawObj[offNum] : (r.current_val ?? "--");
+    combinedMap.set(offNum, {
+      offset: offNum,
+      mem_type: memType,
+      reg_key: r.reg_key,
+      label: r.label,
+      category: r.category || "CONTROL",
+      unit: r.unit || "",
+      min_val: r.min_val,
+      max_val: r.max_val,
+      step: r.step || 1,
+      current_val: liveVal,
+      is_writable: true
+    });
+  });
+
+  // 2. Télémétrie brute des 76 offsets (buffer RAM)
+  Object.keys(rawObj).forEach(k => {
+    const offNum = Number(k);
+    if (!combinedMap.has(offNum)) {
+      const memType = (offNum >= 32768) ? "EEPROM" : "RAM";
+      const rawDesc = OFFSET_NAMES[offNum] || `Offset #${offNum}`;
+      let keyName = `offset_${offNum}`;
+      let unit = "";
+      if (OFFSET_NAMES[offNum]) {
+        const parts = OFFSET_NAMES[offNum].split(" ");
+        keyName = parts[0];
+        if (parts.length > 1 && parts[1].startsWith("(")) {
+          unit = parts.slice(1).join(" ").replace(/[()]/g, "");
+        }
+      }
+      let cat = "TÉLÉMÉTRIE";
+      if ([0, 2, 103].includes(offNum)) cat = "SONDES T°";
+      else if ([8, 34, 40, 115].includes(offNum)) cat = "ÉTAT / SÉCURITÉ";
+      else if ([16, 31, 32, 47].includes(offNum)) cat = "VENTILATEURS";
+      else if (offNum === 37) cat = "DÉPRESSION";
+      else if ([105, 107].includes(offNum)) cat = "MASQUES USINE";
+      else if (offNum === 260) cat = "MAINTENANCE";
+
+      combinedMap.set(offNum, {
+        offset: offNum,
+        mem_type: memType,
+        reg_key: keyName,
+        label: rawDesc,
+        category: cat,
+        unit: unit,
+        min_val: null,
+        max_val: null,
+        step: 1,
+        current_val: rawObj[k],
+        is_writable: false
+      });
+    }
+  });
+
+  // Si rawObj est encore vide, peupler quand même avec les offsets connus
+  if (Object.keys(rawObj).length === 0) {
+    Object.keys(OFFSET_NAMES).forEach(k => {
+      const offNum = Number(k);
+      if (!combinedMap.has(offNum)) {
+        const memType = (offNum >= 32768) ? "EEPROM" : "RAM";
+        combinedMap.set(offNum, {
+          offset: offNum,
+          mem_type: memType,
+          reg_key: OFFSET_NAMES[offNum].split(" ")[0],
+          label: OFFSET_NAMES[offNum],
+          category: offNum >= 32768 ? "EEPROM" : "TÉLÉMÉTRIE",
+          unit: "",
+          min_val: null,
+          max_val: null,
+          step: 1,
+          current_val: "--",
+          is_writable: false
+        });
+      }
+    });
+  }
+
+  const items = Array.from(combinedMap.values()).sort((a, b) => a.offset - b.offset);
+
+  // Mise à jour des compteurs
+  const ramCount = items.filter(i => i.mem_type === "RAM").length;
+  const eepromCount = items.filter(i => i.mem_type === "EEPROM").length;
+  const totalCount = items.length;
+
+  const cAll = document.getElementById("count-mem-all");
+  if (cAll) cAll.textContent = totalCount;
+  const cRam = document.getElementById("count-mem-ram");
+  if (cRam) cRam.textContent = ramCount;
+  const cEep = document.getElementById("count-mem-eeprom");
+  if (cEep) cEep.textContent = eepromCount;
+  const cBadge = document.getElementById("catalog-reg-count");
+  if (cBadge) cBadge.textContent = `${totalCount} adresses`;
+  const rawBufEl = document.getElementById("raw-buf-count");
+  if (rawBufEl) rawBufEl.textContent = Object.keys(rawObj).length || ramCount;
+
+  items.forEach(item => {
     const tr = document.createElement("tr");
-    tr.className = "hover:bg-gray-800/40 transition";
+    tr.className = "hover:bg-gray-800/40 transition border-b border-gray-800/40";
+    tr.dataset.memType = item.mem_type;
+
+    const hexStr = "0x" + item.offset.toString(16).toUpperCase().padStart(2, "0");
+    const typeBadge = (item.mem_type === "RAM")
+      ? `<span class="px-1.5 py-0.5 rounded font-mono font-bold text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800/80">🟢 RAM</span>`
+      : `<span class="px-1.5 py-0.5 rounded font-mono font-bold text-[10px] bg-purple-950 text-purple-300 border border-purple-800/80">🟣 EEPROM</span>`;
+
+    const rangeStr = (item.min_val !== null && item.max_val !== null)
+      ? `[${Number(item.min_val)}..${Number(item.max_val)}] ${escapeHtml(item.unit || "")}`
+      : (item.unit ? escapeHtml(item.unit) : `<span class="text-gray-500">-</span>`);
+
+    let valDisplay = item.current_val;
+    if (typeof valDisplay === "number") {
+      valDisplay = Number.isInteger(valDisplay) ? valDisplay : valDisplay.toFixed(1);
+    }
+
+    const editVal = (typeof item.current_val === "number") ? item.current_val : (Number(item.default_val) || 0);
+
+    const actionHtml = item.is_writable
+      ? `<div class="flex items-center justify-end gap-1.5">
+          <input id="inp-${escapeHtml(item.reg_key)}" type="number" step="${Number(item.step || 1)}" min="${Number(item.min_val ?? 0)}" max="${Number(item.max_val ?? 65535)}" value="${Number(editVal)}"
+            class="inst-input bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 w-16 sm:w-20 text-white tabular-nums text-xs focus:border-orange-500 focus:outline-none" />
+          <button data-reg="${escapeHtml(item.reg_key)}" onclick="sendCommand(this.dataset.reg, document.getElementById('inp-' + this.dataset.reg).value)"
+            class="inst-input px-2.5 py-0.5 rounded bg-orange-600 hover:bg-orange-500 text-white text-[11px] font-semibold cursor-pointer transition shadow">Écrire</button>
+        </div>`
+      : `<div class="text-right"><span class="text-[10px] text-gray-500 font-mono italic">👁️ Direct (RO)</span></div>`;
+
     tr.innerHTML = `
-      <td class="py-1.5 px-2 font-mono text-orange-400 font-semibold">${escapeHtml(r.reg_key)}</td>
-      <td class="py-1.5 px-2 font-mono text-cyan-300">#${Number(r.offset)}</td>
-      <td class="py-1.5 px-2"><span class="px-2 py-0.5 rounded bg-gray-800 text-gray-300 text-[10px] font-medium">${escapeHtml(r.category)}</span></td>
-      <td class="py-1.5 px-2 text-gray-200 max-w-[220px] truncate" title="${escapeHtml(r.label)}">${escapeHtml(r.label)}</td>
-      <td class="py-1.5 px-2 text-gray-400">[${Number(r.min_val)}..${Number(r.max_val)}] ${escapeHtml(r.unit)}</td>
-      <td class="py-1.5 px-2">
-        <input id="inp-${escapeHtml(r.reg_key)}" type="number" step="${Number(r.step)}" min="${Number(r.min_val)}" max="${Number(r.max_val)}" value="${Number(r.current_val)}"
-          class="inst-input bg-gray-800 border border-gray-700 rounded px-2 py-0.5 w-20 text-white tabular-nums text-xs" />
+      <td class="py-1.5 px-2.5 font-mono text-cyan-300 font-bold whitespace-nowrap">
+        <span>#${item.offset}</span>
+        <span class="text-[9px] text-gray-500 font-normal ml-1">${hexStr}</span>
       </td>
-      <td class="py-1.5 px-2">
-        <button data-reg="${escapeHtml(r.reg_key)}" onclick="sendCommand(this.dataset.reg, document.getElementById('inp-' + this.dataset.reg).value)"
-          class="inst-input px-2.5 py-0.5 rounded bg-orange-600 hover:bg-orange-500 text-white text-[11px] font-semibold cursor-pointer transition">Écrire</button>
-      </td>
+      <td class="py-1.5 px-2 whitespace-nowrap">${typeBadge}</td>
+      <td class="py-1.5 px-2 font-mono text-orange-400 font-semibold whitespace-nowrap">${escapeHtml(item.reg_key)}</td>
+      <td class="py-1.5 px-2 whitespace-nowrap"><span class="px-2 py-0.5 rounded bg-gray-800 text-gray-300 text-[10px] font-medium">${escapeHtml(item.category)}</span></td>
+      <td class="py-1.5 px-2 text-gray-200 max-w-[200px] sm:max-w-[280px] truncate" title="${escapeHtml(item.label)}">${escapeHtml(item.label)}</td>
+      <td class="py-1.5 px-2 text-gray-400 text-[10px] whitespace-nowrap">${rangeStr}</td>
+      <td class="py-1.5 px-2 font-bold text-white tabular-nums whitespace-nowrap">${escapeHtml(valDisplay)}</td>
+      <td class="py-1.5 px-2.5 whitespace-nowrap">${actionHtml}</td>
     `;
     tbody.appendChild(tr);
   });
 
   const searchInp = document.getElementById("catalog-search");
-  if (searchInp && searchInp.value) {
-    filterCatalogTable(searchInp.value);
-  }
+  filterCatalogTable(searchInp ? searchInp.value : "");
 }
 
 async function loadSnapshots() {

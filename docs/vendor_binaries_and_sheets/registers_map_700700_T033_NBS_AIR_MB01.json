@@ -1,0 +1,92 @@
+{
+  "device_metadata": {
+    "brand": "Nobis",
+    "model_family": [
+      "A10 C LIGHT",
+      "A10 C LIGHT COAX",
+      "A10 C LIGHT 2020",
+      "A10 C LIGHT STYLE",
+      "A10 C LIGHT STYLE COAX"
+    ],
+    "agua_iot_endpoint": "https://nobis.agua-iot.com",
+    "agua_customer_code": "700700",
+    "agua_brand_id": "1",
+    "mainboard_firmware": "T033.NBS.AIR.MB01",
+    "mainboard_profile": "Elemento_aria001 / AIU9KW",
+    "handheld_remote_firmware": "R026.NBS.AIR.UI01",
+    "radio_frequency_band_mhz": "868.3 - 869.85",
+    "max_erp_dbm": 6,
+    "normative_certification": "EN 16510-1:2023 / EN 16510-2-6:2023 (IMQ CS25-0117813-01)"
+  },
+  "registers_map": {
+    "offset_70_pellet_mix": {
+      "register_offset": 70,
+      "agua_key": "pellet_mix_set",
+      "ui_label": "MELANGE P/A -> PELLET",
+      "type": "INT8",
+      "unit": "%",
+      "min": -5,
+      "max": 5,
+      "step": 1,
+      "active_in_phases": ["TRAVAIL", "ECONOMIE"]
+    },
+    "offset_71_air_mix": {
+      "register_offset": 71,
+      "agua_key": "air_mix_set",
+      "ui_label": "MELANGE P/A -> PRISE D AIR",
+      "type": "INT8",
+      "unit": "%",
+      "min": -5,
+      "max": 5,
+      "step": 1,
+      "active_in_phases": ["TRAVAIL", "ECONOMIE"]
+    },
+    "powerful_boost_mode": {
+      "agua_key": "enable_pwf_set",
+      "ui_label": "MENU -> HABILITER PWF",
+      "type": "ENUM_UINT8",
+      "values": {"0": "OFF", "1": "ON", "2": "CHRONO"}
+    },
+    "real_status_01_02": {
+      "flue_pressure_pa": {"agua_key": "flue_pressure_get", "ui_label": "PRS", "unit": "Pa", "nominal_work_range": [9, 25]},
+      "set_flue_pressure_pa": {"agua_key": "set_flue_pressure_get", "ui_label": "SET PRS", "unit": "Pa", "default_ref": 25},
+      "smoke_extractor_rpm": {"agua_key": "smoke_fan_rpm_get", "ui_label": "EXT. FUMEES", "unit": "RPM", "default_ref": 1850}
+    },
+    "real_status_02_02": {
+      "auger_rpm_actual": {"agua_key": "real_auger_rpm_get", "ui_label": "VIS S. FIN", "unit": "RPM", "p7_ref": 850},
+      "auger_rpm_set": {"agua_key": "set_auger_rpm_get", "ui_label": "SET V.S.F.", "unit": "RPM", "p7_ref": 850},
+      "auger_current_ma": {"agua_key": "auger_current_get", "ui_label": "AMP. V.S.F.", "unit": "mA", "nominal_load": 150, "empty_starvation_threshold": 65},
+      "cleaning_timer_sec": {"agua_key": "timer_dec_get", "ui_label": "TIMER DEC", "unit": "SEC"}
+    },
+    "temp_status": {
+      "flame_temp_c": {"agua_key": "temp_flame_get", "ui_label": "T. FLAMME", "sensor": "Thermocouple K", "unit": "C"},
+      "smoke_temp_c": {"agua_key": "temp_gas_flue_get", "ui_label": "T. HOT FUM", "unit": "C", "p1_ref": 101.0, "p7_ref": 168.0},
+      "room_temp_c": {"agua_key": "temp_air2_get", "ui_label": "T. PALMAR", "unit": "C"},
+      "board_temp_c": {"agua_key": "temp_sk_get", "ui_label": "T. SK", "unit": "C"}
+    },
+    "alarms": {
+      "AL-01": "BLACK OUT",
+      "AL-02": "ABSENCE MISE EN MARCHE (Réservoir vide à l'allumage / résistance / calibrage)",
+      "AL-03": "GRANULES EPUISES (Cuve 100% vide en travail)",
+      "AL-04": "TEMPERATURE FUMEES",
+      "AL-05": "TOURS ASPIRATEURS NON RESPECTES",
+      "AL-06": "ASPIRATEUR FUMEES EN PANNE",
+      "AL-07": "TOURS MOTOREDUCTEUR NON RESPECTES CHARGEMENT GRANULES",
+      "AL-08": "MOTOREDUCTEUR CHARGEMENT GRANULES EN PANNE",
+      "AL-09": "VIS SANS FIN CHARGEMENT GRANULES BLOQUEE",
+      "AL-10": "ALIMENTATION VIS SANS FIN CHARGEMENT GRANULES",
+      "AL-11": "PRESSION MINIMALE PASCAL",
+      "AL-12": "PANNE DISPOSITIF DE NETTOYAGE BRASERO",
+      "AL-13": "DEPRESSION DANS CONDUIT DE FUMEE",
+      "AL-14": "THERMOSTAT A REARMEMENT MANUEL",
+      "AL-15": "PORTE FEU / TIROIR CENDRES OUVERTS",
+      "AL-16": "PORTILLON RESERVOIR GRANULES OUVERT",
+      "AL-18": "SONDE FLAMME",
+      "AL-22": "TEMPERATURE FLAMME",
+      "AL-23": "TRIAC VIS SANS FIN",
+      "AL-24": "PHASE VIS SANS FIN",
+      "AL-28": "ECHEC DE LA REVOLUTION ENCODEUR DE FUMEE",
+      "AL-29": "LIMITE DE CYCLE NETTOYAGE"
+    }
+  }
+}

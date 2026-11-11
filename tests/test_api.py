@@ -271,6 +271,41 @@ class TestAPIEndpoints(unittest.TestCase):
         d7_off, d7_bit, d7_end, d7_mask = ac._resolve_register_write_params(33168, "chrono_p1_day_7_set")
         self.assertEqual(d7_mask, 64)
 
+    def test_mobile_navigation_tabs_bottom_clearance(self):
+        """Vérifie que l'interface mobile dispose d'un dégagement inférieur suffisant (HTML et CSS)
+        pour éviter que le contenu des onglets (Pellets, Chrono, Supervision, Paramètres)
+        ne soit masqué sous la barre de navigation fixe du bas."""
+        # 1. Vérification dans l'index HTML servi
+        resp_spa = self.client.get("/")
+        self.assertEqual(resp_spa.status_code, 200)
+        html = resp_spa.text
+
+        # Présence de la barre fixe inférieure mobile
+        self.assertIn("fixed bottom-0", html)
+        self.assertIn("mob-btn-tab-control", html)
+
+        # Dégagement sur le conteneur principal <main> et body
+        self.assertIn("pb-28 md:pb-6", html)
+
+        # Dégagement sur chacun des onglets scrollables
+        for tab_id in ["tab-pellets", "tab-chrono", "tab-dashboard", "tab-installer"]:
+            self.assertIn(f'id="{tab_id}"', html)
+            self.assertIn(f'id="{tab_id}" class="hidden space-y-', html)
+            self.assertIn("pb-8 md:pb-0", html)
+
+        # 2. Vérification dans la feuille de style styles.css servie
+        resp_css = self.client.get("/static/css/styles.css")
+        self.assertEqual(resp_css.status_code, 200)
+        css = resp_css.text
+
+        self.assertIn("@media (max-width: 767px)", css)
+        self.assertIn("padding-bottom: calc(", css)
+        self.assertIn("env(safe-area-inset-bottom", css)
+        self.assertIn("#tab-pellets", css)
+        self.assertIn("#tab-chrono", css)
+        self.assertIn("#tab-dashboard", css)
+        self.assertIn("#tab-installer", css)
+
 
 if __name__ == "__main__":
     unittest.main()

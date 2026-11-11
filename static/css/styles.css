@@ -291,11 +291,35 @@ input[type="range"]::-webkit-slider-thumb {
   overscroll-behavior: none;
 }
 
+/* ========================================================================== */
+/* DÉGAGEMENT NAVIGATION MOBILE (ÉVITE QUE LE CONTENU PASSE SOUS LES ONGLETS) */
+/* ========================================================================== */
+@media (max-width: 767px) {
+  body {
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  main {
+    padding-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  #tab-pellets,
+  #tab-chrono,
+  #tab-dashboard,
+  #tab-installer {
+    padding-bottom: calc(2.5rem + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  #toast-box {
+    bottom: calc(4.75rem + env(safe-area-inset-bottom, 12px)) !important;
+  }
+}
+
 @media (max-width: 640px) {
   #tab-control {
     overflow-y: hidden;
-    height: calc(100dvh - 128px);
-    max-height: calc(100dvh - 128px);
+    height: calc(100dvh - 128px - env(safe-area-inset-bottom, 0px));
+    max-height: calc(100dvh - 128px - env(safe-area-inset-bottom, 0px));
     display: flex;
     flex-direction: column;
   }

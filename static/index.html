@@ -36,14 +36,14 @@
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-  <link rel="stylesheet" href="/static/css/styles.css?v=1.0" />
+  <link rel="stylesheet" href="/static/css/styles.css?v=1.0.1" />
 </head>
 
-<body class="min-h-screen flex flex-col pb-20 md:pb-6">
+<body class="min-h-screen flex flex-col pb-28 md:pb-6">
 
   <!-- TOAST NOTIFICATION FLOTTANTE -->
   <div id="toast-box"
-    class="fixed bottom-20 md:bottom-5 right-4 z-50 hidden px-4 py-2.5 rounded-xl shadow-2xl border text-xs font-semibold flex items-center gap-2 transition-all">
+    class="fixed bottom-24 md:bottom-5 right-4 z-50 hidden px-4 py-2.5 rounded-xl shadow-2xl border text-xs font-semibold flex items-center gap-2 transition-all">
   </div>
 
   <!-- MODALE D'INTERACTION GÉNÉRIQUE (REMPLACE CONFIRM / PROMPT / ALERT) -->
@@ -804,7 +804,7 @@
   </nav>
 
   <!-- CONTENU PRINCIPAL -->
-  <main class="flex-1 px-1.5 py-2 sm:p-6 max-w-[1650px] w-full mx-auto space-y-6">
+  <main class="flex-1 px-1.5 pt-2 pb-28 md:pb-6 sm:p-6 max-w-[1650px] w-full mx-auto space-y-6">
 
     <!-- =================================================================== -->
     <!-- ONGLET 1 (AFFICHÉ PAR DÉFAUT) : PILOTAGE TRI-ARC V10 (SANS CADRE)   -->
@@ -883,7 +883,7 @@
     <!-- =================================================================== -->
     <!-- ONGLET PELLETS : SUIVI TRÉMIE 35 KG, CONSOMMATIONS, STOCK & SONDES  -->
     <!-- =================================================================== -->
-    <section id="tab-pellets" class="hidden space-y-6">
+    <section id="tab-pellets" class="hidden space-y-6 pb-8 md:pb-0">
       <div class="max-w-xl mx-auto">
         <div class="card p-5 space-y-4 border-t-2 border-t-[#96562c] flex flex-col justify-between">
           <div class="space-y-4">
@@ -1054,7 +1054,7 @@
     <!-- =================================================================== -->
     <!-- ONGLET 2 : PROGRAMMES HEBDOMADAIRES (P1..P4) & FRISE 24H           -->
     <!-- =================================================================== -->
-    <section id="tab-chrono" class="hidden space-y-6">
+    <section id="tab-chrono" class="hidden space-y-6 pb-8 md:pb-0">
       <div class="card p-5 space-y-4">
         <div class="flex flex-wrap items-center justify-between gap-4 border-b border-gray-800 pb-3">
           <div>
@@ -1116,7 +1116,7 @@
     <!-- =================================================================== -->
     <!-- ONGLET 3 : SUPERVISION (4 VOLETS ALIGNÉS AU PIXEL PRÈS + TACTILE)   -->
     <!-- =================================================================== -->
-    <section id="tab-dashboard" class="hidden space-y-4">
+    <section id="tab-dashboard" class="hidden space-y-4 pb-8 md:pb-0">
       <div class="card p-4 sm:p-5 space-y-4">
         <div class="flex flex-wrap items-center justify-between gap-4 border-b border-gray-800 pb-3">
           <div>
@@ -1579,7 +1579,7 @@
     <!-- =================================================================== -->
     <!-- ONGLET 4 : PARAMÈTRES (MENU INSTALLATEUR, SNAPSHOTS & 76 REGISTRES) -->
     <!-- =================================================================== -->
-    <section id="tab-installer" class="hidden space-y-6">
+    <section id="tab-installer" class="hidden space-y-6 pb-8 md:pb-0">
 
       <!-- ÉCRAN DE VERROUILLAGE SÉCURISÉ DU MENU INSTALLATEUR -->
       <div id="installer-lock-screen"
@@ -1925,63 +1925,78 @@
             class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 text-xs"></div>
         </div>
 
-        <!-- Inspecteur des 76 Offsets remontés par le poêle (Popup) -->
-        <div class="card p-4 border-l-4 border-l-cyan-500">
-          <div class="flex flex-wrap items-center justify-between gap-3">
+        <!-- TABLEAU DE BORD MÉMOIRE UNIFIÉ : 76 OFFSETS RAM & REGISTRES EEPROM -->
+        <div class="card p-4 space-y-3.5 border-l-4 border-l-cyan-500">
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-800 pb-3">
             <div class="flex items-center gap-3">
-              <span class="text-2xl">📡</span>
+              <span class="text-2xl">📊</span>
               <div>
-                <h3 class="text-sm font-bold text-white flex items-center gap-2 cursor-help"
-                  title="Affiche l'intégralité des 76 adresses mémoire retournées par /deviceGetBufferReading sur votre Nobis A10 C Light Style Coax.">
-                  <span>Inspecteur Intégral des 76 Offsets Poêle (`raw_buffer`)</span>
-                  <span
-                    class="text-[11px] font-semibold px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 border border-cyan-800">
-                    <span id="raw-buf-count">0</span> / 76 offsets lus
+                <h3 class="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                  <span>Cartographie Mémoire Unifiée (Offsets RAM & Registres EEPROM)</span>
+                  <span id="catalog-reg-count"
+                    class="text-[11px] font-semibold px-2 py-0.5 rounded bg-gray-900 border border-gray-700 text-gray-300">
+                    -- entrées
                   </span>
                 </h3>
-                <p class="text-xs text-gray-400">Trame mémoire temps réel complète (télémétrie brute, états, consignes,
-                  masques).</p>
+                <p class="text-xs text-gray-400">
+                  Vue fusionnée des <span id="raw-buf-count" class="text-cyan-400 font-semibold font-mono">0</span> offsets de télémétrie temps réel (buffer RAM) et des registres de configuration non-volatils (EEPROM).
+                </p>
               </div>
             </div>
-            <button type="button" onclick="openOffsetsModal()"
-              class="px-4 py-2 rounded-lg bg-cyan-700 hover:bg-cyan-600 active:scale-95 text-white text-xs font-bold transition flex items-center gap-2 shadow-lg cursor-pointer">
-              <span>📡</span>
-              <span>Afficher les 76 Offsets dans la Popup</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Catalogue complet des registres EEPROM (Cadre Réduit & Filtrable) -->
-        <div class="card p-3.5 space-y-2.5">
-          <div class="flex flex-wrap items-center justify-between gap-2.5">
-            <div class="flex items-center gap-2">
-              <h3 class="text-sm font-bold text-white flex items-center gap-1.5">
-                <span>📋</span><span>Catalogue des Registres EEPROM</span>
-              </h3>
-              <span id="catalog-reg-count"
-                class="text-[10px] text-gray-400 bg-gray-900 border border-gray-800 px-2 py-0.5 rounded-full">--</span>
-            </div>
             <div class="flex items-center gap-2 flex-wrap">
-              <input id="catalog-search" type="text" placeholder="Filtrer registres..."
-                oninput="filterCatalogTable(this.value)"
-                class="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1 text-xs text-white w-40 sm:w-52 placeholder-gray-500 focus:outline-none focus:border-orange-500" />
+              <button type="button" onclick="pollNow(); setTimeout(renderEepromTable, 600);"
+                class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs font-semibold text-gray-200 transition flex items-center gap-1.5 cursor-pointer"
+                title="Interroger le poêle immédiatement pour actualiser les données">
+                🔄 Actualiser
+              </button>
+              <button type="button" onclick="openOffsetsModal()"
+                class="px-3 py-1.5 rounded-lg bg-cyan-900/60 hover:bg-cyan-800 border border-cyan-700 text-cyan-200 text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer"
+                title="Ouvrir la grille 2D des 76 offsets dans une popup">
+                📡 Vue Grille (Popup)
+              </button>
               <button type="button" onclick="toggleCatalogCollapse()" id="btn-toggle-catalog"
-                class="px-2.5 py-1 rounded bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs font-semibold text-gray-300 transition">
+                class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-xs font-semibold text-gray-300 transition cursor-pointer">
                 ↕️ Déplier / Réduire
               </button>
             </div>
           </div>
-          <div id="catalog-table-wrap" class="overflow-x-auto max-h-[220px] transition-all">
+
+          <!-- Filtres rapides par type de mémoire et recherche textuelle -->
+          <div class="flex flex-wrap items-center justify-between gap-2.5">
+            <div class="flex items-center gap-1.5 bg-gray-950 p-1 rounded-lg border border-gray-800 text-xs">
+              <button id="mem-filter-all" type="button" onclick="setMemoryFilter('ALL')"
+                class="mem-tab-btn active px-3 py-1 rounded font-semibold transition bg-gray-800 text-white cursor-pointer">
+                Tous (<span id="count-mem-all">--</span>)
+              </button>
+              <button id="mem-filter-ram" type="button" onclick="setMemoryFilter('RAM')"
+                class="mem-tab-btn px-3 py-1 rounded font-semibold transition text-cyan-400 hover:bg-gray-900 cursor-pointer">
+                🟢 Offsets RAM (<span id="count-mem-ram">--</span>)
+              </button>
+              <button id="mem-filter-eeprom" type="button" onclick="setMemoryFilter('EEPROM')"
+                class="mem-tab-btn px-3 py-1 rounded font-semibold transition text-purple-400 hover:bg-gray-900 cursor-pointer">
+                🟣 Registres EEPROM (<span id="count-mem-eeprom">--</span>)
+              </button>
+            </div>
+            <div class="flex-1 min-w-[200px] max-w-sm">
+              <input id="catalog-search" type="text" placeholder="Filtrer par offset, nom, valeur (ex: 37, fan, P4)..."
+                oninput="filterCatalogTable(this.value)"
+                class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1 text-xs text-white w-full placeholder-gray-500 focus:outline-none focus:border-cyan-500" />
+            </div>
+          </div>
+
+          <!-- Tableau unifié avec ascenseur scrollable -->
+          <div id="catalog-table-wrap" class="overflow-x-auto max-h-[380px] transition-all border border-gray-800/80 rounded-lg">
             <table class="w-full text-left text-[11px]">
-              <thead class="text-gray-400 border-b border-gray-800 sticky top-0 bg-gray-900">
+              <thead class="text-gray-400 border-b border-gray-800 sticky top-0 bg-gray-900/95 backdrop-blur-sm z-10">
                 <tr>
-                  <th class="py-1.5 px-2">Clé Registre</th>
-                  <th class="py-1.5 px-2">Offset</th>
-                  <th class="py-1.5 px-2">Catégorie</th>
-                  <th class="py-1.5 px-2">Description</th>
-                  <th class="py-1.5 px-2">Plage</th>
-                  <th class="py-1.5 px-2">Valeur Actuelle</th>
-                  <th class="py-1.5 px-2">Action</th>
+                  <th class="py-2 px-2.5">Offset</th>
+                  <th class="py-2 px-2">Type</th>
+                  <th class="py-2 px-2">Clé / Symbole</th>
+                  <th class="py-2 px-2">Catégorie</th>
+                  <th class="py-2 px-2">Description / Rôle</th>
+                  <th class="py-2 px-2">Plage / Format</th>
+                  <th class="py-2 px-2">Valeur Actuelle</th>
+                  <th class="py-2 px-2.5 text-right">Action / Accès</th>
                 </tr>
               </thead>
               <tbody id="eeprom-table-body" class="divide-y divide-gray-800/60 tabular-nums"></tbody>
