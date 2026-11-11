@@ -119,16 +119,20 @@ except Exception:
 
 
 # ==============================================================================
-# GESTIONNAIRE DU MODE SILENCE ! (CONVECTION NATURELLE, P1, TIMER & RESTAURATION)
+# GESTIONNAIRE DU MODE SILENCE ! (INTELLIGENT, P0/VENTIL 0, TIMER & RESTAURATION)
 # ==============================================================================
 SILENCE_KEYS_TO_SAVE = [
-    "power_level",
+    "temp_amb_setpoint",
+    "duct_left_setpoint",
+    "duct_right_setpoint",
+    "fun_pwf_set",
+    "standby_set",
+    "chrono_week_enable_set",
+    "fun_auto_set",
     "fan_front_speed",
     "duct_left_speed",
     "duct_right_speed",
-    "fun_auto_set",
-    "standby_set",
-    "fun_pwf_set",
+    "power_level",
 ]
 
 
@@ -148,7 +152,9 @@ def get_silence_state() -> Dict[str, Any]:
         "duration_hours": 2.0,
         "start_epoch": 0.0,
         "end_epoch": 0.0,
-        "initial_state": {}
+        "is_stove_on": False,
+        "initial_state": {},
+        "modified_keys": []
     }
 
 
@@ -178,7 +184,9 @@ def get_silence_status() -> Dict[str, Any]:
         "start_epoch": float(state.get("start_epoch", 0.0)),
         "end_epoch": end_epoch,
         "remaining_seconds": remaining,
-        "initial_state": state.get("initial_state", {})
+        "is_stove_on": state.get("is_stove_on"),
+        "initial_state": state.get("initial_state", {}),
+        "modified_keys": state.get("modified_keys", [])
     }
 
 
@@ -186,25 +194,85 @@ async def activate_silence_mode(duration_hours: float = 2.0) -> Dict[str, Any]:
     active_mode = get_active_mode()
     regs = get_registers_dict(active_mode)
 
+    # Récupération du dernier enregistrement de télémétrie pour détecter l'état (éteint vs allumé)
+    conn = get_db(active_mode)
+    try:
+        latest = conn.execute("SELECT * FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
+        latest_dict = dict(latest) if latest else {}
+    finally:
+        conn.close()
+
+    is_stove_on = False
+    if latest_dict and latest_dict.get("status_code") is not None:
+        st_code = int(latest_dict.get("status_code", 0))
+        if st_code == -1:
+            cmd_val = float(latest_dict.get("status_managed") or regs.get("status_code", {}).get("current_val", 0.0))
+            is_stove_on = (cmd_val == 85.0)
+        else:
+            is_stove_on = (st_code != 0)
+    elif "status_code" in regs:
+        cmd_val = float(regs["status_code"].get("current_val", 0.0))
+        is_stove_on = (cmd_val == 85.0)
+
     # 1. Sauvegarde des valeurs initiales
     initial_state = {}
     for k in SILENCE_KEYS_TO_SAVE:
         if k in regs:
             initial_state[k] = float(regs[k].get("current_val", 0.0))
+        elif latest_dict and k in latest_dict and latest_dict[k] is not None:
+            initial_state[k] = float(latest_dict[k])
         else:
             initial_state[k] = 0.0
 
-    # 2. Ordres de bascule en mode Silence ! (P1, ventilation à 0, désactivation auto/eco/boost)
-    activation_cmds = [
-        {"reg_key": "power_level", "value": 1.0, "offset": 33120},
-        {"reg_key": "fan_front_speed", "value": 0.0, "offset": 33132},
-        {"reg_key": "duct_left_speed", "value": 0.0, "offset": 33136},
-        {"reg_key": "duct_right_speed", "value": 0.0, "offset": 33134},
-        {"reg_key": "fun_auto_set", "value": 0.0, "offset": 33128},
-        {"reg_key": "standby_set", "value": 0.0, "offset": 33130},
-        {"reg_key": "fun_pwf_set", "value": 0.0, "offset": 33154},
-        {"reg_key": "set_silece_set", "value": 1.0, "offset": 33250},
-    ]
+    # 2. Ordres de bascule en mode Silence intelligent
+    if is_stove_on:
+        # Poêle allumé :
+        # - désactivation du boost (fun_pwf_set = 0)
+        # - désactivation du mode éco (standby_set = 0)
+        # - désactivation de la programmation (chrono_week_enable_set = 0)
+        # - activation du mode auto total (fun_auto_set = 1, ventilations front/sx/dx = 8)
+        # - passage des consignes en hors gel (7°C) : le poêle passe ainsi en P0 et Ventil 0 sans s'éteindre
+        activation_cmds = [
+            {"reg_key": "fun_pwf_set", "value": 0.0, "offset": int(regs.get("fun_pwf_set", {}).get("offset", 33154))},
+            {"reg_key": "standby_set", "value": 0.0, "offset": int(regs.get("standby_set", {}).get("offset", 33130))},
+            {"reg_key": "chrono_week_enable_set", "value": 0.0, "offset": int(regs.get("chrono_week_enable_set", {}).get("offset", 33162))},
+            {"reg_key": "fun_auto_set", "value": 1.0, "offset": int(regs.get("fun_auto_set", {}).get("offset", 33128))},
+            {"reg_key": "fan_front_speed", "value": 8.0, "offset": int(regs.get("fan_front_speed", {}).get("offset", 33132))},
+            {"reg_key": "duct_left_speed", "value": 8.0, "offset": int(regs.get("duct_left_speed", {}).get("offset", 33136))},
+            {"reg_key": "duct_right_speed", "value": 8.0, "offset": int(regs.get("duct_right_speed", {}).get("offset", 33134))},
+            {"reg_key": "temp_amb_setpoint", "value": 7.0, "offset": int(regs.get("temp_amb_setpoint", {}).get("offset", 33122))},
+            {"reg_key": "duct_left_setpoint", "value": 7.0, "offset": int(regs.get("duct_left_setpoint", {}).get("offset", 33126))},
+            {"reg_key": "duct_right_setpoint", "value": 7.0, "offset": int(regs.get("duct_right_setpoint", {}).get("offset", 33124))},
+            {"reg_key": "set_silece_set", "value": 1.0, "offset": int(regs.get("set_silece_set", {}).get("offset", 33250))},
+        ]
+        modified_keys = [
+            "fun_pwf_set",
+            "standby_set",
+            "chrono_week_enable_set",
+            "fun_auto_set",
+            "fan_front_speed",
+            "duct_left_speed",
+            "duct_right_speed",
+            "temp_amb_setpoint",
+            "duct_left_setpoint",
+            "duct_right_setpoint",
+        ]
+        log_detail = "poêle allumé : Boost/Éco/Chrono désactivés, Auto total activé, consignes en hors-gel 7°C (régulation P0 & Ventil 0 sans extinction)"
+    else:
+        # Poêle éteint :
+        # - toutes les consignes passent en hors gel (7°C)
+        activation_cmds = [
+            {"reg_key": "temp_amb_setpoint", "value": 7.0, "offset": int(regs.get("temp_amb_setpoint", {}).get("offset", 33122))},
+            {"reg_key": "duct_left_setpoint", "value": 7.0, "offset": int(regs.get("duct_left_setpoint", {}).get("offset", 33126))},
+            {"reg_key": "duct_right_setpoint", "value": 7.0, "offset": int(regs.get("duct_right_setpoint", {}).get("offset", 33124))},
+            {"reg_key": "set_silece_set", "value": 1.0, "offset": int(regs.get("set_silece_set", {}).get("offset", 33250))},
+        ]
+        modified_keys = [
+            "temp_amb_setpoint",
+            "duct_left_setpoint",
+            "duct_right_setpoint",
+        ]
+        log_detail = "poêle éteint : toutes les consignes de température passées en hors-gel 7°C"
 
     write_res = await execute_registers_batch_write(activation_cmds)
 
@@ -218,7 +286,9 @@ async def activate_silence_mode(duration_hours: float = 2.0) -> Dict[str, Any]:
         "duration_hours": float(duration_hours),
         "start_epoch": now_ts,
         "end_epoch": end_ts,
-        "initial_state": initial_state
+        "is_stove_on": is_stove_on,
+        "initial_state": initial_state,
+        "modified_keys": modified_keys
     }
     save_silence_state(state)
 
@@ -233,7 +303,7 @@ async def activate_silence_mode(duration_hours: float = 2.0) -> Dict[str, Any]:
     db_log(
         "COMMAND",
         "SILENCE",
-        f"Mode Silence ! activé pour {duration_hours:g}H (P1, ventilation coupée, auto/eco/boost désactivés). Restauration programmée à {end_dt.strftime('%H:%M:%S')}.",
+        f"Mode Silence ! intelligent activé pour {duration_hours:g}H ({log_detail}). Restauration programmée à {end_dt.strftime('%H:%M:%S')}.",
         active_mode
     )
 
@@ -250,6 +320,7 @@ async def deactivate_silence_mode(is_auto_expired: bool = False, override_comman
     active_mode = get_active_mode()
     state = get_silence_state()
     initial = state.get("initial_state", {})
+    modified_keys = state.get("modified_keys")
     regs = get_registers_dict(active_mode)
 
     if scheduler.get_job("silence_timer_job"):
@@ -269,18 +340,32 @@ async def deactivate_silence_mode(is_auto_expired: bool = False, override_comman
                 except (ValueError, TypeError):
                     pass
 
-    keys_config = [
-        ("power_level", 4.0, 33120),
-        ("fan_front_speed", 3.0, 33132),
-        ("duct_left_speed", 0.0, 33136),
-        ("duct_right_speed", 0.0, 33134),
-        ("fun_auto_set", 1.0, 33128),
-        ("standby_set", 0.0, 33130),
-        ("fun_pwf_set", 0.0, 33154),
-    ]
+    default_offsets_and_vals = {
+        "temp_amb_setpoint": (19.0, 33122),
+        "duct_left_setpoint": (20.0, 33126),
+        "duct_right_setpoint": (20.0, 33124),
+        "fun_pwf_set": (0.0, 33154),
+        "standby_set": (0.0, 33130),
+        "chrono_week_enable_set": (0.0, 33162),
+        "fun_auto_set": (1.0, 33128),
+        "fan_front_speed": (3.0, 33132),
+        "duct_left_speed": (0.0, 33136),
+        "duct_right_speed": (0.0, 33134),
+        "power_level": (4.0, 33120),
+    }
+
+    if modified_keys is None:
+        keys_to_restore = [k for k in default_offsets_and_vals if k in initial]
+    else:
+        keys_to_restore = list(modified_keys)
+
+    for k in overrides_dict:
+        if k not in keys_to_restore and k in default_offsets_and_vals:
+            keys_to_restore.append(k)
 
     restore_cmds = []
-    for k, def_val, def_off in keys_config:
+    for k in keys_to_restore:
+        def_val, def_off = default_offsets_and_vals.get(k, (0.0, 0))
         off = int(regs.get(k, {}).get("offset", def_off))
         if k in overrides_dict:
             target_val = overrides_dict[k]
@@ -288,7 +373,7 @@ async def deactivate_silence_mode(is_auto_expired: bool = False, override_comman
             target_val = float(initial.get(k, def_val))
         restore_cmds.append({"reg_key": k, "value": target_val, "offset": off})
 
-    restore_cmds.append({"reg_key": "set_silece_set", "value": 0.0, "offset": 33250})
+    restore_cmds.append({"reg_key": "set_silece_set", "value": 0.0, "offset": int(regs.get("set_silece_set", {}).get("offset", 33250))})
 
     write_res = await execute_registers_batch_write(restore_cmds)
 
@@ -307,7 +392,7 @@ async def deactivate_silence_mode(is_auto_expired: bool = False, override_comman
     db_log(
         "COMMAND",
         "SILENCE",
-        f"Mode Silence ! désactivé ({reason}) : paramètres restaurés/mis à jour.",
+        f"Mode Silence ! intelligent désactivé ({reason}) : paramètres et consignes d'origine restaurés.",
         active_mode
     )
 
@@ -449,6 +534,16 @@ async def serve_spa():
         with open(index_file, "r", encoding="utf-8") as f:
             return HTMLResponse(content=f.read(), headers=no_cache)
     return HTMLResponse(content="<h1>Nobis.Supervisor API Active</h1>", headers=no_cache)
+
+
+@app.api_route("/calibration", methods=["GET", "HEAD"], response_class=HTMLResponse)
+async def serve_calibration_wizard():
+    calib_file = os.path.join(BASE_DIR, "src", "ui", "wizard_calibration.html")
+    no_cache = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
+    if os.path.exists(calib_file):
+        with open(calib_file, "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read(), headers=no_cache)
+    raise HTTPException(status_code=404, detail="Page de calibration introuvable")
 
 
 @app.api_route("/manifest.json", methods=["GET", "HEAD"])
@@ -735,20 +830,20 @@ async def api_stove_set(payload: StoveSetPayload):
 
 @app.post("/api/silence/activate")
 async def api_silence_activate(payload: SilenceActivatePayload = Body(default=SilenceActivatePayload())):
-    """Active le mode Silence ! : P1, ventilation=0, arrêt auto/eco/boost, compte à rebours temporisé."""
+    """Active le mode Silence intelligent : si poêle éteint -> toutes consignes en hors gel (7°C) ; si allumé -> coupure Boost/Éco/Chrono, activation Auto total, consignes en hors gel (passage P0 et Ventil 0 sans extinction), compte à rebours et restauration automatique."""
     return await activate_silence_mode(payload.duration_hours)
 
 
 @app.post("/api/silence/deactivate")
 async def api_silence_deactivate(payload: Optional[SilenceDeactivatePayload] = Body(default=None)):
-    """Désactive le mode Silence ! et restaure immédiatement les paramètres initiaux (avec surcharges éventuelles)."""
+    """Désactive le mode Silence intelligent et restaure immédiatement les consignes et paramètres initiaux (avec surcharges éventuelles)."""
     override_cmds = payload.override_commands if payload else None
     return await deactivate_silence_mode(is_auto_expired=False, override_commands=override_cmds)
 
 
 @app.get("/api/silence/status")
 async def api_silence_status():
-    """Retourne l'état actuel du mode Silence !, le compte à rebours restant et les valeurs initiales."""
+    """Retourne l'état actuel du mode Silence intelligent, le compte à rebours restant, le statut du poêle et les valeurs initiales."""
     return get_silence_status()
 
 
@@ -900,6 +995,129 @@ async def api_pellet_batch_raz(payload: Dict[str, Any] = Body(default={})):
 async def api_pellet_batch_status():
     """Retourne l'état courant du lot de granulés évalué."""
     return get_pellet_batch_state()
+
+
+# ==============================================================================
+# API CALIBRATION ASSISTÉE & EN ARRIÈRE-PLAN (NOBIS A10)
+# ==============================================================================
+
+@app.get("/api/calibration/status")
+async def api_calibration_status():
+    """Retourne l'état complet de la session de calibration active (persiste en arrière-plan)."""
+    from src.calibration.calibration_service import get_calibration_service
+    calib_srv = get_calibration_service()
+
+    active_mode = get_active_mode()
+    conn = get_db(active_mode)
+    try:
+        last_row = conn.execute("SELECT * FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
+        latest = dict(last_row) if last_row else {}
+    finally:
+        conn.close()
+
+    return calib_srv.get_status(latest)
+
+
+@app.post("/api/calibration/step1-start")
+async def api_calibration_step1_start(payload: Dict[str, Any] = Body(default={})):
+    """Étape 1 : Choix du mode et désactivation automatique de POWERFUL (P8)."""
+    from src.calibration.calibration_service import get_calibration_service, build_sample_from_record
+    calib_srv = get_calibration_service()
+    mode_str = str(payload.get("mode") or "COMBINED_BOTH")
+
+    active_mode = get_active_mode()
+    conn = get_db(active_mode)
+    try:
+        last_row = conn.execute("SELECT * FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
+        latest = dict(last_row) if last_row else {}
+    finally:
+        conn.close()
+
+    sample = build_sample_from_record(latest)
+
+    def _disable_pwf_cb():
+        try:
+            asyncio.create_task(execute_register_write("fun_pwf_set", 0.0, 33154, skip_poll=True))
+            return True
+        except Exception:
+            return False
+
+    return calib_srv.start_preflight(mode_str, sample, disable_p8_fn=_disable_pwf_cb)
+
+
+@app.post("/api/calibration/step2-confirm-al03")
+async def api_calibration_step2_confirm():
+    """Étape 2 : Confirmation de l'état initial AL-03 et réarmement automatique."""
+    from src.calibration.calibration_service import get_calibration_service, build_sample_from_record
+    calib_srv = get_calibration_service()
+
+    active_mode = get_active_mode()
+    conn = get_db(active_mode)
+    try:
+        last_row = conn.execute("SELECT * FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
+        latest = dict(last_row) if last_row else {}
+    finally:
+        conn.close()
+
+    sample = build_sample_from_record(latest)
+
+    def _reset_alarm_cb():
+        try:
+            asyncio.create_task(execute_register_write("status_code", 85.0, 232, skip_poll=True))
+            return True
+        except Exception:
+            return False
+
+    return calib_srv.confirm_initial_al03(sample, reset_alarm_fn=_reset_alarm_cb)
+
+
+@app.post("/api/calibration/step3-load-charge")
+async def api_calibration_step3_load(payload: Dict[str, Any] = Body(default={})):
+    """Étape 3 : Verrouille le poids du sac étalon et lance l'acquisition en arrière-plan."""
+    from src.calibration.calibration_service import get_calibration_service, build_sample_from_record
+    calib_srv = get_calibration_service()
+    weighed_kg = float(payload.get("weighed_bag_kg", 15.0))
+    aspirated_g = float(payload.get("aspirated_priming_grams", 0.0))
+
+    active_mode = get_active_mode()
+    conn = get_db(active_mode)
+    try:
+        last_row = conn.execute("SELECT * FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
+        latest = dict(last_row) if last_row else {}
+    finally:
+        conn.close()
+
+    sample = build_sample_from_record(latest)
+    return calib_srv.load_weighed_charge(sample, weighed_bag_kg=weighed_kg, aspirated_priming_g=aspirated_g)
+
+
+@app.post("/api/calibration/step5-apply")
+async def api_calibration_step5_apply():
+    """Étape 5 : Application en 1 clic des Offsets 70 et 71 dans l'EEPROM Micronova."""
+    from src.calibration.calibration_service import get_calibration_service
+    calib_srv = get_calibration_service()
+
+    written_vals = {}
+
+    def _write_reg(reg: int, val: int) -> bool:
+        written_vals[reg] = val
+        rk = "trim_pellet_pct" if reg == 70 else "trim_exhaust_pct"
+        asyncio.create_task(execute_register_write(rk, float(val), reg))
+        return True
+
+    def _read_reg(reg: int) -> int:
+        return written_vals.get(reg, 0)
+
+    return calib_srv.apply_recommendations(write_fn=_write_reg, read_fn=_read_reg)
+
+
+@app.post("/api/calibration/reset")
+async def api_calibration_reset():
+    """Réinitialise la calibration pour repartir de zéro si souhaité."""
+    from src.calibration.calibration_service import get_calibration_service
+    calib_srv = get_calibration_service()
+    return calib_srv.reset_session()
+
 
 
 @app.post("/api/sync-clock")
@@ -1300,7 +1518,7 @@ async def api_test_webhook(payload: TestWebhookPayload = Body(default=TestWebhoo
 @app.post("/api/test-connection")
 async def api_test_connection(payload: TestConnectionPayload):
     raw_dict = payload.model_dump(exclude_none=True)
-    mode = raw_dict.get("comm_mode", "simulation")
+    mode = raw_dict.get("comm_mode", "agua_cloud")
     settings = get_settings_dict()
     settings.update({k: str(v) for k, v in raw_dict.items() if str(v) != "********"})
     weather = await weather_service.fetch_current(settings.get("weather_lat", "48.1636"), settings.get("weather_lon", "2.0436"))

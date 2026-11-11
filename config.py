@@ -99,7 +99,7 @@ AGUA_REG_KEY_ALIASES: Dict[str, List[str]] = {
 }
 
 DEFAULT_REGISTERS_CATALOG: List[Dict[str, Any]] = [
-    {"reg_key": "status_code", "offset": 232, "mem_type": "RAM", "label": "Commande Marche/Arrêt (85=ON, 170=OFF)", "unit": "cmd", "min_val": 0, "max_val": 255, "step": 1, "default_val": 85, "category": "STATE"},
+    {"reg_key": "status_code", "offset": 232, "mem_type": "RAM", "label": "Commande Marche/Arrêt (85=ON, 170=OFF)", "unit": "cmd", "min_val": 0, "max_val": 255, "step": 1, "default_val": 0, "category": "STATE"},
     {"reg_key": "power_level", "offset": 33120, "mem_type": "EEPROM", "label": "Puissance de combustion (P1 à P7)", "unit": "P", "min_val": 1, "max_val": 7, "step": 1, "default_val": 4, "category": "CONTROL"},
     {"reg_key": "fun_auto_set", "offset": 33128, "mem_type": "EEPROM", "label": "Modulation Automatique - Auto puissance (0=OFF, 1=ON)", "unit": "bool", "min_val": 0, "max_val": 1, "step": 1, "default_val": 1, "category": "CONTROL"},
     {"reg_key": "standby_set", "offset": 33130, "mem_type": "EEPROM", "label": "Mode ECO - Stand-by auto sur consigne (0=OFF, 1=ON)", "unit": "bool", "min_val": 0, "max_val": 1, "step": 1, "default_val": 1, "category": "CONTROL"},
@@ -167,10 +167,10 @@ TELEMETRY_COLUMNS: Dict[str, str] = {
     "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
     "timestamp": "TEXT NOT NULL",
     "epoch": "INTEGER NOT NULL",
-    "comm_mode": "TEXT DEFAULT 'simulation'",
-    "status_code": "INTEGER DEFAULT 5",
-    "status_label": "TEXT DEFAULT 'TRAVAIL (Normal)'",
-    "status_managed": "INTEGER DEFAULT 85",
+    "comm_mode": "TEXT DEFAULT 'agua_cloud'",
+    "status_code": "INTEGER DEFAULT 0",
+    "status_label": "TEXT DEFAULT 'OFF (Éteint)'",
+    "status_managed": "INTEGER DEFAULT 0",
     "alarm_code": "INTEGER DEFAULT 0",
     "alarm_label": "TEXT DEFAULT 'Aucune (____)'",
     "blackout_popup": "INTEGER DEFAULT 0",

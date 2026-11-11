@@ -47,7 +47,7 @@ class TestConnectionPayload(BaseModel):
     __test__ = False
     model_config = ConfigDict(extra="allow")
 
-    comm_mode: str = "simulation"
+    comm_mode: str = "agua_cloud"
     agua_email: Optional[str] = None
     agua_password: Optional[str] = None
     local_gateway_url: Optional[str] = None

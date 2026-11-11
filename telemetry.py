@@ -963,8 +963,16 @@ async def _collect_telemetry_unlocked(force_mode: Optional[str] = None) -> Dict[
         if prev.get("status_code") == -1:
             db_log("INFO", "COMMUNICATION", f"Communication avec le poêle rétablie avec succès ({comm_mode}).", comm_mode)
 
-        state = int(raw_buf.get(8, 5))
-        status_managed = int(raw_buf.get(232, 85))
+        # Décodage sécurisé de l'état physique du poêle :
+        # Si le registre 8 (status_get) n'est pas fourni dans le buffer, ne JAMAIS supposer 5 (TRAVAIL).
+        # On utilise le code précédent (si valide et != -1) ou 0 (OFF / Éteint).
+        prev_st = prev.get("status_code")
+        fallback_st = int(prev_st) if prev_st is not None and prev_st != -1 else 0
+        state = int(raw_buf.get(8, raw_buf.get("8", fallback_st)))
+
+        prev_sm = prev.get("status_managed")
+        fallback_sm = int(prev_sm) if prev_sm is not None else 0
+        status_managed = int(raw_buf.get(232, raw_buf.get("232", fallback_sm)))
         alarm_code = int(raw_buf.get(34, 0))
         alarm_label = NOBIS_ALARMS.get(alarm_code, f"AL{alarm_code}")
         status_label = STOVE_STATES.get(state, f"Code {state}")
@@ -987,8 +995,8 @@ async def _collect_telemetry_unlocked(force_mode: Optional[str] = None) -> Dict[
 
         temp_amb = float(raw_buf.get(103, prev.get("temp_ambient") or 19.0))
         setpoint_amb = float(raw_buf.get(33122, r_val.get("temp_amb_setpoint", 19.0)))
-        temp_fumes = float(raw_buf.get(2, prev.get("temp_fumes") or 185.0))
-        temp_probe_k = float(raw_buf.get(0, prev.get("temp_probe_k") or 309.0))
+        temp_fumes = float(raw_buf.get(2, prev.get("temp_fumes") or 25.0))
+        temp_probe_k = float(raw_buf.get(0, prev.get("temp_probe_k") or 25.0))
         rpm = int(round(float(raw_buf.get(47, 0.0)) * 10.0))
         dep_pa = round(float(raw_buf.get(37, 0.0)) / 10.0, 1)
 
@@ -1264,13 +1272,44 @@ async def _collect_telemetry_unlocked(force_mode: Optional[str] = None) -> Dict[
         standby_en = int(r_val.get("standby_set", 0))
         p_cmd = int(r_val.get("power_level", 4))
         fun_pwf = int(r_val.get("fun_pwf_set", 0))
-        p_actual = (8 if fun_pwf in (1, 2) else p_cmd) if state == 5 else 0
-        temp_amb = round(prev_amb + (0.05 if state == 5 else -0.05), 1)
-        temp_fumes = round(101.0 + max(0, p_actual - 1) * 11.15, 1) if state == 5 else 25.0
-        temp_k = round(380.0 + p_actual * 30.0, 1) if state == 5 else 28.0
-        rpm = int(1420 + p_actual * 70) if state == 5 else 0
-        sim_dep = round(2.3 + p_actual * 0.18, 1) if state == 5 else 0.1
-        rate_kgh = round(0.86 + max(0, p_actual - 1) * (1.30 / 6.0), 2) if state == 5 and p_actual > 0 else 0.0
+        fun_auto = int(r_val.get("fun_auto_set", 1))
+
+        # En mode auto total (fun_auto=1), si la température ambiante atteint ou dépasse la consigne,
+        # le poêle bascule en modulation minimale P0 (ralenti/économie)
+        if state == 5:
+            if fun_pwf in (1, 2):
+                p_actual = 8
+            elif fun_auto == 1 and prev_amb >= sp_amb:
+                p_actual = 0
+            else:
+                p_actual = p_cmd
+        else:
+            p_actual = 0
+
+        fan_front_cmd = int(r_val.get("fan_front_speed", 3))
+        if fan_front_cmd == 8:
+            vent_front_actual = 0 if (state == 5 and p_actual == 0) else min(7, max(1, p_actual))
+        else:
+            vent_front_actual = fan_front_cmd
+
+        duct_left_cmd = int(r_val.get("duct_left_speed", 0))
+        if duct_left_cmd == 8:
+            duct_left_actual = 0 if (state == 5 and p_actual == 0) else min(7, max(1, p_actual))
+        else:
+            duct_left_actual = duct_left_cmd
+
+        duct_right_cmd = int(r_val.get("duct_right_speed", 0))
+        if duct_right_cmd == 8:
+            duct_right_actual = 0 if (state == 5 and p_actual == 0) else min(7, max(1, p_actual))
+        else:
+            duct_right_actual = duct_right_cmd
+
+        temp_amb = round(prev_amb + (0.01 if state == 5 and p_actual > 0 else (-0.02 if state == 5 and p_actual == 0 else -0.05)), 1)
+        temp_fumes = round(101.0 + max(0, p_actual - 1) * 11.15, 1) if (state == 5 and p_actual > 0) else (85.0 if state == 5 and p_actual == 0 else 25.0)
+        temp_k = round(380.0 + p_actual * 30.0, 1) if (state == 5 and p_actual > 0) else (320.0 if state == 5 and p_actual == 0 else 28.0)
+        rpm = int(1420 + p_actual * 70) if (state == 5 and p_actual > 0) else (1200 if state == 5 and p_actual == 0 else 0)
+        sim_dep = round(2.3 + p_actual * 0.18, 1) if (state == 5 and p_actual > 0) else (1.8 if state == 5 and p_actual == 0 else 0.1)
+        rate_kgh = round(0.86 + max(0, p_actual - 1) * (1.30 / 6.0), 2) if (state == 5 and p_actual > 0) else (0.45 if state == 5 and p_actual == 0 else 0.0)
 
         c_hr = int(r_val.get("clock_hour_set", now.hour))
         c_mn = int(r_val.get("clock_minute_set", now.minute))
@@ -1340,12 +1379,12 @@ async def _collect_telemetry_unlocked(force_mode: Optional[str] = None) -> Dict[
             "2": round(temp_fumes, 1),
             "8": state,
             "11": p_actual,
-            "16": int(r_val.get("fan_front_speed", 3)),
+            "16": vent_front_actual,
             "22": 64,
             "28": 40,
             "29": 40,
-            "31": int(r_val.get("duct_left_speed", 0)),
-            "32": int(r_val.get("duct_right_speed", 0)),
+            "31": duct_left_actual,
+            "32": duct_right_actual,
             "34": 0,
             "37": int(round(sim_dep * 10.0)),
             "40": 0,
@@ -1437,20 +1476,20 @@ async def _collect_telemetry_unlocked(force_mode: Optional[str] = None) -> Dict[
             "glow_plug_on": 1 if state in (2, 3, 4) else 0,
             "power_level": p_cmd,
             "power_actual": p_actual,
-            "fun_auto_set": int(r_val.get("fun_auto_set", 1)),
+            "fun_auto_set": fun_auto,
             "standby_enabled": standby_en,
             "fun_pwf_set": fun_pwf,
             "set_silece_set": int(r_val.get("set_silece_set", 0)),
-            "fan_front_speed": int(r_val.get("fan_front_speed", 3)),
-            "vent_front_actual": int(r_val.get("fan_front_speed", 3)),
+            "fan_front_speed": fan_front_cmd,
+            "vent_front_actual": vent_front_actual,
             "duct_left_temp": float(r_val.get("duct_left_setpoint", 20.0)),
             "duct_left_setpoint": float(r_val.get("duct_left_setpoint", 20.0)),
-            "duct_left_speed": int(r_val.get("duct_left_speed", 0)),
-            "duct_left_actual": int(r_val.get("duct_left_speed", 0)),
+            "duct_left_speed": duct_left_cmd,
+            "duct_left_actual": duct_left_actual,
             "duct_right_temp": float(r_val.get("duct_right_setpoint", 20.0)),
             "duct_right_setpoint": float(r_val.get("duct_right_setpoint", 20.0)),
-            "duct_right_speed": int(r_val.get("duct_right_speed", 0)),
-            "duct_right_actual": int(r_val.get("duct_right_speed", 0)),
+            "duct_right_speed": duct_right_cmd,
+            "duct_right_actual": duct_right_actual,
             "chrono_week_enable": int(r_val.get("chrono_week_enable_set", 0)),
             "chrono_p1_start": int(r_val.get("chrono_p1_start_set", 48)),
             "chrono_p1_stop": int(r_val.get("chrono_p1_stop_set", 63)),
@@ -1524,6 +1563,15 @@ async def _collect_telemetry_unlocked(force_mode: Optional[str] = None) -> Dict[
         "exhaust_quality": record.get("exhaust_quality")
     })
     await matter_manager.sync_telemetry(record)
+
+    # Traitement en tâche de fond de l'étalonnage précis (A10)
+    try:
+        from src.calibration.calibration_service import get_calibration_service
+        calib_srv = get_calibration_service()
+        calib_srv.process_telemetry_record(record, raw_buf)
+    except Exception as e:
+        logger.debug(f"Erreur d'ingestion calibration en tâche de fond : {e}")
+
     return record
 
 

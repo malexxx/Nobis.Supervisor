@@ -88,11 +88,90 @@ function closeActionModal() {
 
 const showActionModal = openActionModal;
 
-// Gestion de la pop-up Configuration avec champs dynamiques selon le protocole choisi
+// =============================================================================
+// GESTION DU RE-DESIGN DE L'ONGLET PARAMÈTRES, TARAGES & OBSERVABILITÉ
+// =============================================================================
+let currentInstallerSubTab = "settings";
+
+function switchInstallerSubTab(subTabId) {
+  currentInstallerSubTab = subTabId || "settings";
+  const validTabs = ["settings", "tuning", "expert", "logs"];
+  validTabs.forEach(t => {
+    const pane = document.getElementById("subtab-pane-" + t);
+    const btn = document.getElementById("subtab-btn-" + t);
+    const isTarget = (t === currentInstallerSubTab);
+    if (pane) {
+      pane.classList.toggle("hidden", !isTarget);
+    }
+    if (btn) {
+      if (isTarget) {
+        btn.classList.add("subtab-active", "bg-orange-600", "text-white", "shadow-md");
+        btn.classList.remove("text-gray-400", "hover:bg-gray-900");
+      } else {
+        btn.classList.remove("subtab-active", "bg-orange-600", "text-white", "shadow-md");
+        btn.classList.add("text-gray-400", "hover:bg-gray-900");
+      }
+    }
+  });
+
+  if (currentInstallerSubTab === "expert") {
+    checkInstallerAuthStatus();
+    renderEepromTable();
+    loadSnapshots();
+    renderHardwareMasks();
+  } else if (currentInstallerSubTab === "logs") {
+    loadLogs(currentLogSeverity);
+    loadAudit();
+  } else if (currentInstallerSubTab === "tuning") {
+    const trimPelletInp = document.getElementById("inst-trim-pellet");
+    if (trimPelletInp && document.activeElement !== trimPelletInp) {
+      trimPelletInp.value = getRegVal("trim_pellet_pct", 0);
+    }
+    const trimExhaustInp = document.getElementById("inst-trim-exhaust");
+    if (trimExhaustInp && document.activeElement !== trimExhaustInp) {
+      trimExhaustInp.value = getRegVal("trim_exhaust_pct", 0);
+    }
+  } else if (currentInstallerSubTab === "settings") {
+    updateConfigModalFields();
+  }
+}
+
+function switchLogView(viewName) {
+  const sysView = document.getElementById("logs-view-system");
+  const auditView = document.getElementById("logs-view-audit");
+  const sysBtn = document.getElementById("logview-btn-system");
+  const auditBtn = document.getElementById("logview-btn-audit");
+
+  if (viewName === "audit") {
+    if (sysView) sysView.classList.add("hidden");
+    if (auditView) auditView.classList.remove("hidden");
+    if (sysBtn) {
+      sysBtn.className = "px-3.5 py-1.5 rounded-lg font-semibold transition text-gray-400 hover:text-white hover:bg-gray-900 cursor-pointer flex items-center gap-1.5";
+    }
+    if (auditBtn) {
+      auditBtn.className = "px-3.5 py-1.5 rounded-lg font-bold transition bg-orange-600 text-white shadow-sm cursor-pointer flex items-center gap-1.5";
+    }
+    loadAudit();
+  } else {
+    if (sysView) sysView.classList.remove("hidden");
+    if (auditView) auditView.classList.add("hidden");
+    if (sysBtn) {
+      sysBtn.className = "px-3.5 py-1.5 rounded-lg font-bold transition bg-orange-600 text-white shadow-sm cursor-pointer flex items-center gap-1.5";
+    }
+    if (auditBtn) {
+      auditBtn.className = "px-3.5 py-1.5 rounded-lg font-semibold transition text-gray-400 hover:text-white hover:bg-gray-900 cursor-pointer flex items-center gap-1.5";
+    }
+    loadLogs(currentLogSeverity);
+  }
+}
+
+// Gestion de la Configuration avec champs dynamiques selon le protocole choisi
 function openConfigModal(highlightFieldId = null) {
+  switchTab("tab-installer");
+  switchInstallerSubTab("settings");
   updateConfigModalFields();
   const modal = document.getElementById("config-modal");
-  modal.classList.remove("hidden");
+  if (modal) modal.classList.add("hidden");
 
   if (highlightFieldId) {
     setTimeout(() => {
@@ -106,19 +185,25 @@ function openConfigModal(highlightFieldId = null) {
           el.classList.remove("ring-2", "ring-amber-400", "border-amber-400", "bg-amber-950/80", "shadow-[0_0_15px_rgba(245,158,11,0.5)]");
         }, 3000);
       }
-    }, 100);
+    }, 150);
   }
 }
 
 function closeConfigModal() {
-  document.getElementById("config-modal").classList.add("hidden");
+  const modal = document.getElementById("config-modal");
+  if (modal) modal.classList.add("hidden");
 }
 
 function updateConfigModalFields() {
-  const mode = document.getElementById("cfg-mode").value;
-  document.getElementById("cfg-fields-agua").classList.toggle("hidden", mode !== "agua_cloud");
-  document.getElementById("cfg-fields-gateway").classList.toggle("hidden", mode !== "local_gateway");
-  document.getElementById("cfg-fields-sim").classList.toggle("hidden", mode !== "simulation");
+  const modeEl = document.getElementById("cfg-mode");
+  if (!modeEl) return;
+  const mode = modeEl.value;
+  const aguaFields = document.getElementById("cfg-fields-agua");
+  const gwFields = document.getElementById("cfg-fields-gateway");
+  const simFields = document.getElementById("cfg-fields-sim");
+  if (aguaFields) aguaFields.classList.toggle("hidden", mode !== "agua_cloud");
+  if (gwFields) gwFields.classList.toggle("hidden", mode !== "local_gateway");
+  if (simFields) simFields.classList.toggle("hidden", mode !== "simulation");
 }
 
 function toggleMobileSeriesDrawer() {
@@ -152,7 +237,11 @@ function switchTab(tabId) {
 
   ["tab-control", "tab-pellets", "tab-chrono", "tab-dashboard", "tab-installer"].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.classList.toggle("hidden", id !== tabId);
+    if (el) {
+      const isTarget = (id === tabId);
+      el.classList.toggle("hidden", !isTarget);
+      el.style.display = isTarget ? "" : "none";
+    }
     const btn = document.getElementById("btn-" + id);
     if (btn) {
       if (id === tabId) {
@@ -185,8 +274,7 @@ function switchTab(tabId) {
   }
   if (tabId === "tab-installer") {
     checkInstallerAuthStatus();
-    loadLogs(currentLogSeverity);
-    loadAudit();
+    switchInstallerSubTab(currentInstallerSubTab || "settings");
   }
 }
 
@@ -207,7 +295,282 @@ function setGanttDay(bit) {
   renderChronoPrograms();
 }
 
-// Rendu de la Frise Gantt 24h et des 4 cartes Programmes Chrono P1..P4
+let currentOpenProgramModal = null;
+
+function openProgramModal(p) {
+  currentOpenProgramModal = Number(p);
+  renderProgramModalContent(currentOpenProgramModal);
+  const modal = document.getElementById("program-modal");
+  if (modal) modal.classList.remove("hidden");
+}
+
+function closeProgramModal() {
+  currentOpenProgramModal = null;
+  const modal = document.getElementById("program-modal");
+  if (modal) modal.classList.add("hidden");
+}
+
+// Rendu du contenu complet d'un programme dans la Popup modale
+function renderProgramModalContent(p) {
+  const modalContainer = document.getElementById("program-modal-container");
+  if (!modalContainer) return;
+
+  const startSlot = Number(getRegVal(`chrono_p${p}_start_set`, latestData[`chrono_p${p}_start`] ?? 144));
+  const stopSlot = Number(getRegVal(`chrono_p${p}_stop_set`, latestData[`chrono_p${p}_stop`] ?? 144));
+  const mask = Number(getRegVal(`chrono_p${p}_days_mask`, latestData[`chrono_p${p}_days`] ?? 0));
+  const pwr = Number(getRegVal(`chrono_p${p}_power_set`, latestData[`chrono_p${p}_power`] ?? 7));
+  const temp = Number(getRegVal(`chrono_p${p}_temperature_set`, latestData[`chrono_p${p}_temp`] ?? 20));
+
+  const fanFront = Number(getRegVal(`chrono_p${p}_fan_front_set`, 0));
+  const tCanL = Number(getRegVal(`chrono_p${p}_tcanl_set`, 20));
+  const vCanL = Number(getRegVal(`chrono_p${p}_canl_set`, 0));
+  const tCanR = Number(getRegVal(`chrono_p${p}_tcanr_set`, 20));
+  const vCanR = Number(getRegVal(`chrono_p${p}_canr_set`, 0));
+
+  const dayLabels = [
+    { bit: 1, name: "Lun", full: "Lundi" },
+    { bit: 2, name: "Mar", full: "Mardi" },
+    { bit: 4, name: "Mer", full: "Mercredi" },
+    { bit: 8, name: "Jeu", full: "Jeudi" },
+    { bit: 16, name: "Ven", full: "Vendredi" },
+    { bit: 32, name: "Sam", full: "Samedi" },
+    { bit: 64, name: "Dim", full: "Dimanche" }
+  ];
+
+  const progTheme = {
+    1: {
+      border: "border-emerald-600/70",
+      badge: "bg-emerald-500 text-gray-950",
+      text: "text-emerald-400",
+      dayActive: "bg-emerald-600 text-white font-bold border-emerald-500 shadow-sm"
+    },
+    2: {
+      border: "border-orange-600/70",
+      badge: "bg-orange-500 text-gray-950",
+      text: "text-orange-400",
+      dayActive: "bg-orange-600 text-white font-bold border-orange-500 shadow-sm"
+    },
+    3: {
+      border: "border-cyan-600/70",
+      badge: "bg-cyan-500 text-gray-950",
+      text: "text-cyan-400",
+      dayActive: "bg-cyan-600 text-white font-bold border-cyan-500 shadow-sm"
+    },
+    4: {
+      border: "border-purple-600/70",
+      badge: "bg-purple-500 text-white",
+      text: "text-purple-400",
+      dayActive: "bg-purple-600 text-white font-bold border-purple-500 shadow-sm"
+    }
+  }[p];
+
+  const isConfigured = (startSlot < 144 && stopSlot < 144 && startSlot !== stopSlot);
+
+  // Options Allumage & Arrêt (par tranche de 10 min de 00h00 à 23h50 + OFF)
+  let slotOptionsStart = `<option value="144" ${startSlot === 144 ? 'selected' : ''}>OFF (Désactivé)</option>`;
+  let slotOptionsStop = `<option value="144" ${stopSlot === 144 ? 'selected' : ''}>OFF (Désactivé)</option>`;
+  for (let s = 0; s < 144; s++) {
+    const tStr = slotToTime(s);
+    slotOptionsStart += `<option value="${s}" ${startSlot === s ? 'selected' : ''}>${tStr}</option>`;
+    slotOptionsStop += `<option value="${s}" ${stopSlot === s ? 'selected' : ''}>${tStr}</option>`;
+  }
+
+  // Listes déroulantes pour les consignes
+  let powerOptions = "";
+  for (let lvl = 1; lvl <= 7; lvl++) {
+    powerOptions += `<option value="${lvl}" ${pwr === lvl ? 'selected' : ''}>P${lvl} (Niveau ${lvl})</option>`;
+  }
+
+  let tempOptions = "";
+  for (let t = 7; t <= 41; t++) {
+    const lbl = t === 41 ? "41°C (MAX)" : (t === 7 ? "7°C (Hors-gel)" : `${t}°C`);
+    tempOptions += `<option value="${t}" ${temp === t ? 'selected' : ''}>${lbl}</option>`;
+  }
+
+  let tCanLOptions = "";
+  let tCanROptions = "";
+  for (let t = 7; t <= 41; t++) {
+    const lbl = t === 41 ? "41°C (MAX)" : (t === 7 ? "7°C (Hors-gel)" : `${t}°C`);
+    tCanLOptions += `<option value="${t}" ${tCanL === t ? 'selected' : ''}>${lbl}</option>`;
+    tCanROptions += `<option value="${t}" ${tCanR === t ? 'selected' : ''}>${lbl}</option>`;
+  }
+
+  const fanDuctOptions = (curVal) => [
+    { val: 0, label: "0 - OFF" },
+    { val: 1, label: "1 - Vitesse 1" },
+    { val: 2, label: "2 - Vitesse 2" },
+    { val: 3, label: "3 - Vitesse 3" },
+    { val: 4, label: "4 - Vitesse 4" },
+    { val: 5, label: "5 - Vitesse 5" },
+    { val: 6, label: "6 - Vitesse 6" },
+    { val: 7, label: "7 - Vitesse 7" },
+    { val: 8, label: "8 - PS (Auto)" }
+  ].map(o => `<option value="${o.val}" ${curVal === o.val ? 'selected' : ''}>${o.label}</option>`).join("");
+
+  // Jours d'activation
+  const dayBtns = dayLabels.map(d => {
+    const isOn = (mask & d.bit) !== 0;
+    const nextMask = isOn ? (mask & ~d.bit) : (mask | d.bit);
+    return `<button type="button" onclick="sendCommand('chrono_p${p}_days_mask', ${nextMask})"
+      class="min-h-[34px] py-1 px-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer ${isOn ? progTheme.dayActive : 'bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700 border-gray-700'}"
+      title="${d.full}">
+      ${d.name}
+    </button>`;
+  }).join("");
+
+  // Options ventilation façade
+  const fanFrontOptions = [
+    { val: 0, label: "0 - OFF (Convection)" },
+    { val: 1, label: "1 - Vitesse 1" },
+    { val: 2, label: "2 - Vitesse 2" },
+    { val: 3, label: "3 - Vitesse 3" },
+    { val: 4, label: "4 - Vitesse 4" },
+    { val: 5, label: "5 - Vitesse 5" },
+    { val: 6, label: "6 - Vitesse 6" },
+    { val: 7, label: "7 - Vitesse 7" },
+    { val: 8, label: "8 - PS (Auto)" }
+  ].map(o => `<option value="${o.val}" ${fanFront === o.val ? 'selected' : ''}>${o.label}</option>`).join("");
+
+  modalContainer.className = `bg-gray-900 border ${progTheme.border} rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden my-auto`;
+
+  modalContainer.innerHTML = `
+    <!-- En-tête de la Popup -->
+    <div class="p-4 bg-gray-950/90 border-b border-gray-800 flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <span class="px-2.5 py-1 rounded-md text-xs font-black ${progTheme.badge} shadow-sm">P${p}</span>
+        <div>
+          <h3 class="text-base font-bold text-white flex items-center gap-2">
+            <span>Programme ${p}</span>
+          </h3>
+          <p class="text-[11px] text-gray-400">Configuration des créneaux horaires, puissances et consignes</p>
+        </div>
+      </div>
+      <button type="button" onclick="closeProgramModal()"
+        class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white font-bold flex items-center justify-center transition cursor-pointer">
+        ✕
+      </button>
+    </div>
+
+    <!-- Contenu du Programme (Scrollable) -->
+    <div class="p-4 sm:p-5 overflow-y-auto space-y-4 text-xs tabular-nums flex-1 pb-6">
+      <!-- 1. Tranche Horaire -->
+      <div class="bg-gray-950/70 p-3.5 rounded-xl border border-gray-800 space-y-2.5">
+        <span class="font-bold text-gray-200 text-xs block">⏰ Plage Horaire</span>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="text-gray-400 block mb-1">Heure d'Allumage</label>
+            <select onchange="sendCommand('chrono_p${p}_start_set', this.value)"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:outline-none focus:border-orange-500 cursor-pointer">
+              ${slotOptionsStart}
+            </select>
+          </div>
+          <div>
+            <label class="text-gray-400 block mb-1">Heure d'Arrêt</label>
+            <select onchange="sendCommand('chrono_p${p}_stop_set', this.value)"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:outline-none focus:border-orange-500 cursor-pointer">
+              ${slotOptionsStop}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Consignes Flamme & T° Salon & Ventilation -->
+      <div class="bg-gray-950/70 p-3.5 rounded-xl border border-gray-800 space-y-2.5">
+        <span class="font-bold text-gray-200 text-xs block">🔥 Consignes de Chauffe</span>
+        <div class="grid grid-cols-3 gap-2.5">
+          <div>
+            <label class="text-gray-400 block mb-1" title="Puissance de combustion de 1 à 7">Puissance</label>
+            <select onchange="sendCommand('chrono_p${p}_power_set', this.value)"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white font-bold text-xs focus:outline-none focus:border-orange-500 cursor-pointer">
+              ${powerOptions}
+            </select>
+          </div>
+          <div>
+            <label class="text-gray-400 block mb-1" title="Consigne T° Ambiante (7..40°C, 41=MAX)">T° Salon</label>
+            <select onchange="sendCommand('chrono_p${p}_temperature_set', this.value)"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white font-bold text-xs focus:outline-none focus:border-orange-500 cursor-pointer">
+              ${tempOptions}
+            </select>
+          </div>
+          <div>
+            <label class="text-gray-400 block mb-1" title="Ventilation Façade (0=OFF, 1..7, 8=PS)">Vent. Façade</label>
+            <select onchange="sendCommand('chrono_p${p}_fan_front_set', this.value)"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-white font-medium text-xs focus:outline-none focus:border-orange-500 cursor-pointer">
+              ${fanFrontOptions}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Canalisations d'air chaud Gauche SX & Droite DX -->
+      <div class="bg-gray-950/70 p-3.5 rounded-xl border border-gray-800 space-y-2.5">
+        <span class="font-bold text-gray-200 text-xs block">💨 Canalisations d'Air Chaud</span>
+        <div class="grid grid-cols-2 gap-3">
+          <!-- Canalisation Gauche SX -->
+          <div class="bg-gray-900/90 p-2.5 rounded-lg border border-gray-800 space-y-2">
+            <div class="text-[11px] text-cyan-400 font-semibold flex items-center justify-between">
+              <span>⬅️ Gauche (SX)</span>
+              <span class="text-[10px] text-gray-500 font-mono">Cons / Vit</span>
+            </div>
+            <div class="space-y-1.5">
+              <div>
+                <label class="text-[10px] text-gray-400 block mb-0.5">T° Consigne SX</label>
+                <select onchange="sendCommand('chrono_p${p}_tcanl_set', this.value)"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-white text-xs tabular-nums focus:outline-none focus:border-cyan-500 cursor-pointer">
+                  ${tCanLOptions}
+                </select>
+              </div>
+              <div>
+                <label class="text-[10px] text-gray-400 block mb-0.5">Vitesse Soufflerie SX</label>
+                <select onchange="sendCommand('chrono_p${p}_canl_set', this.value)"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-cyan-300 font-bold text-xs tabular-nums focus:outline-none focus:border-cyan-500 cursor-pointer">
+                  ${fanDuctOptions(vCanL)}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Canalisation Droite DX -->
+          <div class="bg-gray-900/90 p-2.5 rounded-lg border border-gray-800 space-y-2">
+            <div class="text-[11px] text-sky-400 font-semibold flex items-center justify-between">
+              <span>➡️ Droite (DX)</span>
+              <span class="text-[10px] text-gray-500 font-mono">Cons / Vit</span>
+            </div>
+            <div class="space-y-1.5">
+              <div>
+                <label class="text-[10px] text-gray-400 block mb-0.5">T° Consigne DX</label>
+                <select onchange="sendCommand('chrono_p${p}_tcanr_set', this.value)"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-white text-xs tabular-nums focus:outline-none focus:border-sky-500 cursor-pointer">
+                  ${tCanROptions}
+                </select>
+              </div>
+              <div>
+                <label class="text-[10px] text-gray-400 block mb-0.5">Vitesse Soufflerie DX</label>
+                <select onchange="sendCommand('chrono_p${p}_canr_set', this.value)"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-sky-300 font-bold text-xs tabular-nums focus:outline-none focus:border-sky-500 cursor-pointer">
+                  ${fanDuctOptions(vCanR)}
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. Jours actifs de la semaine -->
+      <div class="bg-gray-950/70 p-3.5 rounded-xl border border-gray-800 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="font-bold text-gray-200 text-xs">📅 Jours d'Activation</span>
+          <span class="text-[11px] text-gray-500 font-mono">Masque = ${mask}</span>
+        </div>
+        <div class="grid grid-cols-7 gap-1.5 pt-1">
+          ${dayBtns}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// Rendu de la Frise Gantt 24h et des 4 boutons Programmes Chrono P1..P4
 function renderChronoPrograms() {
   const container = document.getElementById("chrono-programs-grid");
   const ganttTracks = document.getElementById("chrono-gantt-tracks");
@@ -222,6 +585,40 @@ function renderChronoPrograms() {
     2: "bg-orange-500/85 border-orange-400",
     3: "bg-cyan-500/85 border-cyan-400",
     4: "bg-purple-500/85 border-purple-400"
+  };
+
+  // Badges colorés pour le libellé P1..P4 dans la frise
+  const progTrackBadges = {
+    1: "bg-emerald-950/80 border-emerald-500/70 text-emerald-300 hover:border-emerald-400",
+    2: "bg-orange-950/80 border-orange-500/70 text-orange-300 hover:border-orange-400",
+    3: "bg-cyan-950/80 border-cyan-500/70 text-cyan-300 hover:border-cyan-400",
+    4: "bg-purple-950/80 border-purple-500/70 text-purple-300 hover:border-purple-400"
+  };
+
+  // Styles des 4 boutons de cartes programmes
+  const progBorderColors = {
+    1: "border-emerald-500/50 hover:border-emerald-400 bg-gradient-to-br from-emerald-950/60 to-gray-900/90 hover:from-emerald-900/60 hover:to-gray-800/90 shadow-emerald-950/30",
+    2: "border-orange-500/50 hover:border-orange-400 bg-gradient-to-br from-orange-950/60 to-gray-900/90 hover:from-orange-900/60 hover:to-gray-800/90 shadow-orange-950/30",
+    3: "border-cyan-500/50 hover:border-cyan-400 bg-gradient-to-br from-cyan-950/60 to-gray-900/90 hover:from-cyan-900/60 hover:to-gray-800/90 shadow-cyan-950/30",
+    4: "border-purple-500/50 hover:border-purple-400 bg-gradient-to-br from-purple-950/60 to-gray-900/90 hover:from-purple-900/60 hover:to-gray-800/90 shadow-purple-950/30"
+  };
+  const progBadgeStyles = {
+    1: "bg-emerald-500 text-gray-950 font-black",
+    2: "bg-orange-500 text-gray-950 font-black",
+    3: "bg-cyan-500 text-gray-950 font-black",
+    4: "bg-purple-500 text-white font-black"
+  };
+  const progTextColors = {
+    1: "text-emerald-300",
+    2: "text-orange-300",
+    3: "text-cyan-300",
+    4: "text-purple-300"
+  };
+  const progPillColors = {
+    1: "bg-emerald-950/80 text-emerald-300 border-emerald-700/60",
+    2: "bg-orange-950/80 text-orange-300 border-orange-700/60",
+    3: "bg-cyan-950/80 text-cyan-300 border-cyan-700/60",
+    4: "bg-purple-950/80 text-purple-300 border-purple-700/60"
   };
 
   // Détermination du jour courant (par défaut) et du jour sélectionné
@@ -240,34 +637,20 @@ function renderChronoPrograms() {
   const prevDayIdx = (selectedDayIdx >= 0 ? selectedDayIdx + 6 : 6) % 7;
   const prevDayObj = GANTT_DAYS[prevDayIdx];
 
-  // Rendu du sélecteur de jour dans l'en-tête de la frise
+  // Rendu du sélecteur de jour dans l'en-tête de la frise (étendu dynamiquement, texte tronqué)
   const daySelector = document.getElementById("chrono-day-selector");
   if (daySelector) {
     daySelector.innerHTML = GANTT_DAYS.map(d => {
       const isSel = (d.bit === selectedDayObj.bit);
-      const isToday = (d.bit === todayDayObj.bit);
       return `<button type="button" onclick="setGanttDay(${d.bit})"
-        class="min-h-[28px] px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1 transition-all cursor-pointer ${isSel
+        class="min-h-[30px] sm:min-h-[32px] px-1 py-1 rounded-md text-xs font-semibold flex items-center justify-center transition-all cursor-pointer min-w-0 w-full overflow-hidden ${isSel
           ? 'bg-orange-600 text-white font-bold shadow-md shadow-orange-950/50 border border-orange-500'
           : 'bg-gray-900 text-gray-400 hover:text-white hover:bg-gray-800 border border-gray-800'
         }"
-        title="${d.full}${isToday ? ' (Aujourd\'hui)' : ''}">
-        <span>${d.name}</span>
-        ${isToday ? '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" title="Aujourd\'hui"></span>' : ''}
+        title="${d.full}">
+        <span class="truncate block w-full text-center">${d.full}</span>
       </button>`;
     }).join("");
-  }
-
-  // Badges d'information sur le jour affiché
-  const dayBadge = document.getElementById("gantt-selected-day-badge");
-  if (dayBadge) {
-    dayBadge.textContent = isTodaySelected ? `${selectedDayObj.full} (Aujourd'hui)` : selectedDayObj.full;
-  }
-  const daySubtext = document.getElementById("gantt-day-subtext");
-  if (daySubtext) {
-    daySubtext.textContent = isTodaySelected
-      ? `Créneaux actifs aujourd'hui (${selectedDayObj.full})`
-      : `Créneaux actifs programmés pour le ${selectedDayObj.full}`;
   }
 
   // Position du marqueur de l'heure actuelle sur la frise 24h
@@ -285,18 +668,7 @@ function renderChronoPrograms() {
     }
   }
 
-  const nowLbl = document.getElementById("gantt-now-label");
-  if (nowLbl) {
-    if (isTodaySelected) {
-      nowLbl.style.display = "inline";
-      nowLbl.textContent = `Heure actuelle : ${nowStr}`;
-    } else {
-      nowLbl.style.display = "none";
-      nowLbl.textContent = "";
-    }
-  }
-
-  let html = "";
+  let buttonsHtml = "";
   let ganttHtml = "";
 
   for (let p = 1; p <= 4; p++) {
@@ -307,147 +679,127 @@ function renderChronoPrograms() {
     const temp = Number(getRegVal(`chrono_p${p}_temperature_set`, latestData[`chrono_p${p}_temp`] ?? 20));
 
     const fanFront = Number(getRegVal(`chrono_p${p}_fan_front_set`, 0));
-    const tCanL = Number(getRegVal(`chrono_p${p}_tcanl_set`, 20));
-    const vCanL = Number(getRegVal(`chrono_p${p}_canl_set`, 0));
-    const tCanR = Number(getRegVal(`chrono_p${p}_tcanr_set`, 20));
-    const vCanR = Number(getRegVal(`chrono_p${p}_canr_set`, 0));
+    const tCanL = Number(getRegVal(`chrono_p${p}_tcanl_set`, latestData[`chrono_p${p}_tcanl`] ?? latestData[`chrono_p${p}_temp`] ?? 20));
+    const vCanL = Number(getRegVal(`chrono_p${p}_canl_set`, latestData[`chrono_p${p}_canl`] ?? 0));
+    const tCanR = Number(getRegVal(`chrono_p${p}_tcanr_set`, latestData[`chrono_p${p}_tcanr`] ?? latestData[`chrono_p${p}_temp`] ?? 20));
+    const vCanR = Number(getRegVal(`chrono_p${p}_canr_set`, latestData[`chrono_p${p}_canr`] ?? 0));
 
     const isDayActive = (mask & selectedDayObj.bit) !== 0;
     const wasPrevDayActive = (mask & prevDayObj.bit) !== 0;
 
-    // Calcul du segment Gantt filtré sur le jour sélectionné (sur 144 pas de 10 min)
+    // Calcul du segment Gantt filtré sur le jour sélectionné (sur 144 pas de 10 min) sans contenu textuel intérieur
     let barSegments = "";
     if (startSlot < 144 && stopSlot < 144 && startSlot !== stopSlot) {
       if (stopSlot > startSlot) {
         if (isDayActive) {
           const leftPct = ((startSlot / 144) * 100).toFixed(2);
           const widthPct = (((stopSlot - startSlot) / 144) * 100).toFixed(2);
-          barSegments = `<div style="left:${leftPct}%;width:${widthPct}%" class="absolute inset-y-0.5 rounded border ${progColors[p]} flex items-center justify-center text-[9px] font-bold text-white truncate px-1 shadow-sm">P${p}: ${slotToTime(startSlot)}-${slotToTime(stopSlot)} (${temp}°C / P${pwr})</div>`;
+          barSegments = `<div style="left:${leftPct}%;width:${widthPct}%" class="absolute inset-y-0.5 rounded border ${progColors[p]} shadow-sm cursor-pointer" title="P${p}: ${slotToTime(startSlot)}-${slotToTime(stopSlot)} (${temp}°C / P${pwr})" onclick="openProgramModal(${p})"></div>`;
         }
       } else {
         // Créneau chevauchant minuit (ex: 22h00 -> 06h00)
         // 1. Matinée (00h00 -> stopSlot), suite du démarrage de la veille
         if (wasPrevDayActive) {
           const wMorning = ((stopSlot / 144) * 100).toFixed(2);
-          barSegments += `<div style="left:0%;width:${wMorning}%" class="absolute inset-y-0.5 rounded-r border ${progColors[p]} flex items-center justify-center text-[9px] font-bold text-white truncate px-1 shadow-sm" title="Suite créneau veille (${prevDayObj.name})">P${p}: 00h-${slotToTime(stopSlot)} (${temp}°C)</div>`;
+          barSegments += `<div style="left:0%;width:${wMorning}%" class="absolute inset-y-0.5 rounded-r border ${progColors[p]} shadow-sm cursor-pointer" title="P${p}: 00h-${slotToTime(stopSlot)} (${temp}°C) - Suite veille (${prevDayObj.name})" onclick="openProgramModal(${p})"></div>`;
         }
         // 2. Soirée (startSlot -> 24h00), démarrage du créneau aujourd'hui
         if (isDayActive) {
           const lEvening = ((startSlot / 144) * 100).toFixed(2);
           const wEvening = (((144 - startSlot) / 144) * 100).toFixed(2);
-          barSegments += `<div style="left:${lEvening}%;width:${wEvening}%" class="absolute inset-y-0.5 rounded-l border ${progColors[p]} flex items-center justify-center text-[9px] font-bold text-white truncate px-1 shadow-sm" title="Début créneau soirée">P${p}: ${slotToTime(startSlot)}-24h (${temp}°C / P${pwr})</div>`;
+          barSegments += `<div style="left:${lEvening}%;width:${wEvening}%" class="absolute inset-y-0.5 rounded-l border ${progColors[p]} shadow-sm cursor-pointer" title="P${p}: ${slotToTime(startSlot)}-24h (${temp}°C / P${pwr})" onclick="openProgramModal(${p})"></div>`;
         }
       }
     }
 
+    // Libellé P1..P4 coloré dans la frise
     ganttHtml += `
       <div class="flex items-center gap-2">
-        <span class="w-8 text-[10px] font-bold text-gray-400">P${p}</span>
+        <button type="button" onclick="openProgramModal(${p})"
+          class="w-8 text-center py-0.5 rounded text-[11px] font-extrabold border cursor-pointer hover:brightness-125 transition shadow-sm ${progTrackBadges[p]}"
+          title="Ouvrir le Programme P${p}">P${p}</button>
         <div class="relative flex-1 h-5 bg-gray-900 rounded border border-gray-800 overflow-hidden">
           ${barSegments}
         </div>
       </div>
     `;
 
-    const dayBtns = dayLabels.map(d => {
-      const isOn = (mask & d.bit) !== 0;
-      const nextMask = isOn ? (mask & ~d.bit) : (mask | d.bit);
-      return `<button onclick="sendCommand('chrono_p${p}_days_mask', ${nextMask})"
-        class="min-h-[30px] px-1.5 py-1 rounded text-[10px] font-bold ${isOn ? 'bg-orange-600 text-white' : 'bg-gray-800 text-gray-500'}">${d.name}</button>`;
-    }).join("");
+    // Calcul du résumé pour le bouton de carte programme compacte (grille 2x2 sans titre, avec canalisations)
+    const isConfigured = (startSlot < 144 && stopSlot < 144 && startSlot !== stopSlot);
+    const activeDays = dayLabels.filter(d => (mask & d.bit) !== 0).map(d => d.name);
+    let activeDaysSummary = "Aucun jour";
+    if (activeDays.length === 7) activeDaysSummary = "Tous les jours";
+    else if (activeDays.length > 0) activeDaysSummary = activeDays.join(", ");
 
-    let slotOptionsStart = `<option value="144" ${startSlot === 144 ? 'selected' : ''}>OFF (144)</option>`;
-    let slotOptionsStop = `<option value="144" ${stopSlot === 144 ? 'selected' : ''}>OFF (144)</option>`;
-    for (let s = 0; s < 144; s++) {
-      const tStr = slotToTime(s);
-      slotOptionsStart += `<option value="${s}" ${startSlot === s ? 'selected' : ''}>${tStr}</option>`;
-      slotOptionsStop += `<option value="${s}" ${stopSlot === s ? 'selected' : ''}>${tStr}</option>`;
-    }
+    const fanDisplay = fanFront === 8 ? "PS" : (fanFront === 0 ? "OFF" : String(fanFront));
+    const fanLDisplay = vCanL === 8 ? "PS" : (vCanL === 0 ? "OFF" : String(vCanL));
+    const fanRDisplay = vCanR === 8 ? "PS" : (vCanR === 0 ? "OFF" : String(vCanR));
 
-    html += `
-      <div class="bg-gray-950/70 border border-gray-800 rounded-lg p-3.5 space-y-2.5 text-xs tabular-nums">
-        <div class="flex items-center justify-between border-b border-gray-800 pb-2">
-          <strong class="text-white text-sm">📅 Programme P${p}</strong>
-          <span class="px-2 py-0.5 rounded ${startSlot < 144 && stopSlot < 144 ? 'bg-emerald-950 text-emerald-300' : 'bg-gray-800 text-gray-400'}">
-            ${slotToTime(startSlot)} ➔ ${slotToTime(stopSlot)}
+    buttonsHtml += `
+      <button type="button" onclick="openProgramModal(${p})"
+        class="w-full text-left p-2.5 sm:p-3 rounded-xl border transition-all duration-200 cursor-pointer shadow-md hover:shadow-lg hover:scale-[1.01] flex flex-col justify-between gap-1.5 sm:gap-2 ${progBorderColors[p]} group">
+        <div class="flex items-center justify-between gap-1">
+          <span class="px-2 py-0.5 rounded text-[11px] sm:text-xs font-black ${progBadgeStyles[p]} shadow-sm">P${p}</span>
+          <span class="px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] font-bold border shrink-0 flex items-center gap-1 ${isConfigured ? progPillColors[p] : 'bg-gray-800 text-gray-400 border-gray-700'}">
+            <span>${isConfigured ? '🕒' : '⏹️'}</span>
+            <span>${isConfigured ? `${slotToTime(startSlot)} - ${slotToTime(stopSlot)}` : 'OFF'}</span>
           </span>
         </div>
-        <div class="grid grid-cols-2 gap-2">
-          <div>
-            <label class="text-gray-400 block mb-0.5">Allumage (P${p})</label>
-            <select onchange="sendCommand('chrono_p${p}_start_set', this.value)" class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white">
-              ${slotOptionsStart}
-            </select>
-          </div>
-          <div>
-            <label class="text-gray-400 block mb-0.5">Arrêt (P${p})</label>
-            <select onchange="sendCommand('chrono_p${p}_stop_set', this.value)" class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white">
-              ${slotOptionsStop}
-            </select>
+
+        <div class="space-y-1 text-[11px] sm:text-xs">
+          ${isConfigured ? `
+            <div class="flex items-center gap-2 text-gray-200 font-medium truncate">
+              <span class="flex items-center gap-1" title="Consigne T° Salon">🛋️ ${temp}°C</span>
+              <span class="flex items-center gap-1 text-amber-300" title="Puissance de chauffe (1..7)">🔥 P${pwr}</span>
+              <span class="flex items-center gap-1 text-emerald-300" title="Ventilation Façade">💨 V.${fanDisplay}</span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-1 text-[10px] sm:text-[11px] pt-0.5 border-t border-gray-800/60">
+              <span class="text-cyan-400 truncate flex items-center gap-1" title="Canalisation Gauche SX : ${tCanL}°C, Vitesse ${fanLDisplay}">
+                <span>⬅️</span>
+                <span>${tCanL}°C</span>
+                <span class="text-cyan-300 font-mono">💨${fanLDisplay}</span>
+              </span>
+              <span class="text-sky-400 truncate flex items-center gap-1" title="Canalisation Droite DX : ${tCanR}°C, Vitesse ${fanRDisplay}">
+                <span>➡️</span>
+                <span>${tCanR}°C</span>
+                <span class="text-sky-300 font-mono">💨${fanRDisplay}</span>
+              </span>
+            </div>
+          ` : `
+            <div class="text-gray-500 italic py-0.5 flex items-center gap-1.5">
+              <span>💤</span><span>Non programmé</span>
+            </div>
+          `}
+
+          <div class="text-[10px] sm:text-[11px] text-gray-400 truncate pt-0.5 flex items-center gap-1">
+            <span>📅</span>
+            <span class="truncate">${activeDaysSummary}</span>
           </div>
         </div>
-        <div class="grid grid-cols-3 gap-1.5">
-          <div>
-            <label class="text-gray-400 block mb-0.5" title="Puissance de flamme (1..7)">Puiss. (1-7)</label>
-            <input type="number" min="1" max="7" value="${pwr}" onchange="sendCommand('chrono_p${p}_power_set', this.value)"
-              class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white" />
-          </div>
-          <div>
-            <label class="text-gray-400 block mb-0.5" title="Consigne T° Ambiante (7..40°C, 41=MAX)">T° Salon</label>
-            <input type="number" min="7" max="41" value="${temp}" onchange="sendCommand('chrono_p${p}_temperature_set', this.value)"
-              class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white" />
-          </div>
-          <div>
-            <label class="text-gray-400 block mb-0.5" title="Ventilation Façade (0=OFF, 1..7, 8=PS)">Vent. Façade</label>
-            <input type="number" min="0" max="8" value="${fanFront}" onchange="sendCommand('chrono_p${p}_fan_front_set', this.value)"
-              class="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white" />
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-1.5 pt-1 border-t border-gray-900">
-          <div class="bg-gray-900/60 p-2 rounded-lg border border-gray-800 space-y-1">
-            <div class="text-[10px] text-cyan-400 font-semibold flex items-center justify-between">
-              <span>⬅️ Canal. Gauche SX</span>
-              <span class="text-[9px] text-gray-500 font-mono">Cons / Vit</span>
-            </div>
-            <div class="flex gap-1.5 items-center">
-              <div class="w-1/2">
-                <input type="number" min="7" max="41" value="${tCanL}" title="Consigne T° Canalisation Gauche SX (7..40°C, 41=MAX)" onchange="sendCommand('chrono_p${p}_tcanl_set', this.value)"
-                  class="w-full bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-white text-[11px] tabular-nums" placeholder="T°C" />
-              </div>
-              <div class="w-1/2">
-                <input type="number" min="0" max="8" value="${vCanL}" title="Vitesse Soufflerie Gauche SX (0=OFF, 1..7, 8=PS)" onchange="sendCommand('chrono_p${p}_canl_set', this.value)"
-                  class="w-full bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-cyan-300 font-bold text-[11px] tabular-nums" placeholder="Vit" />
-              </div>
-            </div>
-          </div>
-          <div class="bg-gray-900/60 p-2 rounded-lg border border-gray-800 space-y-1">
-            <div class="text-[10px] text-sky-400 font-semibold flex items-center justify-between">
-              <span>➡️ Canal. Droite DX</span>
-              <span class="text-[9px] text-gray-500 font-mono">Cons / Vit</span>
-            </div>
-            <div class="flex gap-1.5 items-center">
-              <div class="w-1/2">
-                <input type="number" min="7" max="41" value="${tCanR}" title="Consigne T° Canalisation Droite DX (7..40°C, 41=MAX)" onchange="sendCommand('chrono_p${p}_tcanr_set', this.value)"
-                  class="w-full bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-white text-[11px] tabular-nums" placeholder="T°C" />
-              </div>
-              <div class="w-1/2">
-                <input type="number" min="0" max="8" value="${vCanR}" title="Vitesse Soufflerie Droite DX (0=OFF, 1..7, 8=PS)" onchange="sendCommand('chrono_p${p}_canr_set', this.value)"
-                  class="w-full bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-sky-300 font-bold text-[11px] tabular-nums" placeholder="Vit" />
-              </div>
-            </div>
-          </div>
-        </div>
-        <div>
-          <label class="text-gray-400 block mb-1">Jours actifs (Masque = ${mask})</label>
-          <div class="grid grid-cols-7 gap-1">${dayBtns}</div>
-        </div>
-      </div>
+      </button>
     `;
   }
 
   if (ganttTracks) ganttTracks.innerHTML = ganttHtml;
-  container.innerHTML = html;
+  container.innerHTML = buttonsHtml;
+
+  // Rafraîchir la modale ouverte sans perturber la saisie si l'utilisateur est en train d'écrire
+  if (currentOpenProgramModal !== null) {
+    const activeEl = document.activeElement;
+    const isEditing = activeEl && activeEl.closest && activeEl.closest("#program-modal") && (activeEl.tagName === "INPUT" || activeEl.tagName === "SELECT");
+    if (!isEditing) {
+      renderProgramModalContent(currentOpenProgramModal);
+    }
+  }
 }
+
+// Écouteur d'échappement pour fermer la popup
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && currentOpenProgramModal !== null) {
+    closeProgramModal();
+  }
+});
 
 function renderHardwareMasks() {
   const grid = document.getElementById("hardware-masks-grid");
@@ -663,6 +1015,34 @@ function updateCloudConnectionIndicator(overrideStatus, message) {
   if (cloudIcon) {
     cloudIcon.textContent = modeIcon;
     cloudIcon.title = `Protocole : ${activeMode}`;
+  }
+
+  const modeEl = document.getElementById("hdr-mode");
+  const modeBadge = document.getElementById("hdr-mode-badge");
+  const modeIconEl = document.getElementById("hdr-mode-icon");
+  if (modeEl) {
+    if (activeMode === "simulation") {
+      modeEl.textContent = "Simulation";
+      if (modeIconEl) modeIconEl.textContent = "🧪";
+      if (modeBadge) {
+        modeBadge.className = "flex items-center gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg text-xs font-bold border cursor-pointer transition shadow-[0_0_12px_rgba(245,158,11,0.35)] bg-amber-950/90 border-amber-500 text-amber-300 animate-pulse";
+        modeBadge.title = "MODE SIMULATION ACTIF (Données virtuelles) • Cliquer pour basculer sur Cloud Nobis";
+      }
+    } else if (activeMode === "local_gateway") {
+      modeEl.textContent = "Passerelle";
+      if (modeIconEl) modeIconEl.textContent = "🔌";
+      if (modeBadge) {
+        modeBadge.className = "flex items-center gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition shadow-inner bg-emerald-950/80 border-emerald-600/70 text-emerald-300 hover:border-emerald-500";
+        modeBadge.title = "Liaison directe Passerelle UART Locale • Cliquer pour configurer";
+      }
+    } else {
+      modeEl.textContent = "Cloud Nobis";
+      if (modeIconEl) modeIconEl.textContent = "☁️";
+      if (modeBadge) {
+        modeBadge.className = "flex items-center gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition shadow-inner bg-gray-950/80 border-gray-800 text-sky-400 hover:border-sky-500/60";
+        modeBadge.title = "Liaison officielle Cloud Nobis (Agua IOT) • Cliquer pour configurer";
+      }
+    }
   }
 
   // Cas 1 : Si le conteneur lui-même est inaccessible -> Bulle Rouge
@@ -919,7 +1299,32 @@ function applyDashboardState(data, updateSeries = true) {
   const dbEl = document.getElementById("hdr-db");
   if (dbEl) dbEl.textContent = activeDbFile;
   const modeEl = document.getElementById("hdr-mode");
-  if (modeEl) modeEl.textContent = activeMode;
+  const modeBadge = document.getElementById("hdr-mode-badge");
+  const modeIconEl = document.getElementById("hdr-mode-icon");
+  if (modeEl) {
+    if (activeMode === "simulation") {
+      modeEl.textContent = "Simulation";
+      if (modeIconEl) modeIconEl.textContent = "🧪";
+      if (modeBadge) {
+        modeBadge.className = "flex items-center gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg text-xs font-bold border cursor-pointer transition shadow-[0_0_12px_rgba(245,158,11,0.35)] bg-amber-950/90 border-amber-500 text-amber-300 animate-pulse";
+        modeBadge.title = "MODE SIMULATION ACTIF (Données virtuelles) • Cliquer pour basculer sur Cloud Nobis";
+      }
+    } else if (activeMode === "local_gateway") {
+      modeEl.textContent = "Passerelle";
+      if (modeIconEl) modeIconEl.textContent = "🔌";
+      if (modeBadge) {
+        modeBadge.className = "flex items-center gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition shadow-inner bg-emerald-950/80 border-emerald-600/70 text-emerald-300 hover:border-emerald-500";
+        modeBadge.title = "Liaison directe Passerelle UART Locale • Cliquer pour configurer";
+      }
+    } else {
+      modeEl.textContent = "Cloud Nobis";
+      if (modeIconEl) modeIconEl.textContent = "☁️";
+      if (modeBadge) {
+        modeBadge.className = "flex items-center gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition shadow-inner bg-gray-950/80 border-gray-800 text-sky-400 hover:border-sky-500/60";
+        modeBadge.title = "Liaison officielle Cloud Nobis (Agua IOT) • Cliquer pour configurer";
+      }
+    }
+  }
   document.getElementById("hdr-state").textContent = latestData.status_label || "--";
   updateStatusIndicatorAndAlerts();
 
@@ -1261,16 +1666,23 @@ function applyDashboardState(data, updateSeries = true) {
 
   renderEepromTable();
 
-  // Pop-up Configuration (ne pas écraser si la modale est déjà ouverte en cours de saisie)
-  const cfgModal = document.getElementById("config-modal");
-  if (currentSettings && cfgModal && cfgModal.classList.contains("hidden")) {
-    document.getElementById("cfg-mode").value = currentSettings.comm_mode || "agua_cloud";
-    document.getElementById("cfg-interval").value = currentSettings.poll_interval_s || "120";
-    document.getElementById("cfg-city").value = currentSettings.weather_city || "";
-    document.getElementById("cfg-lat").value = currentSettings.weather_lat || "";
-    document.getElementById("cfg-lon").value = currentSettings.weather_lon || "";
-    document.getElementById("cfg-email").value = currentSettings.agua_email || "";
-    document.getElementById("cfg-gw").value = currentSettings.local_gateway_url || "";
+  // Synchronisation des réglages système (ne pas écraser si l'utilisateur est en train de taper dans un champ)
+  const isEditingSettings = document.activeElement && document.activeElement.id && document.activeElement.id.startsWith("cfg-");
+  if (currentSettings && !isEditingSettings) {
+    const modeEl = document.getElementById("cfg-mode");
+    if (modeEl) modeEl.value = currentSettings.comm_mode || "agua_cloud";
+    const intEl = document.getElementById("cfg-interval");
+    if (intEl) intEl.value = currentSettings.poll_interval_s || "120";
+    const cityEl = document.getElementById("cfg-city");
+    if (cityEl) cityEl.value = currentSettings.weather_city || "";
+    const latEl = document.getElementById("cfg-lat");
+    if (latEl) latEl.value = currentSettings.weather_lat || "";
+    const lonEl = document.getElementById("cfg-lon");
+    if (lonEl) lonEl.value = currentSettings.weather_lon || "";
+    const emailEl = document.getElementById("cfg-email");
+    if (emailEl) emailEl.value = currentSettings.agua_email || "";
+    const gwEl = document.getElementById("cfg-gw");
+    if (gwEl) gwEl.value = currentSettings.local_gateway_url || "";
     const bagPriceInp = document.getElementById("cfg-bag-price");
     if (bagPriceInp) bagPriceInp.value = currentSettings.pellet_bag_price_eur || "5.80";
     const bagsStockInp = document.getElementById("cfg-bags-stock");
@@ -1826,6 +2238,9 @@ async function checkInstallerAuthStatus(forceRefresh = false) {
   const unlockedContent = document.getElementById("installer-unlocked-content");
   const noPwdAlert = document.getElementById("installer-no-pwd-alert");
   const errBox = document.getElementById("installer-auth-error");
+  const authPill = document.getElementById("installer-auth-pill");
+  const authPillText = document.getElementById("installer-auth-pill-text");
+  const lockIcon = document.getElementById("subtab-expert-lock-icon");
 
   if (!lockScreen || !unlockedContent) return;
 
@@ -1838,6 +2253,9 @@ async function checkInstallerAuthStatus(forceRefresh = false) {
     if (!res.ok) {
       lockScreen.classList.remove("hidden");
       unlockedContent.classList.add("hidden");
+      if (authPill) authPill.className = "text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700 flex items-center gap-1";
+      if (authPillText) authPillText.textContent = "Expert Verrouillé";
+      if (lockIcon) lockIcon.textContent = "🔒";
       return;
     }
     const data = await res.json();
@@ -1845,6 +2263,9 @@ async function checkInstallerAuthStatus(forceRefresh = false) {
     if (data.authenticated) {
       lockScreen.classList.add("hidden");
       unlockedContent.classList.remove("hidden");
+      if (authPill) authPill.className = "text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-600 flex items-center gap-1";
+      if (authPillText) authPillText.textContent = "Expert Déverrouillé";
+      if (lockIcon) lockIcon.textContent = "🔓";
       if (errBox) errBox.classList.add("hidden");
       document.querySelectorAll(".inst-input").forEach(el => { el.disabled = false; });
       loadSnapshots();
@@ -1855,6 +2276,9 @@ async function checkInstallerAuthStatus(forceRefresh = false) {
       }
       lockScreen.classList.remove("hidden");
       unlockedContent.classList.add("hidden");
+      if (authPill) authPill.className = "text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700 flex items-center gap-1";
+      if (authPillText) authPillText.textContent = "Expert Verrouillé";
+      if (lockIcon) lockIcon.textContent = "🔒";
 
       if (noPwdAlert) {
         noPwdAlert.classList.toggle("hidden", !!data.has_password_configured);
@@ -1976,7 +2400,11 @@ const SILENCE_OVERRIDABLE_KEYS = {
   "duct_right_speed": "la canalisation droite",
   "fun_auto_set": "le mode Auto",
   "standby_set": "le mode ECO",
-  "fun_pwf_set": "le mode BOOST"
+  "fun_pwf_set": "le mode BOOST",
+  "temp_amb_setpoint": "la consigne de température ambiante",
+  "duct_left_setpoint": "la consigne canalisation gauche",
+  "duct_right_setpoint": "la consigne canalisation droite",
+  "chrono_week_enable_set": "la programmation horaire (Chrono)",
 };
 
 async function sendCommand(reg_key, value, forceOverride = false) {
@@ -1987,6 +2415,10 @@ async function sendCommand(reg_key, value, forceOverride = false) {
     } else if (reg_key.includes("speed")) {
       const spdText = Number(value) === 0 ? "OFF" : (Number(value) === 8 ? "PS Auto" : `vitesse ${value}`);
       targetLabel = `${SILENCE_OVERRIDABLE_KEYS[reg_key]} sur ${spdText}`;
+    } else if (reg_key.includes("setpoint")) {
+      targetLabel = `${SILENCE_OVERRIDABLE_KEYS[reg_key]} sur ${value} °C`;
+    } else if (reg_key === "chrono_week_enable_set") {
+      targetLabel = Number(value) === 1 ? "l'activation du Chrono hebdomadaire" : "la désactivation du Chrono hebdomadaire";
     } else if (reg_key === "fun_auto_set") {
       targetLabel = Number(value) === 1 ? "l'activation du mode Auto" : "la désactivation du mode Auto";
     } else if (reg_key === "standby_set") {
@@ -1999,7 +2431,7 @@ async function sendCommand(reg_key, value, forceOverride = false) {
 
     openActionModal({
       title: "🤫 Mode Silence ! en cours",
-      message: `Le mode Silence ! est actuellement actif (temporisé).\n\nPour appliquer manuellement ${targetLabel}, le mode Silence ! doit être désactivé.\n\nConfirmez-vous la désactivation du mode Silence ! et l'application de cette consigne ?`,
+      message: `Le mode Silence ! intelligent est actuellement actif (temporisé).\n\nPour appliquer manuellement ${targetLabel}, le mode Silence ! doit être désactivé.\n\nConfirmez-vous la désactivation du mode Silence ! et l'application de cette consigne ?`,
       confirmText: "Désactiver et Appliquer",
       onConfirm: async () => {
         await deactivateSilenceMode([{ reg_key, value: Number(value) }]);
@@ -2028,7 +2460,8 @@ async function sendCommand(reg_key, value, forceOverride = false) {
     reportClientError("RESEAU", `Erreur réseau envoi ${reg_key}=${value} : ${e.message}`);
   }
   await refreshLatestOnly();
-  if (!document.getElementById("tab-logs").classList.contains("hidden")) loadAudit();
+  const installerTab = document.getElementById("tab-installer");
+  if (installerTab && !installerTab.classList.contains("hidden")) loadAudit();
 }
 
 function setAllFansMode(targetVal) {
@@ -3054,7 +3487,12 @@ async function confirmActivateSilence() {
     updateSilenceButtonState();
     if (typeof refreshLatestOnly === "function") await refreshLatestOnly();
     if (typeof loadAudit === "function") await loadAudit();
-    showToast(`Mode Silence ! actif (${hours}H) : P1, ventilation=0, auto/eco/boost coupés.`);
+    const isStoveOn = data.silence_mode && typeof data.silence_mode.is_stove_on === "boolean" ? data.silence_mode.is_stove_on : (Number(latestData.status_code ?? 0) !== 0);
+    if (isStoveOn) {
+      showToast(`Mode Silence ! intelligent actif (${hours}H) : Boost/Éco/Chrono coupés, Auto total actif, consignes en hors gel 7°C (P0 & Ventil 0 sans extinction).`);
+    } else {
+      showToast(`Mode Silence ! intelligent actif (${hours}H) : poêle éteint, consignes passées en hors gel (7°C).`);
+    }
   } catch (e) {
     showToast("Erreur réseau activation Silence !: " + e.message, true);
   }
@@ -3079,7 +3517,7 @@ async function deactivateSilenceMode(overrideCommands = null) {
     updateSilenceButtonState();
     if (typeof refreshLatestOnly === "function") await refreshLatestOnly();
     if (typeof loadAudit === "function") await loadAudit();
-    showToast(overrideCommands ? "Mode Silence ! désactivé : nouvelle consigne appliquée." : "Mode Silence ! désactivé : valeurs d'origine restaurées.");
+    showToast(overrideCommands ? "Mode Silence ! désactivé : nouvelle consigne appliquée." : "Mode Silence ! désactivé : consignes et réglages d'origine restaurés.");
   } catch (e) {
     showToast("Erreur réseau désactivation Silence !: " + e.message, true);
   }
@@ -3090,7 +3528,7 @@ function handleSilenceButtonClick() {
     const remMins = Math.ceil((silenceModeState.remaining_seconds || 0) / 60);
     openActionModal({
       title: "🤫 Mode Silence ! en cours",
-      message: `Le mode Silence ! est actuellement actif (il reste environ ${remMins} min).\n\nSouhaitez-vous l'arrêter maintenant et restaurer immédiatement les réglages initiaux (Puissance, Ventilation, modes Auto/ECO/BOOST) ?`,
+      message: `Le mode Silence ! intelligent est actuellement actif (il reste environ ${remMins} min).\n\nSouhaitez-vous l'arrêter maintenant et restaurer immédiatement les réglages et consignes d'origine ?`,
       confirmText: "Arrêter et Restaurer",
       onConfirm: () => deactivateSilenceMode()
     });
@@ -3840,33 +4278,16 @@ window.addEventListener("unhandledrejection", (e) => {
   reportClientError("PROMISE", e.reason?.message || String(e.reason));
 });
 
-async function loadLogs(sev) {
-  currentLogSeverity = sev || "ALL";
+let lastLoadedLogs = [];
 
-  // Highlight active filter buttons
-  ["all", "info", "command", "warning", "error"].forEach(s => {
-    const btn = document.getElementById("log-btn-" + s);
-    if (btn) {
-      if (s.toUpperCase() === currentLogSeverity.toUpperCase()) {
-        btn.classList.add("active");
-        btn.style.outline = "2px solid #f97316";
-      } else {
-        btn.classList.remove("active");
-        btn.style.outline = "none";
-      }
-    }
-  });
-
-  const res = await fetch(`/api/logs?severity=${currentLogSeverity}`);
-  if (!res.ok) return;
-  const logs = await res.json();
+function renderLogsList(logs) {
   const box = document.getElementById("logs-container");
   if (!box) return;
 
   if (!logs || logs.length === 0) {
     box.innerHTML = `<div class="py-12 text-center text-gray-500">
       <span class="text-3xl block mb-2">📜</span>
-      Aucun événement enregistré avec la sévérité <b>${escapeHtml(currentLogSeverity)}</b>.
+      Aucun événement ne correspond à ce filtre.
     </div>`;
     return;
   }
@@ -3888,13 +4309,80 @@ async function loadLogs(sev) {
 
     return `
       <div class="flex items-start gap-2.5 border-b border-gray-900/80 py-1.5 hover:bg-gray-900/40 px-1 rounded transition text-xs font-mono">
-        <span class="text-gray-500 tabular-nums shrink-0 text-[11px] mt-0.5">${escapeHtml(l.timestamp)}</span>
+        <span class="text-gray-500 tabular-nums shrink-0 text-[11px] mt-0.5">${escapeHtml(l.timestamp || "")}</span>
         <span class="px-1.5 py-0.5 rounded text-[10px] border ${bgBadge} ${sevBadge} shrink-0 w-20 text-center">[${escapeHtml(s)}]</span>
-        <span class="text-gray-400 shrink-0 w-28 text-[11px] font-semibold truncate" title="${escapeHtml(l.source)}">${escapeHtml(l.source)}</span>
-        <span class="text-gray-200 flex-1 break-words leading-relaxed">${escapeHtml(l.message)}</span>
+        <span class="text-gray-400 shrink-0 w-28 text-[11px] font-semibold truncate" title="${escapeHtml(l.source || "")}">${escapeHtml(l.source || "")}</span>
+        <span class="text-gray-200 flex-1 break-words leading-relaxed">${escapeHtml(l.message || "")}</span>
       </div>
     `;
   }).join("");
+}
+
+function filterLogsClientSide(query) {
+  const q = (query || "").trim().toLowerCase();
+  if (!q) {
+    renderLogsList(lastLoadedLogs);
+    return;
+  }
+  const filtered = (lastLoadedLogs || []).filter(l => {
+    const msg = (l.message || "").toLowerCase();
+    const src = (l.source || "").toLowerCase();
+    const sev = (l.severity || "").toLowerCase();
+    const ts = (l.timestamp || "").toLowerCase();
+    return msg.includes(q) || src.includes(q) || sev.includes(q) || ts.includes(q);
+  });
+  renderLogsList(filtered);
+}
+
+function copyLogsToClipboard() {
+  if (!lastLoadedLogs || lastLoadedLogs.length === 0) {
+    showToast("Aucun log à copier.", true);
+    return;
+  }
+  const searchInp = document.getElementById("log-search-input");
+  const q = searchInp ? searchInp.value.trim().toLowerCase() : "";
+  const logsToCopy = q ? lastLoadedLogs.filter(l => {
+    const msg = (l.message || "").toLowerCase();
+    const src = (l.source || "").toLowerCase();
+    return msg.includes(q) || src.includes(q);
+  }) : lastLoadedLogs;
+
+  const text = logsToCopy.map(l => `${l.timestamp || ""} [${(l.severity || "INFO").toUpperCase()}] [${l.source || ""}] ${l.message || ""}`).join("\n");
+  navigator.clipboard.writeText(text).then(() => {
+    showToast(`📋 ${logsToCopy.length} logs copiés dans le presse-papier !`);
+  }).catch(() => {
+    showToast("Impossible de copier dans le presse-papier", true);
+  });
+}
+
+async function loadLogs(sev) {
+  currentLogSeverity = sev || "ALL";
+
+  // Highlight active filter buttons
+  ["all", "info", "command", "warning", "error"].forEach(s => {
+    const btn = document.getElementById("log-btn-" + s);
+    if (btn) {
+      if (s.toUpperCase() === currentLogSeverity.toUpperCase()) {
+        btn.classList.add("active");
+        btn.style.outline = "2px solid #f97316";
+      } else {
+        btn.classList.remove("active");
+        btn.style.outline = "none";
+      }
+    }
+  });
+
+  const res = await fetch(`/api/logs?severity=${currentLogSeverity}`);
+  if (!res.ok) return;
+  const logs = await res.json();
+  lastLoadedLogs = Array.isArray(logs) ? logs : [];
+
+  const searchInp = document.getElementById("log-search-input");
+  if (searchInp && searchInp.value.trim()) {
+    filterLogsClientSide(searchInp.value);
+  } else {
+    renderLogsList(lastLoadedLogs);
+  }
 }
 
 // =============================================================================
@@ -5134,9 +5622,10 @@ function renderTriArcFloatingOptionBubble(T) {
           <button type="button" onclick="setTriArcSilenceHours(4)" class="py-2.5 rounded-2xl border cursor-pointer bg-slate-950 border-slate-800 hover:border-purple-400 text-purple-200">4h</button>
         </div>
         <div class="space-y-1.5 text-[11px] leading-tight text-slate-300 bg-slate-950/70 border border-slate-800 rounded-xl p-2.5">
-          <p class="font-semibold text-purple-300">Fonctionnement du mode Silence</p>
-          <p>Le mode <strong>Silence</strong> coupe ou abaisse au seuil de convection naturelle les ventilateurs d'air chaud et modère la puissance de chauffe pour un fonctionnement ultra-silencieux.</p>
-          <p class="text-slate-400">À la fin du décompte programmé, le poêle reprendra automatiquement son régime de ventilation précédent. L'activation du mode Boost (Powerful) désactive automatiquement le Silence.</p>
+          <p class="font-semibold text-purple-300">Fonctionnement intelligent du mode Silence</p>
+          <p>• <strong>Si poêle éteint :</strong> toutes les consignes passent immédiatement en <strong>hors gel (7°C)</strong>.</p>
+          <p>• <strong>Si poêle allumé :</strong> désactivation du <strong>Boost</strong>, du <strong>Mode Éco</strong> et de la <strong>programmation (Chrono)</strong>, activation du <strong>Mode Auto total</strong> et passage des consignes en <strong>hors gel (7°C)</strong>. Le poêle bascule ainsi automatiquement en puissance minimale <strong>P0</strong> et ventilation <strong>Ventil 0</strong> (convection 100% silencieuse) <strong>sans s'éteindre</strong>.</p>
+          <p class="text-slate-400">À la fin du décompte programmé ou lors d'une modification manuelle, les consignes et réglages d'origine sont automatiquement restaurés.</p>
         </div>
       </div>
     `;
