@@ -1,3 +1,9 @@
+FROM node:22-trixie-slim AS node-builder
+
+WORKDIR /build
+COPY matter_bridge/package.json matter_bridge/package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
+
 FROM python:3.11-slim
 
 LABEL org.opencontainers.image.title="Nobis.Supervisor" \
@@ -8,22 +14,25 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TZ=Europe/Paris
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    tzdata \
-    curl \
-    nodejs \
-    npm \
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends \
+        tzdata \
+        curl \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && echo $TZ > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
 
+COPY --from=node-builder /usr/local/bin/node /usr/local/bin/node
+
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && pip install --no-cache-dir -r requirements.txt
 
 COPY . /app/
-RUN cd /app/matter_bridge && npm install --omit=dev --no-audit --no-fund
+COPY --from=node-builder /build/node_modules /app/matter_bridge/node_modules
 RUN mkdir -p /app/data
 
 EXPOSE 8080 5540/udp 5540/tcp
