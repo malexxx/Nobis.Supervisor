@@ -181,6 +181,15 @@ const STOVE_PHASE_META = {
   }
 };
 
+// =============================================================================
+// FONCTIONS UTILITAIRES DE CONVERSION & FORMATAGE
+// =============================================================================
+
+/**
+ * Retourne les métadonnées techniques et chromatiques d'une phase de combustion.
+ * @param {Object|number} rowOrCode - Enregistrement de télémétrie ou code de statut brut (-1..11).
+ * @returns {Object} Objet décrivant la phase (libellé, icône, code hexadécimal, classes CSS).
+ */
 function getPhaseMeta(rowOrCode) {
   if (rowOrCode && typeof rowOrCode === "object") {
     if (rowOrCode._isGap || Number(rowOrCode.status_code) === -1) return STOVE_PHASE_META["-1"];
@@ -191,6 +200,11 @@ function getPhaseMeta(rowOrCode) {
   return STOVE_PHASE_META[c] || STOVE_PHASE_META[0];
 }
 
+/**
+ * Échappe les caractères HTML dangereux pour prévenir les failles XSS.
+ * @param {string|number} val - Valeur à échapper.
+ * @returns {string} Chaîne sécurisée.
+ */
 function escapeHtml(val) {
   return String(val ?? "")
     .replace(/&/g, "&amp;")
@@ -200,6 +214,11 @@ function escapeHtml(val) {
     .replace(/'/g, "&#39;");
 }
 
+/**
+ * Convertit un créneau d'horloge Chrono (tranche de 10 min, 0..143) en chaîne HH:MM.
+ * @param {number} slot - Index de tranche horaire (144 = inactif).
+ * @returns {string} Format "HH:MM" ou "OFF (144)".
+ */
 function slotToTime(slot) {
   const s = Number(slot);
   if (s >= 144) return "OFF (144)";
@@ -209,80 +228,20 @@ function slotToTime(slot) {
   return `${hh}:${mm}`;
 }
 
+/**
+ * Formate une consigne de température (affiche "MAX" si >= 41°C).
+ * @param {number} val - Température en °C.
+ * @returns {string} Ex: "21 °C" ou "MAX".
+ */
 function formatTempSetpoint(val) {
   return Number(val) >= 41 ? "MAX" : `${val} °C`;
 }
 
-function updateAmbSetpointPreview(val) {
-  const formatted = formatTempSetpoint(val);
-  const ctlEl = document.getElementById("ctl-amb-val");
-  const kpiEl = document.getElementById("kpi-amb-sp");
-  if (ctlEl) ctlEl.textContent = formatted;
-  if (kpiEl) kpiEl.textContent = formatted;
-  const maxBtn = document.getElementById("btn-amb-max");
-  if (maxBtn) maxBtn.classList.toggle("btn-active-glow", Number(val) >= 41);
-  const frostBtn = document.getElementById("btn-amb-frost");
-  if (frostBtn) frostBtn.classList.toggle("btn-active-frost", Number(val) === 7);
-}
-
-function updateDuctSetpointPreview(prefix, val) {
-  const formatted = formatTempSetpoint(val);
-  const kpiEl = document.getElementById(`kpi-${prefix}-sp`);
-  const ctlEl = document.getElementById(`ctl-${prefix}-sp`);
-  if (kpiEl) kpiEl.textContent = formatted;
-  if (ctlEl) ctlEl.textContent = formatted;
-  const maxBtn = document.getElementById(`btn-${prefix}-max`);
-  if (maxBtn) maxBtn.classList.toggle("btn-active-glow", Number(val) >= 41);
-  const frostBtn = document.getElementById(`btn-${prefix}-frost`);
-  if (frostBtn) frostBtn.classList.toggle("btn-active-frost", Number(val) === 7);
-}
-
-function formatFanSpeedLabel(val) {
-  const v = Number(val);
-  if (v === 0) return "OFF";
-  if (v === 8) return "🔄 Auto (PS)";
-  return `Vitesse ${v}`;
-}
-
-function updateFanSliderPreview(zone, val) {
-  const v = Number(val);
-  const labelId = zone === "front" ? "ctl-fan-label" : `ctl-${zone}-fan-label`;
-  const el = document.getElementById(labelId);
-  if (el) {
-    el.textContent = formatFanSpeedLabel(v);
-    if (v === 0) {
-      el.className = "text-xs font-bold text-gray-400 tabular-nums";
-    } else if (v === 8) {
-      el.className = "text-xs font-black text-cyan-300 tabular-nums animate-pulse";
-    } else {
-      el.className = "text-xs font-bold text-emerald-300 tabular-nums";
-    }
-  }
-}
-
-function formatPowerSliderLabel(val) {
-  const v = Number(val);
-  if (v === 0) return "P0 (Ralenti Éco)";
-  if (v === 8) return "⚡ BOOST (P8)";
-  return `Puissance P${v}`;
-}
-
-function updatePwrSliderPreview(val) {
-  const v = Number(val);
-  const el = document.getElementById("ctl-pwr-label");
-  if (el) {
-    el.textContent = formatPowerSliderLabel(v);
-    if (v === 0) {
-      el.className = "text-xs font-bold text-sky-300 tabular-nums";
-    } else if (v === 8) {
-      el.className = "text-xs font-black text-rose-400 tabular-nums animate-pulse";
-    } else {
-      el.className = "text-xs font-bold text-amber-300 tabular-nums";
-    }
-  }
-}
-
-
+/**
+ * Formate la consigne de vitesse d'un ventilateur (0..8).
+ * @param {number} val - Indice de vitesse (0=OFF, 8=Auto/PS).
+ * @returns {string} Ex: "OFF", "PS (Auto)" ou "3/7".
+ */
 function formatFanSpeed(val) {
   const v = Number(val);
   if (v === 0) return "OFF";
@@ -290,6 +249,11 @@ function formatFanSpeed(val) {
   return `${v}/7`;
 }
 
+/**
+ * Formate la vitesse physique réelle retournée par la carte de modulation.
+ * @param {number} val - Vitesse réelle (0=OFF, 1=Risparmio, 2..8=Vitesse 1..7).
+ * @returns {string} Ex: "OFF", "RISPARMIO", "Vit. 2".
+ */
 function formatRealFan(val) {
   const v = Number(val);
   if (v === 0) return "OFF";
@@ -297,6 +261,11 @@ function formatRealFan(val) {
   return `Vit. ${v - 1}`;
 }
 
+/**
+ * Formate le niveau de puissance de combustion réel ou consigne.
+ * @param {number} val - Niveau de puissance (0=Éco, 8=Boost).
+ * @returns {string} Ex: "P0 (Éco)", "P8 (Boost)", "P4".
+ */
 function formatRealPower(val) {
   const v = Number(val);
   if (v === 0) return "P0 (Éco)";
@@ -304,6 +273,12 @@ function formatRealPower(val) {
   return `P${v}`;
 }
 
+/**
+ * Récupère la valeur d'un registre depuis le catalogue EEPROM ou la dernière télémétrie.
+ * @param {string} key - Clé du registre (ex: "temp_amb_setpoint").
+ * @param {*} fallback - Valeur par défaut si non disponible.
+ * @returns {*} Valeur actuelle du registre ou repli.
+ */
 function getRegVal(key, fallback) {
   if (registersCatalog[key] && registersCatalog[key].current_val !== undefined) {
     return registersCatalog[key].current_val;
@@ -313,4 +288,3 @@ function getRegVal(key, fallback) {
   }
   return fallback;
 }
-

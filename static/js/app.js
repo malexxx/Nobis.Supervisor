@@ -88,6 +88,17 @@ function closeActionModal() {
 
 const showActionModal = openActionModal;
 
+// Mode de communication actif (Cloud / Passerelle / Simulation)
+let currentCommMode = "agua_cloud";
+
+function getActiveCommMode() {
+  return (typeof connectionState !== "undefined" && connectionState && connectionState.commStatus && connectionState.commStatus.comm_mode) ||
+    (typeof latestData !== "undefined" && latestData && latestData.comm_mode) ||
+    (typeof currentSettings !== "undefined" && currentSettings && currentSettings.comm_mode) ||
+    currentCommMode ||
+    "agua_cloud";
+}
+
 // =============================================================================
 // GESTION DU RE-DESIGN DE L'ONGLET PARAMÈTRES, TARAGES & OBSERVABILITÉ
 // =============================================================================
@@ -296,18 +307,338 @@ function setGanttDay(bit) {
 }
 
 let currentOpenProgramModal = null;
+let programDraft = null; // { p, initial: {...}, current: {...} }
 
 function openProgramModal(p) {
-  currentOpenProgramModal = Number(p);
+  const pNum = Number(p);
+  currentOpenProgramModal = pNum;
+
+  const initial = {
+    startSlot: Number(getRegVal(`chrono_p${pNum}_start_set`, latestData[`chrono_p${pNum}_start`] ?? 144)),
+    stopSlot: Number(getRegVal(`chrono_p${pNum}_stop_set`, latestData[`chrono_p${pNum}_stop`] ?? 144)),
+    mask: Number(getRegVal(`chrono_p${pNum}_days_mask`, latestData[`chrono_p${pNum}_days`] ?? 0)),
+    power: Number(getRegVal(`chrono_p${pNum}_power_set`, latestData[`chrono_p${pNum}_power`] ?? 7)),
+    temperature: Number(getRegVal(`chrono_p${pNum}_temperature_set`, latestData[`chrono_p${pNum}_temp`] ?? 20)),
+    fanFront: Number(getRegVal(`chrono_p${pNum}_fan_front_set`, 0)),
+    tCanL: Number(getRegVal(`chrono_p${pNum}_tcanl_set`, 20)),
+    vCanL: Number(getRegVal(`chrono_p${pNum}_canl_set`, 0)),
+    tCanR: Number(getRegVal(`chrono_p${pNum}_tcanr_set`, 20)),
+    vCanR: Number(getRegVal(`chrono_p${pNum}_canr_set`, 0))
+  };
+
+  programDraft = {
+    p: pNum,
+    initial: { ...initial },
+    current: { ...initial }
+  };
+
   renderProgramModalContent(currentOpenProgramModal);
   const modal = document.getElementById("program-modal");
   if (modal) modal.classList.remove("hidden");
 }
 
-function closeProgramModal() {
+function forceCloseProgramModal() {
   currentOpenProgramModal = null;
+  programDraft = null;
   const modal = document.getElementById("program-modal");
   if (modal) modal.classList.add("hidden");
+}
+
+function closeProgramModal() {
+  if (!programDraft || programDraft.p !== currentOpenProgramModal) {
+    forceCloseProgramModal();
+    return;
+  }
+
+  const p = programDraft.p;
+  const changes = getProgramChangesSummary(p, programDraft.initial, programDraft.current);
+
+  if (changes.length === 0) {
+    forceCloseProgramModal();
+    return;
+  }
+
+  showProgramConfirmationModal(p, changes);
+}
+
+function timeToSlot(timeStr) {
+  if (!timeStr) return 144;
+  const parts = timeStr.split(":");
+  if (parts.length < 2) return 144;
+  const h = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  if (isNaN(h) || isNaN(m)) return 144;
+  // Tranches de 10 min (0..143)
+  return Math.min(143, Math.max(0, h * 6 + Math.round(m / 10)));
+}
+
+function updateProgramDraftTime(type, timeStr) {
+  if (!programDraft) return;
+  const slot = timeToSlot(timeStr);
+  if (type === "start") {
+    programDraft.current.startSlot = slot;
+    if (programDraft.current.stopSlot >= 144 || programDraft.current.stopSlot === slot) {
+      const defStop = (slot + 12) % 144;
+      let savedStop = Number(localStorage.getItem(`nobis_p${programDraft.p}_last_stop`));
+      if (isNaN(savedStop) || savedStop >= 144 || savedStop === slot) savedStop = defStop;
+      programDraft.current.stopSlot = savedStop;
+    }
+  } else if (type === "stop") {
+    programDraft.current.stopSlot = slot;
+    if (programDraft.current.startSlot >= 144 || programDraft.current.startSlot === slot) {
+      const defStart = (slot - 12 + 144) % 144;
+      let savedStart = Number(localStorage.getItem(`nobis_p${programDraft.p}_last_start`));
+      if (isNaN(savedStart) || savedStart >= 144 || savedStart === slot) savedStart = defStart;
+      programDraft.current.startSlot = savedStart;
+    }
+  }
+
+  if (programDraft.current.mask === 0) {
+    programDraft.current.mask = 127;
+  }
+
+  renderProgramModalContent(programDraft.p);
+}
+
+function updateProgramDraft(field, value) {
+  if (!programDraft) return;
+  programDraft.current[field] = Number(value);
+  renderProgramModalContent(programDraft.p);
+}
+
+function getProgramChangesSummary(p, initial, current) {
+  const changes = [];
+  const dayNames = [
+    { bit: 1, name: "Lun" }, { bit: 2, name: "Mar" }, { bit: 4, name: "Mer" },
+    { bit: 8, name: "Jeu" }, { bit: 16, name: "Ven" }, { bit: 32, name: "Sam" },
+    { bit: 64, name: "Dim" }
+  ];
+
+  const formatDays = (mask) => {
+    if (mask === 127) return "Tous les jours";
+    if (mask === 0) return "Aucun jour";
+    return dayNames.filter(d => (mask & d.bit) !== 0).map(d => d.name).join(", ");
+  };
+
+  const formatFan = (v) => {
+    const n = Number(v);
+    return n === 8 ? "AUTO" : (n === 0 ? "OFF" : String(n));
+  };
+
+  // 1. Plage horaire
+  if (initial.startSlot !== current.startSlot || initial.stopSlot !== current.stopSlot) {
+    const oldTime = (initial.startSlot < 144 && initial.stopSlot < 144 && initial.startSlot !== initial.stopSlot)
+      ? `${slotToTime(initial.startSlot)} - ${slotToTime(initial.stopSlot)}`
+      : "Inactif";
+    const newTime = (current.startSlot < 144 && current.stopSlot < 144 && current.startSlot !== current.stopSlot)
+      ? `${slotToTime(current.startSlot)} - ${slotToTime(current.stopSlot)}`
+      : "Inactif";
+
+    changes.push({
+      icon: "⏰",
+      label: "Plage horaire",
+      oldText: oldTime,
+      newText: newTime,
+      commands: [
+        { reg_key: `chrono_p${p}_start_set`, value: current.startSlot },
+        { reg_key: `chrono_p${p}_stop_set`, value: current.stopSlot }
+      ]
+    });
+  }
+
+  // 2. Puissance
+  if (initial.power !== current.power) {
+    changes.push({
+      icon: "🔥",
+      label: "Puissance",
+      oldText: `${initial.power}`,
+      newText: `${current.power}`,
+      commands: [
+        { reg_key: `chrono_p${p}_power_set`, value: current.power }
+      ]
+    });
+  }
+
+  // 3. Température Salon
+  if (initial.temperature !== current.temperature) {
+    changes.push({
+      icon: "🌡️",
+      label: "Température",
+      oldText: `${initial.temperature}°C`,
+      newText: `${current.temperature}°C`,
+      commands: [
+        { reg_key: `chrono_p${p}_temperature_set`, value: current.temperature }
+      ]
+    });
+  }
+
+  // 4. Ventilation Façade
+  if (initial.fanFront !== current.fanFront) {
+    changes.push({
+      icon: "💨",
+      label: "Ventilation façade",
+      oldText: formatFan(initial.fanFront),
+      newText: formatFan(current.fanFront),
+      commands: [
+        { reg_key: `chrono_p${p}_fan_front_set`, value: current.fanFront }
+      ]
+    });
+  }
+
+  // 5. Canalisation Gauche
+  if (initial.tCanL !== current.tCanL) {
+    changes.push({
+      icon: "⬅️🌡️",
+      label: "T° Consigne Gauche",
+      oldText: `${initial.tCanL}°C`,
+      newText: `${current.tCanL}°C`,
+      commands: [
+        { reg_key: `chrono_p${p}_tcanl_set`, value: current.tCanL }
+      ]
+    });
+  }
+  if (initial.vCanL !== current.vCanL) {
+    changes.push({
+      icon: "⬅️💨",
+      label: "Soufflerie Gauche",
+      oldText: formatFan(initial.vCanL),
+      newText: formatFan(current.vCanL),
+      commands: [
+        { reg_key: `chrono_p${p}_canl_set`, value: current.vCanL }
+      ]
+    });
+  }
+
+  // 6. Canalisation Droite
+  if (initial.tCanR !== current.tCanR) {
+    changes.push({
+      icon: "➡️🌡️",
+      label: "T° Consigne Droite",
+      oldText: `${initial.tCanR}°C`,
+      newText: `${current.tCanR}°C`,
+      commands: [
+        { reg_key: `chrono_p${p}_tcanr_set`, value: current.tCanR }
+      ]
+    });
+  }
+  if (initial.vCanR !== current.vCanR) {
+    changes.push({
+      icon: "➡️💨",
+      label: "Soufflerie Droite",
+      oldText: formatFan(initial.vCanR),
+      newText: formatFan(current.vCanR),
+      commands: [
+        { reg_key: `chrono_p${p}_canr_set`, value: current.vCanR }
+      ]
+    });
+  }
+
+  // 7. Jours d'activation
+  if (initial.mask !== current.mask) {
+    changes.push({
+      icon: "📅",
+      label: "Jours d'activation",
+      oldText: formatDays(initial.mask),
+      newText: formatDays(current.mask),
+      commands: [
+        { reg_key: `chrono_p${p}_days_mask`, value: current.mask }
+      ]
+    });
+  }
+
+  return changes;
+}
+
+function showProgramConfirmationModal(p, changes) {
+  const rowsHtml = changes.map(c => `
+    <div class="flex items-center justify-between py-2 px-3 rounded-lg bg-gray-900 border border-gray-800 text-xs">
+      <div class="flex items-center gap-2 text-gray-200 font-medium">
+        <span class="text-sm">${c.icon}</span>
+        <span>${c.label}</span>
+      </div>
+      <div class="flex items-center gap-1.5 font-mono text-xs">
+        <span class="text-gray-400 line-through">${c.oldText}</span>
+        <span class="text-orange-400 font-bold">➔</span>
+        <span class="text-emerald-400 font-bold">${c.newText}</span>
+      </div>
+    </div>
+  `).join("");
+
+  const htmlContent = `
+    <div class="space-y-3">
+      <p class="text-xs text-gray-300 leading-relaxed">
+        Vous avez modifié la configuration du <strong>Programme ${p}</strong>.
+        Souhaitez-vous transmettre ces <strong>${changes.length} modification${changes.length > 1 ? "s" : ""}</strong> au poêle ?
+      </p>
+      <div class="space-y-1.5 max-h-60 overflow-y-auto pr-0.5">
+        ${rowsHtml}
+      </div>
+    </div>
+  `;
+
+  openActionModal({
+    title: `⚙️ Confirmation — Programme ${p}`,
+    htmlContent,
+    confirmText: "Appliquer au poêle",
+    cancelText: "Abandonner",
+    showCancel: true,
+    onConfirm: async () => {
+      await applyProgramChanges(p, changes);
+    },
+    onCancel: () => {
+      forceCloseProgramModal();
+      showToast("Modifications abandonnées");
+    }
+  });
+}
+
+async function applyProgramChanges(p, changes) {
+  const toSend = [];
+  changes.forEach(c => {
+    c.commands.forEach(cmd => {
+      toSend.push({ reg_key: cmd.reg_key, value: Number(cmd.value) });
+    });
+  });
+
+  if (toSend.length === 0) return;
+
+  if (programDraft && programDraft.current) {
+    if (programDraft.current.startSlot < 144) localStorage.setItem(`nobis_p${p}_last_start`, programDraft.current.startSlot);
+    if (programDraft.current.stopSlot < 144) localStorage.setItem(`nobis_p${p}_last_stop`, programDraft.current.stopSlot);
+    if (programDraft.current.mask > 0) localStorage.setItem(`nobis_p${p}_last_mask`, programDraft.current.mask);
+  }
+
+  forceCloseProgramModal();
+
+  if (silenceModeState && silenceModeState.active && toSend.some(c => SILENCE_OVERRIDABLE_KEYS[c.reg_key])) {
+    await deactivateSilenceMode(toSend);
+    return;
+  }
+
+  showToast(`Envoi de ${toSend.length} réglage(s) au poêle...`);
+
+  try {
+    if (toSend.length === 1) {
+      await sendCommand(toSend[0].reg_key, toSend[0].value);
+    } else {
+      const res = await fetch("/api/command-batch", {
+        method: "POST",
+        headers: getInstallerHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ commands: toSend })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast("Erreur batch : " + (err.detail || res.statusText), true);
+        reportClientError("PROGRAMME", `Échec batch programme P${p} : ${err.detail || res.statusText}`);
+      } else {
+        showToast(`Programme ${p} mis à jour avec succès (${toSend.length} réglages) !`);
+      }
+      await refreshLatestOnly();
+    }
+  } catch (err) {
+    showToast("Erreur réseau : " + err.message, true);
+    reportClientError("RESEAU", `Erreur réseau maj programme P${p} : ${err.message}`);
+  }
 }
 
 // Rendu du contenu complet d'un programme dans la Popup modale
@@ -315,17 +646,19 @@ function renderProgramModalContent(p) {
   const modalContainer = document.getElementById("program-modal-container");
   if (!modalContainer) return;
 
-  const startSlot = Number(getRegVal(`chrono_p${p}_start_set`, latestData[`chrono_p${p}_start`] ?? 144));
-  const stopSlot = Number(getRegVal(`chrono_p${p}_stop_set`, latestData[`chrono_p${p}_stop`] ?? 144));
-  const mask = Number(getRegVal(`chrono_p${p}_days_mask`, latestData[`chrono_p${p}_days`] ?? 0));
-  const pwr = Number(getRegVal(`chrono_p${p}_power_set`, latestData[`chrono_p${p}_power`] ?? 7));
-  const temp = Number(getRegVal(`chrono_p${p}_temperature_set`, latestData[`chrono_p${p}_temp`] ?? 20));
+  const cur = (programDraft && programDraft.p === p) ? programDraft.current : null;
 
-  const fanFront = Number(getRegVal(`chrono_p${p}_fan_front_set`, 0));
-  const tCanL = Number(getRegVal(`chrono_p${p}_tcanl_set`, 20));
-  const vCanL = Number(getRegVal(`chrono_p${p}_canl_set`, 0));
-  const tCanR = Number(getRegVal(`chrono_p${p}_tcanr_set`, 20));
-  const vCanR = Number(getRegVal(`chrono_p${p}_canr_set`, 0));
+  const startSlot = cur ? cur.startSlot : Number(getRegVal(`chrono_p${p}_start_set`, latestData[`chrono_p${p}_start`] ?? 144));
+  const stopSlot = cur ? cur.stopSlot : Number(getRegVal(`chrono_p${p}_stop_set`, latestData[`chrono_p${p}_stop`] ?? 144));
+  const mask = cur ? cur.mask : Number(getRegVal(`chrono_p${p}_days_mask`, latestData[`chrono_p${p}_days`] ?? 0));
+  const pwr = cur ? cur.power : Number(getRegVal(`chrono_p${p}_power_set`, latestData[`chrono_p${p}_power`] ?? 7));
+  const temp = cur ? cur.temperature : Number(getRegVal(`chrono_p${p}_temperature_set`, latestData[`chrono_p${p}_temp`] ?? 20));
+
+  const fanFront = cur ? cur.fanFront : Number(getRegVal(`chrono_p${p}_fan_front_set`, 0));
+  const tCanL = cur ? cur.tCanL : Number(getRegVal(`chrono_p${p}_tcanl_set`, 20));
+  const vCanL = cur ? cur.vCanL : Number(getRegVal(`chrono_p${p}_canl_set`, 0));
+  const tCanR = cur ? cur.tCanR : Number(getRegVal(`chrono_p${p}_tcanr_set`, 20));
+  const vCanR = cur ? cur.vCanR : Number(getRegVal(`chrono_p${p}_canr_set`, 0));
 
   const dayLabels = [
     { bit: 1, name: "Lun", full: "Lundi" },
@@ -366,188 +699,187 @@ function renderProgramModalContent(p) {
 
   const isConfigured = (startSlot < 144 && stopSlot < 144 && startSlot !== stopSlot);
 
-  // Options Allumage & Arrêt (par tranche de 10 min de 00h00 à 23h50 + OFF)
-  let slotOptionsStart = `<option value="144" ${startSlot === 144 ? 'selected' : ''}>OFF (Désactivé)</option>`;
-  let slotOptionsStop = `<option value="144" ${stopSlot === 144 ? 'selected' : ''}>OFF (Désactivé)</option>`;
-  for (let s = 0; s < 144; s++) {
-    const tStr = slotToTime(s);
-    slotOptionsStart += `<option value="${s}" ${startSlot === s ? 'selected' : ''}>${tStr}</option>`;
-    slotOptionsStop += `<option value="${s}" ${stopSlot === s ? 'selected' : ''}>${tStr}</option>`;
-  }
+  if (startSlot < 144) localStorage.setItem(`nobis_p${p}_last_start`, startSlot);
+  if (stopSlot < 144) localStorage.setItem(`nobis_p${p}_last_stop`, stopSlot);
+  if (mask > 0) localStorage.setItem(`nobis_p${p}_last_mask`, mask);
 
-  // Listes déroulantes pour les consignes
+  const defStart = p === 1 ? 48 : (p === 2 ? 126 : 42);
+  const defStop = p === 1 ? 63 : (p === 2 ? 138 : 54);
+  let savedStart = Number(localStorage.getItem(`nobis_p${p}_last_start`));
+  let savedStop = Number(localStorage.getItem(`nobis_p${p}_last_stop`));
+  if (isNaN(savedStart) || savedStart >= 144) savedStart = defStart;
+  if (isNaN(savedStop) || savedStop >= 144 || savedStop === savedStart) savedStop = defStop;
+
+  const startTimeVal = startSlot < 144 ? slotToTime(startSlot) : slotToTime(savedStart);
+  const stopTimeVal = stopSlot < 144 ? slotToTime(stopSlot) : slotToTime(savedStop);
+
+  // Choix de la puissance : uniquement des chiffres (1..7)
   let powerOptions = "";
   for (let lvl = 1; lvl <= 7; lvl++) {
-    powerOptions += `<option value="${lvl}" ${pwr === lvl ? 'selected' : ''}>P${lvl} (Niveau ${lvl})</option>`;
+    powerOptions += `<option value="${lvl}" ${pwr === lvl ? 'selected' : ''}>${lvl}</option>`;
   }
 
+  // Choix de la T° : uniquement la température, sans MAX ni Hors-gel
   let tempOptions = "";
   for (let t = 7; t <= 41; t++) {
-    const lbl = t === 41 ? "41°C (MAX)" : (t === 7 ? "7°C (Hors-gel)" : `${t}°C`);
-    tempOptions += `<option value="${t}" ${temp === t ? 'selected' : ''}>${lbl}</option>`;
+    tempOptions += `<option value="${t}" ${temp === t ? 'selected' : ''}>${t}°C</option>`;
   }
 
   let tCanLOptions = "";
   let tCanROptions = "";
   for (let t = 7; t <= 41; t++) {
-    const lbl = t === 41 ? "41°C (MAX)" : (t === 7 ? "7°C (Hors-gel)" : `${t}°C`);
-    tCanLOptions += `<option value="${t}" ${tCanL === t ? 'selected' : ''}>${lbl}</option>`;
-    tCanROptions += `<option value="${t}" ${tCanR === t ? 'selected' : ''}>${lbl}</option>`;
+    tCanLOptions += `<option value="${t}" ${tCanL === t ? 'selected' : ''}>${t}°C</option>`;
+    tCanROptions += `<option value="${t}" ${tCanR === t ? 'selected' : ''}>${t}°C</option>`;
   }
 
+  // Choix de la ventilation : uniquement des chiffres ou OFF/AUTO
   const fanDuctOptions = (curVal) => [
-    { val: 0, label: "0 - OFF" },
-    { val: 1, label: "1 - Vitesse 1" },
-    { val: 2, label: "2 - Vitesse 2" },
-    { val: 3, label: "3 - Vitesse 3" },
-    { val: 4, label: "4 - Vitesse 4" },
-    { val: 5, label: "5 - Vitesse 5" },
-    { val: 6, label: "6 - Vitesse 6" },
-    { val: 7, label: "7 - Vitesse 7" },
-    { val: 8, label: "8 - PS (Auto)" }
+    { val: 0, label: "OFF" },
+    { val: 1, label: "1" },
+    { val: 2, label: "2" },
+    { val: 3, label: "3" },
+    { val: 4, label: "4" },
+    { val: 5, label: "5" },
+    { val: 6, label: "6" },
+    { val: 7, label: "7" },
+    { val: 8, label: "AUTO" }
   ].map(o => `<option value="${o.val}" ${curVal === o.val ? 'selected' : ''}>${o.label}</option>`).join("");
+
+  const fanFrontOptions = [
+    { val: 0, label: "OFF" },
+    { val: 1, label: "1" },
+    { val: 2, label: "2" },
+    { val: 3, label: "3" },
+    { val: 4, label: "4" },
+    { val: 5, label: "5" },
+    { val: 6, label: "6" },
+    { val: 7, label: "7" },
+    { val: 8, label: "AUTO" }
+  ].map(o => `<option value="${o.val}" ${fanFront === o.val ? 'selected' : ''}>${o.label}</option>`).join("");
 
   // Jours d'activation
   const dayBtns = dayLabels.map(d => {
     const isOn = (mask & d.bit) !== 0;
     const nextMask = isOn ? (mask & ~d.bit) : (mask | d.bit);
-    return `<button type="button" onclick="sendCommand('chrono_p${p}_days_mask', ${nextMask})"
+    return `<button type="button" onclick="updateProgramDraft('mask', ${nextMask})"
       class="min-h-[34px] py-1 px-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer ${isOn ? progTheme.dayActive : 'bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700 border-gray-700'}"
       title="${d.full}">
       ${d.name}
     </button>`;
   }).join("");
 
-  // Options ventilation façade
-  const fanFrontOptions = [
-    { val: 0, label: "0 - OFF (Convection)" },
-    { val: 1, label: "1 - Vitesse 1" },
-    { val: 2, label: "2 - Vitesse 2" },
-    { val: 3, label: "3 - Vitesse 3" },
-    { val: 4, label: "4 - Vitesse 4" },
-    { val: 5, label: "5 - Vitesse 5" },
-    { val: 6, label: "6 - Vitesse 6" },
-    { val: 7, label: "7 - Vitesse 7" },
-    { val: 8, label: "8 - PS (Auto)" }
-  ].map(o => `<option value="${o.val}" ${fanFront === o.val ? 'selected' : ''}>${o.label}</option>`).join("");
-
   modalContainer.className = `bg-gray-900 border ${progTheme.border} rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden my-auto`;
 
   modalContainer.innerHTML = `
-    <!-- En-tête de la Popup -->
+    <!-- En-tête de la Popup : Titre "Configuration" sans sous-titre -->
     <div class="p-4 bg-gray-950/90 border-b border-gray-800 flex items-center justify-between">
       <div class="flex items-center gap-2.5">
         <span class="px-2.5 py-1 rounded-md text-xs font-black ${progTheme.badge} shadow-sm">P${p}</span>
-        <div>
-          <h3 class="text-base font-bold text-white flex items-center gap-2">
-            <span>Programme ${p}</span>
-          </h3>
-          <p class="text-[11px] text-gray-400">Configuration des créneaux horaires, puissances et consignes</p>
-        </div>
+        <h3 class="text-base font-bold text-white">Configuration</h3>
       </div>
       <button type="button" onclick="closeProgramModal()"
-        class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white font-bold flex items-center justify-center transition cursor-pointer">
+        class="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white font-bold flex items-center justify-center transition cursor-pointer"
+        title="Fermer">
         ✕
       </button>
     </div>
 
     <!-- Contenu du Programme (Scrollable) -->
     <div class="p-4 sm:p-5 overflow-y-auto space-y-4 text-xs tabular-nums flex-1 pb-6">
-      <!-- 1. Tranche Horaire -->
-      <div class="bg-gray-950/70 p-3.5 rounded-xl border border-gray-800 space-y-2.5">
-        <span class="font-bold text-gray-200 text-xs block">⏰ Plage Horaire</span>
+      <!-- Bulle fusionnée : Plages Horaires & Consignes de Chauffe (sans titres) -->
+      <div class="bg-gray-950/70 p-3.5 rounded-xl border border-gray-800 space-y-3.5">
+        <!-- 1. Plage Horaire (horloge smartphone native) -->
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="text-gray-400 block mb-1">Heure d'Allumage</label>
-            <select onchange="sendCommand('chrono_p${p}_start_set', this.value)"
-              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:outline-none focus:border-orange-500 cursor-pointer">
-              ${slotOptionsStart}
-            </select>
+            <label class="text-[11px] text-gray-400 block mb-1">Début</label>
+            <input type="time" step="600"
+              style="color-scheme: dark"
+              value="${startTimeVal}"
+              onchange="updateProgramDraftTime('start', this.value)"
+              class="w-full bg-gray-800 border ${isConfigured ? 'border-gray-700 text-white' : 'border-gray-800 text-gray-400'} rounded-lg px-2.5 py-1.5 font-mono text-xs focus:outline-none focus:border-orange-500 cursor-pointer">
           </div>
           <div>
-            <label class="text-gray-400 block mb-1">Heure d'Arrêt</label>
-            <select onchange="sendCommand('chrono_p${p}_stop_set', this.value)"
-              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs focus:outline-none focus:border-orange-500 cursor-pointer">
-              ${slotOptionsStop}
-            </select>
+            <label class="text-[11px] text-gray-400 block mb-1">Fin</label>
+            <input type="time" step="600"
+              style="color-scheme: dark"
+              value="${stopTimeVal}"
+              onchange="updateProgramDraftTime('stop', this.value)"
+              class="w-full bg-gray-800 border ${isConfigured ? 'border-gray-700 text-white' : 'border-gray-800 text-gray-400'} rounded-lg px-2.5 py-1.5 font-mono text-xs focus:outline-none focus:border-orange-500 cursor-pointer">
+          </div>
+        </div>
+
+        <!-- 2. Consignes de Chauffe (Flamme, T°, Ventilation) avec pictogrammes -->
+        <div class="pt-3 border-t border-gray-800/80">
+          <div class="grid grid-cols-3 gap-2.5">
+            <div>
+              <label class="text-base block mb-1 text-center" title="Puissance de chauffe (1 à 7)">🔥</label>
+              <select onchange="updateProgramDraft('power', this.value)"
+                class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-white text-xs text-center focus:outline-none focus:border-orange-500 cursor-pointer">
+                ${powerOptions}
+              </select>
+            </div>
+            <div>
+              <label class="text-base block mb-1 text-center" title="Température Salon (7 à 41°C)">🌡️</label>
+              <select onchange="updateProgramDraft('temperature', this.value)"
+                class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-white text-xs text-center focus:outline-none focus:border-orange-500 cursor-pointer">
+                ${tempOptions}
+              </select>
+            </div>
+            <div>
+              <label class="text-base block mb-1 text-center" title="Ventilation façade (OFF, 1..7, AUTO)">💨</label>
+              <select onchange="updateProgramDraft('fanFront', this.value)"
+                class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-white text-xs text-center focus:outline-none focus:border-orange-500 cursor-pointer">
+                ${fanFrontOptions}
+              </select>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- 2. Consignes Flamme & T° Salon & Ventilation -->
-      <div class="bg-gray-950/70 p-3.5 rounded-xl border border-gray-800 space-y-2.5">
-        <span class="font-bold text-gray-200 text-xs block">🔥 Consignes de Chauffe</span>
-        <div class="grid grid-cols-3 gap-2.5">
-          <div>
-            <label class="text-gray-400 block mb-1" title="Puissance de combustion de 1 à 7">Puissance</label>
-            <select onchange="sendCommand('chrono_p${p}_power_set', this.value)"
-              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white font-bold text-xs focus:outline-none focus:border-orange-500 cursor-pointer">
-              ${powerOptions}
-            </select>
-          </div>
-          <div>
-            <label class="text-gray-400 block mb-1" title="Consigne T° Ambiante (7..40°C, 41=MAX)">T° Salon</label>
-            <select onchange="sendCommand('chrono_p${p}_temperature_set', this.value)"
-              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-1.5 text-white font-bold text-xs focus:outline-none focus:border-orange-500 cursor-pointer">
-              ${tempOptions}
-            </select>
-          </div>
-          <div>
-            <label class="text-gray-400 block mb-1" title="Ventilation Façade (0=OFF, 1..7, 8=PS)">Vent. Façade</label>
-            <select onchange="sendCommand('chrono_p${p}_fan_front_set', this.value)"
-              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-white font-medium text-xs focus:outline-none focus:border-orange-500 cursor-pointer">
-              ${fanFrontOptions}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <!-- 3. Canalisations d'air chaud Gauche SX & Droite DX -->
+      <!-- Canalisations d'air chaud Gauche & Droite (sans SX/DX, sans Cons/Vit) -->
       <div class="bg-gray-950/70 p-3.5 rounded-xl border border-gray-800 space-y-2.5">
         <span class="font-bold text-gray-200 text-xs block">💨 Canalisations d'Air Chaud</span>
         <div class="grid grid-cols-2 gap-3">
-          <!-- Canalisation Gauche SX -->
+          <!-- Canalisation Gauche -->
           <div class="bg-gray-900/90 p-2.5 rounded-lg border border-gray-800 space-y-2">
             <div class="text-[11px] text-cyan-400 font-semibold flex items-center justify-between">
-              <span>⬅️ Gauche (SX)</span>
-              <span class="text-[10px] text-gray-500 font-mono">Cons / Vit</span>
+              <span>⬅️ Gauche</span>
             </div>
             <div class="space-y-1.5">
               <div>
-                <label class="text-[10px] text-gray-400 block mb-0.5">T° Consigne SX</label>
-                <select onchange="sendCommand('chrono_p${p}_tcanl_set', this.value)"
-                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-white text-xs tabular-nums focus:outline-none focus:border-cyan-500 cursor-pointer">
+                <label class="text-[10px] text-gray-400 block mb-0.5">T° Consigne</label>
+                <select onchange="updateProgramDraft('tCanL', this.value)"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-white text-xs text-center focus:outline-none focus:border-cyan-500 cursor-pointer">
                   ${tCanLOptions}
                 </select>
               </div>
               <div>
-                <label class="text-[10px] text-gray-400 block mb-0.5">Vitesse Soufflerie SX</label>
-                <select onchange="sendCommand('chrono_p${p}_canl_set', this.value)"
-                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-cyan-300 font-bold text-xs tabular-nums focus:outline-none focus:border-cyan-500 cursor-pointer">
+                <label class="text-[10px] text-gray-400 block mb-0.5">Vitesse Soufflerie</label>
+                <select onchange="updateProgramDraft('vCanL', this.value)"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-white text-xs text-center focus:outline-none focus:border-cyan-500 cursor-pointer">
                   ${fanDuctOptions(vCanL)}
                 </select>
               </div>
             </div>
           </div>
 
-          <!-- Canalisation Droite DX -->
+          <!-- Canalisation Droite -->
           <div class="bg-gray-900/90 p-2.5 rounded-lg border border-gray-800 space-y-2">
             <div class="text-[11px] text-sky-400 font-semibold flex items-center justify-between">
-              <span>➡️ Droite (DX)</span>
-              <span class="text-[10px] text-gray-500 font-mono">Cons / Vit</span>
+              <span>➡️ Droite</span>
             </div>
             <div class="space-y-1.5">
               <div>
-                <label class="text-[10px] text-gray-400 block mb-0.5">T° Consigne DX</label>
-                <select onchange="sendCommand('chrono_p${p}_tcanr_set', this.value)"
-                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-white text-xs tabular-nums focus:outline-none focus:border-sky-500 cursor-pointer">
+                <label class="text-[10px] text-gray-400 block mb-0.5">T° Consigne</label>
+                <select onchange="updateProgramDraft('tCanR', this.value)"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-white text-xs text-center focus:outline-none focus:border-sky-500 cursor-pointer">
                   ${tCanROptions}
                 </select>
               </div>
               <div>
-                <label class="text-[10px] text-gray-400 block mb-0.5">Vitesse Soufflerie DX</label>
-                <select onchange="sendCommand('chrono_p${p}_canr_set', this.value)"
-                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-sky-300 font-bold text-xs tabular-nums focus:outline-none focus:border-sky-500 cursor-pointer">
+                <label class="text-[10px] text-gray-400 block mb-0.5">Vitesse Soufflerie</label>
+                <select onchange="updateProgramDraft('vCanR', this.value)"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-white text-xs text-center focus:outline-none focus:border-sky-500 cursor-pointer">
                   ${fanDuctOptions(vCanR)}
                 </select>
               </div>
@@ -556,15 +888,20 @@ function renderProgramModalContent(p) {
         </div>
       </div>
 
-      <!-- 4. Jours actifs de la semaine -->
+      <!-- Jours actifs de la semaine -->
       <div class="bg-gray-950/70 p-3.5 rounded-xl border border-gray-800 space-y-2">
-        <div class="flex items-center justify-between">
-          <span class="font-bold text-gray-200 text-xs">📅 Jours d'Activation</span>
-          <span class="text-[11px] text-gray-500 font-mono">Masque = ${mask}</span>
-        </div>
+        <span class="font-bold text-gray-200 text-xs block">📅 Jours d'Activation</span>
         <div class="grid grid-cols-7 gap-1.5 pt-1">
           ${dayBtns}
         </div>
+      </div>
+
+      <!-- Bouton Enregistrer / Valider pour sortir de la bulle -->
+      <div class="pt-1">
+        <button type="button" onclick="closeProgramModal()"
+          class="w-full py-2.5 px-4 rounded-xl font-bold text-xs bg-orange-600 hover:bg-orange-500 text-white shadow-lg transition cursor-pointer flex items-center justify-center gap-2">
+          <span>Enregistrer les modifications</span>
+        </button>
       </div>
     </div>
   `;
@@ -731,36 +1068,32 @@ function renderChronoPrograms() {
     if (activeDays.length === 7) activeDaysSummary = "Tous les jours";
     else if (activeDays.length > 0) activeDaysSummary = activeDays.join(", ");
 
-    const fanDisplay = fanFront === 8 ? "PS" : (fanFront === 0 ? "OFF" : String(fanFront));
-    const fanLDisplay = vCanL === 8 ? "PS" : (vCanL === 0 ? "OFF" : String(vCanL));
-    const fanRDisplay = vCanR === 8 ? "PS" : (vCanR === 0 ? "OFF" : String(vCanR));
+    const fanDisplay = fanFront === 8 ? "AUTO" : (fanFront === 0 ? "OFF" : String(fanFront));
+    const fanLDisplay = vCanL === 8 ? "AUTO" : (vCanL === 0 ? "OFF" : String(vCanL));
+    const fanRDisplay = vCanR === 8 ? "AUTO" : (vCanR === 0 ? "OFF" : String(vCanR));
 
     buttonsHtml += `
       <button type="button" onclick="openProgramModal(${p})"
         class="w-full text-left p-2.5 sm:p-3 rounded-xl border transition-all duration-200 cursor-pointer shadow-md hover:shadow-lg hover:scale-[1.01] flex flex-col justify-between gap-1.5 sm:gap-2 ${progBorderColors[p]} group">
         <div class="flex items-center justify-between gap-1">
           <span class="px-2 py-0.5 rounded text-[11px] sm:text-xs font-black ${progBadgeStyles[p]} shadow-sm">P${p}</span>
-          <span class="px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] font-bold border shrink-0 flex items-center gap-1 ${isConfigured ? progPillColors[p] : 'bg-gray-800 text-gray-400 border-gray-700'}">
-            <span>${isConfigured ? '🕒' : '⏹️'}</span>
-            <span>${isConfigured ? `${slotToTime(startSlot)} - ${slotToTime(stopSlot)}` : 'OFF'}</span>
-          </span>
         </div>
 
         <div class="space-y-1 text-[11px] sm:text-xs">
           ${isConfigured ? `
             <div class="flex items-center gap-2 text-gray-200 font-medium truncate">
-              <span class="flex items-center gap-1" title="Consigne T° Salon">🛋️ ${temp}°C</span>
-              <span class="flex items-center gap-1 text-amber-300" title="Puissance de chauffe (1..7)">🔥 P${pwr}</span>
-              <span class="flex items-center gap-1 text-emerald-300" title="Ventilation Façade">💨 V.${fanDisplay}</span>
+              <span class="flex items-center gap-1" title="Consigne T° Salon">🌡️ ${temp}°C</span>
+              <span class="flex items-center gap-1 text-amber-300" title="Puissance de chauffe (1..7)">🔥 ${pwr}</span>
+              <span class="flex items-center gap-1 text-emerald-300" title="Ventilation Façade">💨 ${fanDisplay}</span>
             </div>
 
             <div class="grid grid-cols-2 gap-1 text-[10px] sm:text-[11px] pt-0.5 border-t border-gray-800/60">
-              <span class="text-cyan-400 truncate flex items-center gap-1" title="Canalisation Gauche SX : ${tCanL}°C, Vitesse ${fanLDisplay}">
+              <span class="text-cyan-400 truncate flex items-center gap-1" title="Canalisation Gauche : ${tCanL}°C, Vitesse ${fanLDisplay}">
                 <span>⬅️</span>
                 <span>${tCanL}°C</span>
                 <span class="text-cyan-300 font-mono">💨${fanLDisplay}</span>
               </span>
-              <span class="text-sky-400 truncate flex items-center gap-1" title="Canalisation Droite DX : ${tCanR}°C, Vitesse ${fanRDisplay}">
+              <span class="text-sky-400 truncate flex items-center gap-1" title="Canalisation Droite : ${tCanR}°C, Vitesse ${fanRDisplay}">
                 <span>➡️</span>
                 <span>${tCanR}°C</span>
                 <span class="text-sky-300 font-mono">💨${fanRDisplay}</span>
@@ -768,7 +1101,7 @@ function renderChronoPrograms() {
             </div>
           ` : `
             <div class="text-gray-500 italic py-0.5 flex items-center gap-1.5">
-              <span>💤</span><span>Non programmé</span>
+              <span>⏹️</span><span>Programme inactif</span>
             </div>
           `}
 
@@ -1001,6 +1334,7 @@ function updateCloudConnectionIndicator(overrideStatus, message) {
     latestData.comm_mode ||
     (currentSettings && currentSettings.comm_mode) ||
     "agua_cloud";
+  currentCommMode = activeMode;
 
   let modeName = "Cloud Nobis";
   let modeIcon = "☁️";
@@ -1118,36 +1452,6 @@ function updateConnectionIndicator(overrideStatus, message) {
   updateCloudConnectionIndicator(overrideStatus, message);
 }
 
-// Vérifie l'état de santé du conteneur Nobis.Supervisor (endpoint /health)
-async function checkContainerHealth() {
-  const t0 = performance.now();
-  updateContainerConnectionIndicator("connecting", "Ping...");
-  try {
-    const res = await fetch("/health", { cache: "no-store" });
-    const latency = Math.round(performance.now() - t0);
-    if (res.ok) {
-      const data = await res.json();
-      connectionState.isServerConnected = true;
-      connectionState.containerLatencyMs = latency;
-      if (data.comm_status) {
-        connectionState.commStatus = data.comm_status;
-      }
-      updateContainerConnectionIndicator("connected");
-      updateCloudConnectionIndicator();
-      showToast(`🟢 Conteneur Nobis.Supervisor en ligne (${latency} ms • Mode : ${data.active_mode})`);
-    } else {
-      connectionState.isServerConnected = false;
-      updateContainerConnectionIndicator("disconnected", `HTTP ${res.status}`);
-      updateCloudConnectionIndicator();
-      showToast(`🔴 Erreur conteneur : HTTP ${res.status}`);
-    }
-  } catch (e) {
-    connectionState.isServerConnected = false;
-    updateContainerConnectionIndicator("disconnected", "Réseau KO");
-    updateCloudConnectionIndicator();
-    showToast("🔴 Conteneur Nobis.Supervisor injoignable (serveur arrêté ou réseau coupé)");
-  }
-}
 
 // Mise à jour dynamique du voyant d'état (#hdr-dot avec pictos de la phase en cours à gauche du titre), de la carte État du Poêle et du bandeau d'alerte critique
 function updateStatusIndicatorAndAlerts() {
@@ -1294,6 +1598,7 @@ function applyDashboardState(data, updateSeries = true) {
   }
 
   const activeMode = data.active_mode || (currentSettings && currentSettings.comm_mode) || latestData.comm_mode || "agua_cloud";
+  currentCommMode = activeMode;
   const activeDbFile = data.active_db_file || `nobis_a10_${activeMode}.db`;
 
   const dbEl = document.getElementById("hdr-db");
@@ -1522,7 +1827,7 @@ function applyDashboardState(data, updateSeries = true) {
   if (pwrModeDescEl) {
     const stCode = Number(latestData.status_code ?? 0);
     const pActualNum = Number(pActualVal);
-    const sbEnabled = Number(getRegVal("standby_set", latestData.standby_enabled ?? 0)) === 1;
+    const sbEnabled = (stCode === 8 || stCode === 9 || Number(latestData.standby_enabled ?? 0) === 1);
 
     if (stCode === 5) {
       if (pActualNum === 0) {
@@ -1560,7 +1865,7 @@ function applyDashboardState(data, updateSeries = true) {
   const isSilActive = Boolean(silenceModeState && silenceModeState.active);
   if (climBadge) {
     const isStandbyPhase = (stCode === 8 || stCode === 9);
-    const isEcoActive = !isSilActive && (Number(getRegVal("standby_set", 0)) === 1);
+    const isEcoActive = isStandbyPhase || (!isSilActive && (Number(latestData.standby_enabled ?? 0) === 1));
     climBadge.textContent = isStandbyPhase ? (stCode === 8 ? "ACTIF (8 = ECO STOP)" : "ACTIF (9 = STAND BY)") : (isEcoActive ? "STAND-BY ARMÉ" : "VEILLE INACTIVE");
     climBadge.className = `min-h-[36px] px-3 py-1.5 rounded-lg font-semibold text-xs flex items-center border ${isStandbyPhase || isEcoActive ? "bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow" : "bg-gray-900 border-gray-700 text-gray-400"
       }`;
@@ -1705,6 +2010,7 @@ function applyDashboardState(data, updateSeries = true) {
 }
 
 async function loadDashboard() {
+  let data;
   try {
     const res = await fetch(`/api/dashboard?range_key=${currentRange}`);
     if (!res.ok) {
@@ -1712,16 +2018,23 @@ async function loadDashboard() {
       updateConnectionIndicator("disconnected", "Erreur HTTP");
       return;
     }
-    const data = await res.json();
+    data = await res.json();
     connectionState.isServerConnected = true;
-    applyDashboardState(data, true);
   } catch (e) {
     connectionState.isServerConnected = false;
     updateConnectionIndicator("disconnected", "Réseau KO");
+    return;
+  }
+
+  try {
+    applyDashboardState(data, true);
+  } catch (e) {
+    console.error("[Dashboard] Erreur application état UI:", e);
   }
 }
 
 async function refreshLatestOnly() {
+  let data;
   try {
     const res = await fetch("/api/latest");
     if (!res.ok) {
@@ -1729,8 +2042,15 @@ async function refreshLatestOnly() {
       updateConnectionIndicator("disconnected", "Erreur HTTP");
       return;
     }
-    const data = await res.json();
+    data = await res.json();
     connectionState.isServerConnected = true;
+  } catch (e) {
+    connectionState.isServerConnected = false;
+    updateConnectionIndicator("disconnected", "Réseau KO");
+    return;
+  }
+
+  try {
     // Si un nouveau point temporel est arrivé, on l'ajoute en fin de courbe et on recalcule les espaces de perte de connexion
     if (data.latest && data.latest.timestamp) {
       const rawOnly = cachedSeriesRows.filter(r => !r._gapDurationMin);
@@ -1745,8 +2065,7 @@ async function refreshLatestOnly() {
     }
     applyDashboardState(data, false);
   } catch (e) {
-    connectionState.isServerConnected = false;
-    updateConnectionIndicator("disconnected", "Réseau KO");
+    console.error("[Dashboard] Erreur mise à jour télémétrie:", e);
   }
 }
 
@@ -1841,10 +2160,6 @@ function updateDualStateButtons(containerId, setpointVal, actualVal, theme = "am
       btn.classList.add("btn-setpoint-ring");
     }
   });
-}
-
-function highlightActiveButtons(containerId, activeVal) {
-  updateDualStateButtons(containerId, activeVal, activeVal, "amber");
 }
 
 async function handlePowerButtonClick(val) {
@@ -1993,7 +2308,7 @@ function renderEepromTable() {
   let rawObj = {};
   try {
     rawObj = JSON.parse(latestData.raw_buffer_json || "{}");
-  } catch (e) {}
+  } catch (e) { }
 
   const combinedMap = new Map();
 
@@ -2223,10 +2538,6 @@ function deleteSnapshot(id) {
       showToast(`Snapshot #${id} supprimé.`);
     }
   });
-}
-
-function toggleInstallerLock() {
-  installerUnlocked = true;
 }
 
 // =============================================================================
@@ -2462,55 +2773,6 @@ async function sendCommand(reg_key, value, forceOverride = false) {
   await refreshLatestOnly();
   const installerTab = document.getElementById("tab-installer");
   if (installerTab && !installerTab.classList.contains("hidden")) loadAudit();
-}
-
-function setAllFansMode(targetVal) {
-  const label = targetVal === 0 ? "Convection Naturelle (OFF = 0)" : "Mode PS Automatique (PS = 8)";
-  if (silenceModeState && silenceModeState.active && targetVal !== 0) {
-    openActionModal({
-      title: "🤫 Mode Silence ! en cours",
-      message: `Le mode Silence ! est actuellement actif (ventilations coupées).\n\nPasser en ${label} nécessite de désactiver le mode Silence !.\n\nConfirmez-vous la désactivation du mode Silence ! et l'application de cette ventilation ?`,
-      confirmText: "Désactiver et Appliquer",
-      onConfirm: async () => {
-        await deactivateSilenceMode([
-          { reg_key: "fan_front_speed", value: targetVal },
-          { reg_key: "duct_left_speed", value: targetVal },
-          { reg_key: "duct_right_speed", value: targetVal }
-        ]);
-      }
-    });
-    return;
-  }
-  openActionModal({
-    title: "🌀 Mode de Ventilation Global (Batch)",
-    message: `Passer la soufflerie frontale et les 2 canalisations (SX/DX) en ${label} en une seule écriture groupée ?`,
-    confirmText: "Appliquer",
-    onConfirm: async () => {
-      showToast(`Application groupée : ${label}...`);
-      try {
-        const res = await fetch("/api/command-batch", {
-          method: "POST",
-          headers: getInstallerHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify({
-            commands: [
-              { reg_key: "fan_front_speed", value: targetVal },
-              { reg_key: "duct_left_speed", value: targetVal },
-              { reg_key: "duct_right_speed", value: targetVal }
-            ]
-          })
-        });
-        if (res.ok) {
-          showToast(`Ventilation globale passée en ${label} !`);
-        } else {
-          const err = await res.json().catch(() => ({}));
-          showToast("Erreur batch : " + (err.detail || res.statusText), true);
-        }
-      } catch (e) {
-        showToast("Erreur réseau : " + e.message, true);
-      }
-      await refreshLatestOnly();
-    }
-  });
 }
 
 function syncStoveClock() {
@@ -3217,25 +3479,6 @@ function resetStoveAlarm() {
   });
 }
 
-function stepControl(reg_key, delta, minV, maxV) {
-  const cur = Number(getRegVal(reg_key, 19));
-  const next = Math.max(minV, Math.min(maxV, cur + delta));
-  if (reg_key === "temp_amb_setpoint") updateAmbSetpointPreview(next);
-  if (reg_key === "duct_left_setpoint") updateDuctSetpointPreview("dl", next);
-  if (reg_key === "duct_right_setpoint") updateDuctSetpointPreview("dr", next);
-  sendCommand(reg_key, next);
-}
-
-function toggleAutoMode() {
-  const cur = Number(getRegVal("fun_auto_set", latestData.fun_auto_set ?? 1));
-  sendCommand("fun_auto_set", cur ? 0 : 1);
-}
-
-function toggleEcoMode() {
-  const isEco = Number(getRegVal("standby_set", 0)) === 1;
-  sendCommand("standby_set", isEco ? 0 : 1);
-}
-
 // =============================================================================
 // GESTION DU MODE SILENCE ! (POPUP TEMPORISÉE, CONVECTION PURE & RESTAURATION)
 // =============================================================================
@@ -3262,7 +3505,8 @@ function updateModeRing() {
   const autoVal = Number(getRegVal("fun_auto_set", 0)) === 1;
   const isSilActive = Boolean(silenceModeState && silenceModeState.active);
   const remSec = silenceModeState ? Math.max(0, Math.round(silenceModeState.end_epoch - Date.now() / 1000)) : 0;
-  const isEco = !isSilActive && (Number(getRegVal("standby_set", 0)) === 1);
+  const stCode = Number(latestData.status_code ?? 0);
+  const isEco = !isSilActive && (stCode === 8 || stCode === 9 || Number(latestData.standby_enabled ?? 0) === 1);
   const pwfVal = Number(getRegVal("fun_pwf_set", latestData.fun_pwf_set ?? 0));
   const isPsAll = (Number(getRegVal("fan_front_speed", 0)) === 8 &&
     Number(getRegVal("duct_left_speed", 0)) === 8 &&
@@ -3522,25 +3766,6 @@ async function deactivateSilenceMode(overrideCommands = null) {
     showToast("Erreur réseau désactivation Silence !: " + e.message, true);
   }
 }
-
-function handleSilenceButtonClick() {
-  if (silenceModeState && silenceModeState.active) {
-    const remMins = Math.ceil((silenceModeState.remaining_seconds || 0) / 60);
-    openActionModal({
-      title: "🤫 Mode Silence ! en cours",
-      message: `Le mode Silence ! intelligent est actuellement actif (il reste environ ${remMins} min).\n\nSouhaitez-vous l'arrêter maintenant et restaurer immédiatement les réglages et consignes d'origine ?`,
-      confirmText: "Arrêter et Restaurer",
-      onConfirm: () => deactivateSilenceMode()
-    });
-  } else {
-    openSilenceModal();
-  }
-}
-
-function toggleSilenceMode() {
-  handleSilenceButtonClick();
-}
-
 
 function cycleBoostMode() {
   const cur = Number(getRegVal("fun_pwf_set", latestData.fun_pwf_set ?? 0));
@@ -4887,7 +5112,7 @@ function getTriArcTelemetryState() {
 
   const isSilActive = Boolean(silenceModeState && silenceModeState.active);
   const remSec = silenceModeState ? Math.max(0, Math.round(silenceModeState.end_epoch - Date.now() / 1000)) : 0;
-  const isEco = !isSilActive && (getTriArcLiveOrOpt("standby_set", getRegVal("standby_set", 0)) === 1);
+  const isEco = !isSilActive && (st === 8 || st === 9 || (getActiveCommMode() === "simulation" && getTriArcLiveOrOpt("standby_set", getRegVal("standby_set", 0)) === 1));
 
   return {
     st, isAlarm, phaseIcon, phaseLabel: phaseLabelRaw, phaseColor,
@@ -5198,8 +5423,8 @@ function renderTriArcSvgForZone(zone, T) {
 
       <!-- 2. ARC GAUCHE : VENTILATION (OFF ➔ 1..7 ➔ AUTO) -->
       ${(() => {
-        const isFanAuto = (T.autoIdx === 1 || T.autoIdx === 2 || fanSp === 8);
-        return `
+      const isFanAuto = (T.autoIdx === 1 || T.autoIdx === 2 || fanSp === 8);
+      return `
           <g class="${isFanAuto ? 'pointer-events-none opacity-60' : ''}">
             <path d="${trackFan}" fill="none" stroke="#1e293b" stroke-width="9" stroke-linecap="round" />
             ${fillFan ? `<path d="${fillFan}" fill="none" stroke="url(#gradFan-${zone})" stroke-width="9" stroke-linecap="round" />` : ""}
@@ -5223,13 +5448,13 @@ function renderTriArcSvgForZone(zone, T) {
             ` : ""}
           </g>
         `;
-      })()}
+    })()}
 
       <!-- 3. ARC DROIT : PUISSANCE (0 Eco ➔ 1..7 ➔ 8, GRISÉ SUR SX/DX, NON CLIQUABLE SI AUTO COMPLET) -->
       ${(() => {
-        const isPwrAuto = (T.autoIdx === 2);
-        const isDisabled = isDuct || isPwrAuto;
-        return `
+      const isPwrAuto = (T.autoIdx === 2);
+      const isDisabled = isDuct || isPwrAuto;
+      return `
           <g opacity="${isDuct ? '0.22' : (isPwrAuto ? '0.60' : '1')}" class="${isDisabled ? 'pointer-events-none' : ''}">
             <path d="${trackPwr}" fill="none" stroke="#1e293b" stroke-width="9" stroke-linecap="round" />
             ${fillPwr ? `<path d="${fillPwr}" fill="none" stroke="${isDuct ? '#475569' : `url(#gradPwr-${zone})`}" stroke-width="9" stroke-linecap="round" />` : ""}
@@ -5248,7 +5473,7 @@ function renderTriArcSvgForZone(zone, T) {
             ` : ""}
           </g>
         `;
-      })()}
+    })()}
     </svg>
   `;
 }
@@ -5430,28 +5655,28 @@ function renderTriArcBottomModes(T) {
 
       <!-- 3. Boost (🚀 : désactivé=fusée colorée, actif=fusée allumée avec halo, programmé=fusée allumée + horloge) -->
       ${(() => {
-        let boostBtnCls = "bg-slate-900/90 border-slate-700 text-slate-300 hover:border-rose-400";
-        let boostIcon = `<span class="text-2xl leading-none">🚀</span>`;
-        if (T.pwfVal === 1) {
-          boostBtnCls = "bg-rose-950/80 border-rose-400 text-rose-200 shadow-[0_0_14px_rgba(244,63,94,0.45)]";
-          boostIcon = `<span class="text-2xl leading-none drop-shadow-[0_0_8px_rgba(244,63,94,0.8)]">🚀</span>`;
-        } else if (T.pwfVal === 2) {
-          boostBtnCls = "bg-amber-950/80 border-amber-400 text-amber-200 shadow-[0_0_14px_rgba(245,158,11,0.45)]";
-          boostIcon = `
+      let boostBtnCls = "bg-slate-900/90 border-slate-700 text-slate-300 hover:border-rose-400";
+      let boostIcon = `<span class="text-2xl leading-none">🚀</span>`;
+      if (T.pwfVal === 1) {
+        boostBtnCls = "bg-rose-950/80 border-rose-400 text-rose-200 shadow-[0_0_14px_rgba(244,63,94,0.45)]";
+        boostIcon = `<span class="text-2xl leading-none drop-shadow-[0_0_8px_rgba(244,63,94,0.8)]">🚀</span>`;
+      } else if (T.pwfVal === 2) {
+        boostBtnCls = "bg-amber-950/80 border-amber-400 text-amber-200 shadow-[0_0_14px_rgba(245,158,11,0.45)]";
+        boostIcon = `
             <div class="relative inline-flex items-center justify-center">
               <span class="text-2xl leading-none drop-shadow-[0_0_8px_rgba(245,158,11,0.8)]">🚀</span>
               <span class="absolute -bottom-1 -right-1.5 text-xs leading-none">⏱️</span>
             </div>
           `;
-        }
-        return `
+      }
+      return `
           <button type="button" onclick="toggleTriArcOptionBubble('boost')"
             title="Mode Boost / POWERFUL (1=Actif, 2=Programmé)"
             class="h-14 sm:h-15 min-h-[54px] rounded-2xl border-2 flex flex-col items-center justify-center transition cursor-pointer ${boostBtnCls}">
             ${boostIcon}
           </button>
         `;
-      })()}
+    })()}
 
       <!-- 4. Eco / Stand-by (💤 : CONFORT MODE Nobis) -->
       <button type="button" onclick="toggleTriArcOptionBubble('eco')"
@@ -5463,13 +5688,12 @@ function renderTriArcBottomModes(T) {
   `;
 }
 
-function toggleTriArcEcoOption() {
-  const curEco = Number(getTriArcLiveOrOpt("standby_set", getRegVal("standby_set", 0)));
-  queueTriArcChanges([{ reg_key: "standby_set", value: curEco === 1 ? 0 : 1 }]);
-}
-
 function setTriArcEcoOption(val) {
   closeTriArcOptionBubble();
+  if (getActiveCommMode() === "agua_cloud") {
+    showToast("Le Cloud Agua IOT ne permet pas de modifier Comfort Clima à distance. Utilisez la radiocommande Nobis (MENU ▸ UTILISATEUR ▸ COMFORT CLIMA).", "warning");
+    return;
+  }
   queueTriArcChanges([{ reg_key: "standby_set", value: Number(val) }]);
 }
 
@@ -5579,26 +5803,53 @@ function renderTriArcFloatingOptionBubble(T) {
   }
 
   if (triArcExpandedMode === "eco") {
+    const isStandbyPhase = (T.st === 8 || T.st === 9);
+    const phaseBadgeHtml = T.st === 8
+      ? `<div class="py-2.5 px-3 rounded-2xl bg-cyan-950/80 border border-cyan-500 text-cyan-300 text-xs font-bold flex items-center justify-center gap-2 shadow">
+          <span>⏳</span><span>PHASE ACTIVE : 8 = ECO STOP</span>
+         </div>`
+      : (T.st === 9
+        ? `<div class="py-2.5 px-3 rounded-2xl bg-cyan-950/80 border border-cyan-500 text-cyan-300 text-xs font-bold flex items-center justify-center gap-2 shadow">
+            <span>🌙</span><span>PHASE ACTIVE : 9 = STAND BY</span>
+           </div>`
+        : `<div class="py-2.5 px-3 rounded-2xl bg-slate-950 border border-slate-700 text-slate-300 text-xs font-bold flex items-center justify-center gap-2">
+            <span class="text-slate-400">💤</span><span>ÉTAT POÊLE : VEILLE INACTIVE (${escapeHtml(T.phaseLabel)})</span>
+           </div>`);
+
+    const simControlsHtml = getActiveCommMode() === "simulation"
+      ? `
+        <div class="grid grid-cols-2 gap-2 text-xs font-bold pt-1">
+          <button type="button" onclick="setTriArcEcoOption(0)" class="py-2.5 rounded-2xl border cursor-pointer ${!T.isEco ? 'bg-slate-700 border-white text-white' : 'bg-slate-950 border-slate-800 text-slate-400'}">OFF (Simulation)</button>
+          <button type="button" onclick="setTriArcEcoOption(1)" class="py-2.5 rounded-2xl border flex items-center justify-center gap-1.5 cursor-pointer ${T.isEco ? 'bg-emerald-600 border-emerald-300 text-white' : 'bg-slate-950 border-slate-800 text-slate-300'}"><span class="text-sm">💤</span><span>ACTIF (Simulation)</span></button>
+        </div>
+      `
+      : "";
+
     return `
       <div class="bg-slate-900 border-2 border-emerald-400 rounded-3xl p-3.5 space-y-2.5 shadow-[0_10px_40px_rgba(0,0,0,0.9)]">
         <div class="flex items-center justify-between text-xs border-b border-slate-800 pb-2">
-          <span class="font-bold text-emerald-300 flex items-center gap-1.5"><span class="text-base">💤</span> Mode Éco (CONFORT MODE Nobis)</span>
+          <span class="font-bold text-emerald-300 flex items-center gap-1.5"><span class="text-base">💤</span> Mode Éco (CONFORT CLIMA Nobis)</span>
           <button type="button" onclick="closeTriArcOptionBubble()" class="w-6 h-6 rounded-full bg-slate-800 text-slate-300 font-bold cursor-pointer">✕</button>
         </div>
-        <div class="grid grid-cols-2 gap-2 text-xs font-bold">
-          <button type="button" onclick="setTriArcEcoOption(0)" class="py-2.5 rounded-2xl border cursor-pointer ${!T.isEco ? 'bg-slate-700 border-white text-white' : 'bg-slate-950 border-slate-800 text-slate-400'}">OFF (Désactivé)</button>
-          <button type="button" onclick="setTriArcEcoOption(1)" class="py-2.5 rounded-2xl border flex items-center justify-center gap-1.5 cursor-pointer ${T.isEco ? 'bg-emerald-600 border-emerald-300 text-white' : 'bg-slate-950 border-slate-800 text-slate-300'}"><span class="text-sm">💤</span><span>ACTIF</span></button>
-        </div>
+
+        ${phaseBadgeHtml}
+        ${simControlsHtml}
+
         <div class="space-y-1.5 text-[11px] leading-tight text-slate-300 bg-slate-950/70 border border-slate-800 rounded-xl p-2.5">
-          <p class="font-semibold text-emerald-300">À quoi sert ce mode ?</p>
-          <p>Le mode Éco correspond au <strong>Confort Mode</strong> (Stand-by) de Nobis. Lorsque la température de la pièce dépasse votre consigne cible, le poêle passe en phase d'extinction automatique (<strong>ECO STOP</strong>) pour ne pas surchauffer et économiser les granulés. Dès que la température redescend sous la consigne, le poêle redémarre tout seul.</p>
+          <p class="font-semibold text-emerald-300">Fonctionnement Confort Clima (Eco-Stop)</p>
+          <p>Le mode Éco correspond au <strong>Confort Clima</strong> de Nobis. Lorsque la température ambiante mesurée dépasse votre consigne cible, le poêle passe automatiquement en extinction thermique (<strong>ECO STOP</strong>) pour ne pas surchauffer et économiser les granulés. Dès que la température redescend sous la consigne (moins le delta configuré), le poêle redémarre tout seul (<strong>STAND BY</strong>).</p>
         </div>
-        <div class="text-[11px] leading-tight text-amber-300/90 bg-amber-950/40 border border-amber-500/30 rounded-xl p-2 flex items-start gap-1.5">
-          <span class="text-sm leading-none shrink-0">⚠️</span>
+
+        <div class="text-[11px] leading-tight text-amber-300/90 bg-amber-950/40 border border-amber-500/30 rounded-xl p-2.5 flex items-start gap-2">
+          <span class="text-base leading-none shrink-0">ℹ️</span>
           <div>
-            <p class="font-bold text-amber-200 mb-0.5">Configuration sur la télécommande physique :</p>
-            <p><strong>Menu &gt; Réglages / Set Poêle &gt; Confort Mode</strong></p>
-            <p class="mt-1 text-[10px] text-amber-300/80">La configuration des paramètres de ce mode (seuil d'extinction Delta T° et temporisation en minutes) ne peut être réalisée que depuis la télécommande physique Nobis. Merci une nouvelle fois à Nobis !</p>
+            <p class="font-bold text-amber-200 mb-1">Activation et réglages sur la radiocommande Nobis :</p>
+            <p class="text-white font-mono text-[11px] bg-black/40 px-2 py-1 rounded border border-amber-500/20 mb-1.5">
+              MENU ▸ UTILISATEUR ▸ COMFORT CLIMA (ON / OFF)
+            </p>
+            <p class="text-[10px] text-amber-200/90 leading-normal">
+              L'activation/désactivation de Comfort Clima ainsi que ses réglages (temporisation d'extinction et écart thermique Delta T°) se configurent <strong>exclusivement sur la radiocommande physique Nobis</strong>. Le protocole Cloud Agua IOT ne dispose d'aucun registre de commande à distance pour cette fonction. L'application supervise fidèlement l'état et détecte automatiquement vos phases réelles <strong>ECO STOP (8)</strong> et <strong>STAND BY (9)</strong>.
+            </p>
           </div>
         </div>
       </div>
@@ -5794,17 +6045,16 @@ function initTriArcInteractions() {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  initThreePaneCockpit();
-  initTriArcInteractions();
-  renderTriArcCockpit();
-  switchTab("tab-control"); // Pilotage affiché par défaut à gauche
-  updateDynamicPowerButton();
+  try { initThreePaneCockpit(); } catch (e) { console.error("[Init] ThreePaneCockpit:", e); }
+  try { initTriArcInteractions(); } catch (e) { console.error("[Init] TriArcInteractions:", e); }
+  try { renderTriArcCockpit(); } catch (e) { console.error("[Init] RenderTriArc:", e); }
+  try { switchTab("tab-control"); } catch (e) { console.error("[Init] SwitchTab:", e); }
+  try { updateDynamicPowerButton(); } catch (e) { console.error("[Init] DynamicPowerButton:", e); }
   loadDashboard();
   initSSEStream();
-  refreshMatterStatus(false);
+  try { refreshMatterStatus(false); } catch (e) { console.error("[Init] MatterStatus:", e); }
   // Filet de sécurité léger toutes les 60s si l'onglet navigateur a été mis en veille
   setInterval(refreshLatestOnly, 60000);
   // Rafraîchissement précis 1 Hz du compte à rebours Mode Silence ! dans le bouton
   setInterval(updateSilenceCountdownDisplay, 1000);
 });
-

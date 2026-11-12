@@ -1,460 +1,146 @@
+"""
+Superviseur Nobis A10 C Light / Style / 2020 / Coax - Point d'entrée principal FastAPI.
+Architecture modulaire : routeurs spécialisés (silence, matter, calibration, installer, stove, system),
+diffusion temps réel Server-Sent Events (SSE), gestionnaire asynchrone APScheduler et sécurité HTTP.
+"""
+import asyncio
+from contextlib import asynccontextmanager
+from datetime import datetime
+import json
+import logging
 import os
 import sys
 import time
-import json
-import hmac
-import secrets
-import asyncio
-import logging
-from datetime import datetime, timedelta
-from contextlib import asynccontextmanager
-from typing import Dict, Any, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Body, Request
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, FileResponse
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.openapi.utils import get_openapi
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-from config import (
-    STATIC_DIR,
-    MODE_DB_PATHS,
-    HOPPER_CAPACITY_KG,
-    PELLET_BAG_WEIGHT_KG,
-    TELEMETRY_COLUMNS,
-)
-from schemas import (
-    CommandPayload,
-    BatchCommandPayload,
-    RefillHopperPayload,
-    SnapshotCreatePayload,
-    SettingsPayload,
-    TestConnectionPayload,
-    SilenceActivatePayload,
-    SilenceDeactivatePayload,
-    MatterWebhookPayload,
-    TestWebhookPayload,
-    ClientErrorPayload,
-    InstallerVerifyPayload,
-    StoveSetPayload,
-)
+from analytics import enrich_telemetry_record
+from clients import close_http_client, init_http_client
+from config import MODE_DB_PATHS, STATIC_DIR
 from database import (
-    get_sys_db,
-    get_db,
-    init_all_databases,
-    get_settings_dict,
-    get_public_settings_dict,
-    get_active_mode,
-    get_registers_dict,
-    get_rolling_consumption_stats,
     db_log,
+    get_active_mode,
+    get_db,
+    get_public_settings_dict,
+    get_registers_dict,
+    get_settings_dict,
+    init_all_databases,
     seed_simulation_db_if_empty,
 )
-from clients import (
-    init_http_client,
-    close_http_client,
-    borrow_http_client,
-    weather_service,
-    agua_client,
-    local_gateway_client,
-    notification_service,
-    is_safe_webhook_url,
-)
-from telemetry import (
-    sse_subscribers,
-    collect_telemetry_cycle,
-    execute_registers_batch_write,
-    execute_register_write,
-    evaluate_pellet_quality,
-    evaluate_exhaust_quality,
-    check_power_stability,
-    enrich_telemetry_record,
-    prune_database_retention,
-    reset_pellet_batch_calibration,
-    get_pellet_batch_state,
-    get_comm_status,
-)
 from matter_service import matter_manager
+from routers.calibration import router as calibration_router
+from routers.installer import (
+    _failed_auth_attempts,
+    _installer_sessions,
+    is_installer_authenticated,
+    router as installer_router,
+)
+from routers.matter import router as matter_router
+from routers.silence import (
+    _auto_expire_silence_job,
+    activate_silence_mode,
+    deactivate_silence_mode,
+    get_silence_state,
+    get_silence_status,
+    router as silence_router,
+    save_silence_state,
+)
+from routers.stove import router as stove_router
+from routers.system import router as system_router
+from scheduler import scheduler
+from telemetry import (
+    collect_telemetry_cycle,
+    get_comm_status,
+    prune_database_retention,
+    sse_subscribers,
+)
 
-# ==============================================================================
-# INSTANCE FASTAPI & ROUTES REST (COMPATIBLE UVICORN app.main:app & main:app)
-# ==============================================================================
-scheduler = AsyncIOScheduler()
+# Export explicite pour rétro-compatibilité
+__all__ = [
+    "app",
+    "scheduler",
+    "activate_silence_mode",
+    "deactivate_silence_mode",
+    "get_silence_status",
+    "get_silence_state",
+    "save_silence_state",
+    "is_installer_authenticated",
+    "_installer_sessions",
+    "_failed_auth_attempts",
+]
+
 _is_shutting_down = False
 
 
-def _notify_sse_shutdown() -> None:
-    """Réveille immédiatement tous les flux SSE actifs pour libérer Uvicorn à l'arrêt."""
+def _notify_sse_shutdown():
+    """Notifie l'ensemble des clients SSE de l'arrêt imminent du serveur."""
     global _is_shutting_down
     _is_shutting_down = True
+    msg = json.dumps({"event": "shutdown", "message": "Arrêt du serveur en cours..."})
     for q in list(sse_subscribers):
         try:
-            while not q.empty():
-                q.get_nowait()
-            q.put_nowait(None)
+            q.put_nowait(msg)
         except Exception:
             pass
-
-
-try:
-    import uvicorn.server
-    _orig_uvicorn_handle_exit = uvicorn.server.Server.handle_exit
-    _orig_uvicorn_shutdown = uvicorn.server.Server.shutdown
-
-    def _patched_uvicorn_handle_exit(self, sig, frame):
-        _notify_sse_shutdown()
-        return _orig_uvicorn_handle_exit(self, sig, frame)
-
-    async def _patched_uvicorn_shutdown(self, sockets=None):
-        _notify_sse_shutdown()
-        return await _orig_uvicorn_shutdown(self, sockets=sockets)
-
-    uvicorn.server.Server.handle_exit = _patched_uvicorn_handle_exit
-    uvicorn.server.Server.shutdown = _patched_uvicorn_shutdown
-except Exception:
-    pass
-
-
-# ==============================================================================
-# GESTIONNAIRE DU MODE SILENCE ! (INTELLIGENT, P0/VENTIL 0, TIMER & RESTAURATION)
-# ==============================================================================
-SILENCE_KEYS_TO_SAVE = [
-    "temp_amb_setpoint",
-    "duct_left_setpoint",
-    "duct_right_setpoint",
-    "fun_pwf_set",
-    "standby_set",
-    "chrono_week_enable_set",
-    "fun_auto_set",
-    "fan_front_speed",
-    "duct_left_speed",
-    "duct_right_speed",
-    "power_level",
-]
-
-
-def get_silence_state() -> Dict[str, Any]:
-    conn = get_sys_db()
-    try:
-        row = conn.execute("SELECT value FROM settings WHERE key = 'silence_timer_state'").fetchone()
-        if row and row["value"]:
-            try:
-                return json.loads(row["value"])
-            except Exception:
-                pass
-    finally:
-        conn.close()
-    return {
-        "active": False,
-        "duration_hours": 2.0,
-        "start_epoch": 0.0,
-        "end_epoch": 0.0,
-        "is_stove_on": False,
-        "initial_state": {},
-        "modified_keys": []
-    }
-
-
-def save_silence_state(state: Dict[str, Any]) -> None:
-    conn = get_sys_db()
-    try:
-        conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES ('silence_timer_state', ?)",
-            (json.dumps(state),)
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def get_silence_status() -> Dict[str, Any]:
-    state = get_silence_state()
-    is_active = bool(state.get("active", False))
-    end_epoch = float(state.get("end_epoch", 0.0))
-    now_ts = time.time()
-    remaining = max(0, int(end_epoch - now_ts)) if is_active else 0
-    if is_active and remaining <= 0:
-        is_active = False
-    return {
-        "active": is_active,
-        "duration_hours": float(state.get("duration_hours", 2.0)),
-        "start_epoch": float(state.get("start_epoch", 0.0)),
-        "end_epoch": end_epoch,
-        "remaining_seconds": remaining,
-        "is_stove_on": state.get("is_stove_on"),
-        "initial_state": state.get("initial_state", {}),
-        "modified_keys": state.get("modified_keys", [])
-    }
-
-
-async def activate_silence_mode(duration_hours: float = 2.0) -> Dict[str, Any]:
-    active_mode = get_active_mode()
-    regs = get_registers_dict(active_mode)
-
-    # Récupération du dernier enregistrement de télémétrie pour détecter l'état (éteint vs allumé)
-    conn = get_db(active_mode)
-    try:
-        latest = conn.execute("SELECT * FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
-        latest_dict = dict(latest) if latest else {}
-    finally:
-        conn.close()
-
-    is_stove_on = False
-    if latest_dict and latest_dict.get("status_code") is not None:
-        st_code = int(latest_dict.get("status_code", 0))
-        if st_code == -1:
-            cmd_val = float(latest_dict.get("status_managed") or regs.get("status_code", {}).get("current_val", 0.0))
-            is_stove_on = (cmd_val == 85.0)
-        else:
-            is_stove_on = (st_code != 0)
-    elif "status_code" in regs:
-        cmd_val = float(regs["status_code"].get("current_val", 0.0))
-        is_stove_on = (cmd_val == 85.0)
-
-    # 1. Sauvegarde des valeurs initiales
-    initial_state = {}
-    for k in SILENCE_KEYS_TO_SAVE:
-        if k in regs:
-            initial_state[k] = float(regs[k].get("current_val", 0.0))
-        elif latest_dict and k in latest_dict and latest_dict[k] is not None:
-            initial_state[k] = float(latest_dict[k])
-        else:
-            initial_state[k] = 0.0
-
-    # 2. Ordres de bascule en mode Silence intelligent
-    if is_stove_on:
-        # Poêle allumé :
-        # - désactivation du boost (fun_pwf_set = 0)
-        # - désactivation du mode éco (standby_set = 0)
-        # - désactivation de la programmation (chrono_week_enable_set = 0)
-        # - activation du mode auto total (fun_auto_set = 1, ventilations front/sx/dx = 8)
-        # - passage des consignes en hors gel (7°C) : le poêle passe ainsi en P0 et Ventil 0 sans s'éteindre
-        activation_cmds = [
-            {"reg_key": "fun_pwf_set", "value": 0.0, "offset": int(regs.get("fun_pwf_set", {}).get("offset", 33154))},
-            {"reg_key": "standby_set", "value": 0.0, "offset": int(regs.get("standby_set", {}).get("offset", 33130))},
-            {"reg_key": "chrono_week_enable_set", "value": 0.0, "offset": int(regs.get("chrono_week_enable_set", {}).get("offset", 33162))},
-            {"reg_key": "fun_auto_set", "value": 1.0, "offset": int(regs.get("fun_auto_set", {}).get("offset", 33128))},
-            {"reg_key": "fan_front_speed", "value": 8.0, "offset": int(regs.get("fan_front_speed", {}).get("offset", 33132))},
-            {"reg_key": "duct_left_speed", "value": 8.0, "offset": int(regs.get("duct_left_speed", {}).get("offset", 33136))},
-            {"reg_key": "duct_right_speed", "value": 8.0, "offset": int(regs.get("duct_right_speed", {}).get("offset", 33134))},
-            {"reg_key": "temp_amb_setpoint", "value": 7.0, "offset": int(regs.get("temp_amb_setpoint", {}).get("offset", 33122))},
-            {"reg_key": "duct_left_setpoint", "value": 7.0, "offset": int(regs.get("duct_left_setpoint", {}).get("offset", 33126))},
-            {"reg_key": "duct_right_setpoint", "value": 7.0, "offset": int(regs.get("duct_right_setpoint", {}).get("offset", 33124))},
-            {"reg_key": "set_silece_set", "value": 1.0, "offset": int(regs.get("set_silece_set", {}).get("offset", 33250))},
-        ]
-        modified_keys = [
-            "fun_pwf_set",
-            "standby_set",
-            "chrono_week_enable_set",
-            "fun_auto_set",
-            "fan_front_speed",
-            "duct_left_speed",
-            "duct_right_speed",
-            "temp_amb_setpoint",
-            "duct_left_setpoint",
-            "duct_right_setpoint",
-        ]
-        log_detail = "poêle allumé : Boost/Éco/Chrono désactivés, Auto total activé, consignes en hors-gel 7°C (régulation P0 & Ventil 0 sans extinction)"
-    else:
-        # Poêle éteint :
-        # - toutes les consignes passent en hors gel (7°C)
-        activation_cmds = [
-            {"reg_key": "temp_amb_setpoint", "value": 7.0, "offset": int(regs.get("temp_amb_setpoint", {}).get("offset", 33122))},
-            {"reg_key": "duct_left_setpoint", "value": 7.0, "offset": int(regs.get("duct_left_setpoint", {}).get("offset", 33126))},
-            {"reg_key": "duct_right_setpoint", "value": 7.0, "offset": int(regs.get("duct_right_setpoint", {}).get("offset", 33124))},
-            {"reg_key": "set_silece_set", "value": 1.0, "offset": int(regs.get("set_silece_set", {}).get("offset", 33250))},
-        ]
-        modified_keys = [
-            "temp_amb_setpoint",
-            "duct_left_setpoint",
-            "duct_right_setpoint",
-        ]
-        log_detail = "poêle éteint : toutes les consignes de température passées en hors-gel 7°C"
-
-    write_res = await execute_registers_batch_write(activation_cmds)
-
-    now_ts = time.time()
-    dur_s = max(60, int(duration_hours * 3600))
-    end_ts = now_ts + dur_s
-    end_dt = datetime.fromtimestamp(end_ts)
-
-    state = {
-        "active": True,
-        "duration_hours": float(duration_hours),
-        "start_epoch": now_ts,
-        "end_epoch": end_ts,
-        "is_stove_on": is_stove_on,
-        "initial_state": initial_state,
-        "modified_keys": modified_keys
-    }
-    save_silence_state(state)
-
-    scheduler.add_job(
-        _auto_expire_silence_job,
-        "date",
-        run_date=end_dt,
-        id="silence_timer_job",
-        replace_existing=True
-    )
-
-    db_log(
-        "COMMAND",
-        "SILENCE",
-        f"Mode Silence ! intelligent activé pour {duration_hours:g}H ({log_detail}). Restauration programmée à {end_dt.strftime('%H:%M:%S')}.",
-        active_mode
-    )
-
-    status = get_silence_status()
-    return {
-        "status": "ok",
-        "silence_mode": status,
-        "write_result": write_res,
-        "latest": write_res.get("latest", {})
-    }
-
-
-async def deactivate_silence_mode(is_auto_expired: bool = False, override_commands: Optional[List[Any]] = None) -> Dict[str, Any]:
-    active_mode = get_active_mode()
-    state = get_silence_state()
-    initial = state.get("initial_state", {})
-    modified_keys = state.get("modified_keys")
-    regs = get_registers_dict(active_mode)
-
-    if scheduler.get_job("silence_timer_job"):
-        try:
-            scheduler.remove_job("silence_timer_job")
-        except Exception:
-            pass
-
-    overrides_dict: Dict[str, float] = {}
-    if override_commands:
-        for c in override_commands:
-            rk = getattr(c, "reg_key", None) or (c.get("reg_key") if isinstance(c, dict) else None)
-            val = getattr(c, "value", None) if hasattr(c, "value") else (c.get("value") if isinstance(c, dict) else None)
-            if rk is not None and val is not None:
-                try:
-                    overrides_dict[str(rk)] = float(val)
-                except (ValueError, TypeError):
-                    pass
-
-    default_offsets_and_vals = {
-        "temp_amb_setpoint": (19.0, 33122),
-        "duct_left_setpoint": (20.0, 33126),
-        "duct_right_setpoint": (20.0, 33124),
-        "fun_pwf_set": (0.0, 33154),
-        "standby_set": (0.0, 33130),
-        "chrono_week_enable_set": (0.0, 33162),
-        "fun_auto_set": (1.0, 33128),
-        "fan_front_speed": (3.0, 33132),
-        "duct_left_speed": (0.0, 33136),
-        "duct_right_speed": (0.0, 33134),
-        "power_level": (4.0, 33120),
-    }
-
-    if modified_keys is None:
-        keys_to_restore = [k for k in default_offsets_and_vals if k in initial]
-    else:
-        keys_to_restore = list(modified_keys)
-
-    for k in overrides_dict:
-        if k not in keys_to_restore and k in default_offsets_and_vals:
-            keys_to_restore.append(k)
-
-    restore_cmds = []
-    for k in keys_to_restore:
-        def_val, def_off = default_offsets_and_vals.get(k, (0.0, 0))
-        off = int(regs.get(k, {}).get("offset", def_off))
-        if k in overrides_dict:
-            target_val = overrides_dict[k]
-        else:
-            target_val = float(initial.get(k, def_val))
-        restore_cmds.append({"reg_key": k, "value": target_val, "offset": off})
-
-    restore_cmds.append({"reg_key": "set_silece_set", "value": 0.0, "offset": int(regs.get("set_silece_set", {}).get("offset", 33250))})
-
-    write_res = await execute_registers_batch_write(restore_cmds)
-
-    state["active"] = False
-    state["end_epoch"] = 0.0
-    save_silence_state(state)
-
-    if overrides_dict:
-        over_summary = ", ".join(f"{k}={v:g}" for k, v in overrides_dict.items())
-        reason = f"Désactivation manuelle avec consigne ({over_summary})"
-    elif is_auto_expired:
-        reason = "Fin du compte à rebours"
-    else:
-        reason = "Désactivation manuelle"
-
-    db_log(
-        "COMMAND",
-        "SILENCE",
-        f"Mode Silence ! intelligent désactivé ({reason}) : paramètres et consignes d'origine restaurés.",
-        active_mode
-    )
-
-    status = get_silence_status()
-    return {
-        "status": "ok",
-        "silence_mode": status,
-        "write_result": write_res,
-        "latest": write_res.get("latest", {})
-    }
-
-
-async def _auto_expire_silence_job():
-    try:
-        await deactivate_silence_mode(is_auto_expired=True)
-        active_mode = get_active_mode()
-        await collect_telemetry_cycle(active_mode)
-    except Exception as e:
-        db_log("ERROR", "SILENCE", f"Erreur lors de la fin automatique du mode Silence ! : {str(e)}", get_active_mode())
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _is_shutting_down
     _is_shutting_down = False
-    await init_http_client()
     init_all_databases()
     seed_simulation_db_if_empty()
+    await init_http_client()
+
     settings = get_settings_dict()
-    interval_s = max(15, int(settings.get("poll_interval_s", "120")))
+    try:
+        interval_s = max(15, min(3600, int(float(settings.get("poll_interval_s", "120")))))
+    except (ValueError, TypeError):
+        interval_s = 120
+
+    active_mode = get_active_mode()
+
+    # Démarrage de la boucle de télémétrie périodique et rétention
     scheduler.add_job(collect_telemetry_cycle, "interval", seconds=interval_s, id="telemetry_job", replace_existing=True)
     scheduler.add_job(prune_database_retention, "interval", hours=12, id="retention_prune_job", replace_existing=True)
     scheduler.start()
-    active_mode = get_active_mode()
-    db_log("INFO", "SYSTEM", f"Superviseur Nobis A10 démarré sur [{active_mode}] (cycle={interval_s}s).", active_mode)
 
-    # Démarrage automatique du pont Thermostat Matter (Google Home / Nest Hub Max)
-    try:
+    # Initialisation de la passerelle Matter
+    if matter_manager.is_enabled():
         await matter_manager.ensure_started()
+
+    # Premier cycle de collecte initial
+    try:
+        await collect_telemetry_cycle(active_mode)
     except Exception as e:
-        db_log("ERROR", "MATTER", f"Erreur démarrage pont Matter: {e}", active_mode)
+        db_log("ERROR", "STARTUP", f"Échec première collecte au démarrage : {str(e)}", active_mode)
 
     # Vérification et reprise d'un compte à rebours Silence ! actif
     st = get_silence_state()
     if st.get("active"):
-        end_ep = float(st.get("end_epoch", 0.0))
-        now_ep = time.time()
-        if now_ep >= end_ep:
+        end_ep = float(st.get("end_epoch") or 0.0)
+        rem_s = int(end_ep - time.time())
+        if rem_s <= 0:
             db_log("INFO", "SILENCE", "Mode Silence ! expiré pendant l'arrêt du superviseur : restauration immédiate.", active_mode)
             try:
                 await deactivate_silence_mode(is_auto_expired=True)
             except Exception as e:
                 db_log("ERROR", "SILENCE", f"Échec restauration Silence au démarrage: {e}", active_mode)
         else:
-            rem_s = int(end_ep - now_ep)
             end_dt = datetime.fromtimestamp(end_ep)
             scheduler.add_job(
                 _auto_expire_silence_job,
                 "date",
                 run_date=end_dt,
                 id="silence_timer_job",
-                replace_existing=True
+                replace_existing=True,
             )
             db_log("INFO", "SILENCE", f"Reprise du compte à rebours Silence ! ({rem_s}s restantes jusqu'à {end_dt.strftime('%H:%M:%S')}).", active_mode)
 
@@ -472,8 +158,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Nobis.Supervisor - Supervision Micronova & Pont Matter",
-    version="1.0.0",
-    lifespan=lifespan
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
 
@@ -495,11 +181,36 @@ _db_log_handler.setLevel(logging.ERROR)
 logging.getLogger().addHandler(_db_log_handler)
 
 
+_routes_cache = []
+
+
+def _get_allowed_methods_for_path(path: str) -> set:
+    global _routes_cache
+    if not _routes_cache:
+        def collect(router):
+            for route in router.routes:
+                if hasattr(route, "routes"):
+                    collect(route)
+                elif hasattr(route, "original_router"):
+                    collect(route.original_router)
+                elif hasattr(route, "path_regex") and hasattr(route, "methods"):
+                    _routes_cache.append((route.path_regex, route.methods))
+        collect(app)
+
+    methods = set()
+    for regex, r_methods in _routes_cache:
+        if regex.match(path):
+            methods.update(r_methods)
+    return methods
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     active_mode = get_active_mode()
     err_msg = f"{request.method} {request.url.path} -> {type(exc).__name__}: {str(exc)}"
     db_log("ERROR", "API", err_msg, active_mode)
+    if isinstance(exc, OverflowError) or "too large to convert to SQLite" in str(exc):
+        return JSONResponse(status_code=422, content={"detail": [{"loc": ["body"], "msg": "Entier hors limites pour SQLite", "type": "overflow_error"}]})
     return JSONResponse(status_code=500, content={"detail": f"Erreur interne : {str(exc)}"})
 
 
@@ -508,12 +219,34 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     active_mode = get_active_mode()
     severity = "ERROR" if exc.status_code >= 400 else "WARNING"
     db_log(severity, "API", f"{request.method} {request.url.path} [{exc.status_code}] : {exc.detail}", active_mode)
+    if exc.status_code == 400 and ("parsing the body" in str(exc.detail) or "JSONDecodeError" in str(exc.detail)):
+        return JSONResponse(status_code=422, content={"detail": [{"loc": ["body"], "msg": "Erreur décodage JSON", "type": "value_error.jsondecode"}]})
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
+    if request.method == "OPTIONS":
+        allowed = _get_allowed_methods_for_path(request.url.path)
+        if allowed:
+            allow_str = ", ".join(sorted(allowed))
+            headers = {
+                "Allow": allow_str,
+                "Access-Control-Allow-Methods": allow_str,
+                "Access-Control-Allow-Headers": "*",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "SAMEORIGIN",
+                "Referrer-Policy": "strict-origin-when-cross-origin",
+                "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+            }
+            return Response(status_code=200, headers=headers)
+
     response = await call_next(request)
+    if response.status_code == 405:
+        allowed = _get_allowed_methods_for_path(request.url.path)
+        if allowed:
+            response.headers["Allow"] = ", ".join(sorted(allowed))
+
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
@@ -523,11 +256,22 @@ async def security_headers_middleware(request: Request, call_next):
     return response
 
 
+# Inclusion des routeurs modulaires
+app.include_router(silence_router)
+app.include_router(matter_router)
+app.include_router(calibration_router)
+app.include_router(installer_router)
+app.include_router(stove_router)
+app.include_router(system_router)
+
+# Fichiers statiques et SPA
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
-@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse)
+@app.head("/", response_class=HTMLResponse, include_in_schema=False)
 async def serve_spa():
+    """Sert l'interface utilisateur web monopage (SPA) index.html."""
     index_file = os.path.join(STATIC_DIR, "index.html")
     no_cache = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
     if os.path.exists(index_file):
@@ -536,30 +280,24 @@ async def serve_spa():
     return HTMLResponse(content="<h1>Nobis.Supervisor API Active</h1>", headers=no_cache)
 
 
-@app.api_route("/calibration", methods=["GET", "HEAD"], response_class=HTMLResponse)
-async def serve_calibration_wizard():
-    calib_file = os.path.join(BASE_DIR, "src", "ui", "wizard_calibration.html")
-    no_cache = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
-    if os.path.exists(calib_file):
-        with open(calib_file, "r", encoding="utf-8") as f:
-            return HTMLResponse(content=f.read(), headers=no_cache)
-    raise HTTPException(status_code=404, detail="Page de calibration introuvable")
-
-
-@app.api_route("/manifest.json", methods=["GET", "HEAD"])
+@app.get("/manifest.json", responses={200: {"content": {"application/manifest+json": {}}}})
+@app.head("/manifest.json", include_in_schema=False)
 async def serve_manifest():
+    """Sert le fichier de configuration PWA manifest.json."""
     manifest_file = os.path.join(STATIC_DIR, "manifest.json")
     if os.path.exists(manifest_file):
         return FileResponse(
             manifest_file,
             media_type="application/manifest+json",
-            headers={"Cache-Control": "no-cache, no-store, must-revalidate"}
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
         )
     raise HTTPException(status_code=404, detail="manifest.json introuvable")
 
 
-@app.api_route("/sw.js", methods=["GET", "HEAD"])
+@app.get("/sw.js", responses={200: {"content": {"application/javascript": {}}}})
+@app.head("/sw.js", include_in_schema=False)
 async def serve_service_worker():
+    """Sert le script du Service Worker PWA sw.js."""
     sw_file = os.path.join(STATIC_DIR, "sw.js")
     if os.path.exists(sw_file):
         return FileResponse(
@@ -567,25 +305,26 @@ async def serve_service_worker():
             media_type="application/javascript",
             headers={
                 "Service-Worker-Allowed": "/",
-                "Cache-Control": "no-cache, no-store, must-revalidate"
-            }
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+            },
         )
     raise HTTPException(status_code=404, detail="sw.js introuvable")
 
 
 @app.get("/health")
 async def healthcheck():
+    """Point de contrôle de santé (healthcheck) pour Docker et les sondes de disponibilité."""
     mode = get_active_mode()
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "active_mode": mode,
-        "active_db": os.path.basename(MODE_DB_PATHS[mode]),
-        "comm_status": get_comm_status()
+        "active_db": os.path.basename(MODE_DB_PATHS.get(mode, MODE_DB_PATHS["simulation"])),
+        "comm_status": get_comm_status(),
     }
 
 
-@app.get("/api/events")
+@app.get("/api/events", responses={200: {"content": {"text/event-stream": {}}}})
 async def api_sse_events(request: Request):
     """Flux temps réel Server-Sent Events (SSE) poussant chaque mise à jour de télémétrie."""
     queue: asyncio.Queue = asyncio.Queue(maxsize=10)
@@ -621,7 +360,7 @@ async def api_sse_events(request: Request):
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
-        }
+        },
     )
 
 
@@ -640,11 +379,11 @@ async def api_latest():
 
     stats = {
         "conso_week_kg": latest_dict.get("conso_week_kg", 0.0),
-        "conso_month_kg": latest_dict.get("conso_month_kg", 0.0)
+        "conso_month_kg": latest_dict.get("conso_month_kg", 0.0),
     }
     return {
         "active_mode": active_mode,
-        "active_db_file": os.path.basename(MODE_DB_PATHS[active_mode]),
+        "active_db_file": os.path.basename(MODE_DB_PATHS.get(active_mode, MODE_DB_PATHS["simulation"])),
         "latest": latest_dict,
         "comm_status": get_comm_status(),
         "settings": get_public_settings_dict(),
@@ -652,12 +391,13 @@ async def api_latest():
         "consumption_stats": stats,
         "pellet_quality": latest_dict.get("pellet_quality"),
         "exhaust_quality": latest_dict.get("exhaust_quality"),
-        "silence_mode": get_silence_status()
+        "silence_mode": get_silence_status(),
     }
 
 
 @app.get("/api/dashboard")
 async def api_dashboard(range_key: str = Query("24h")):
+    """Fournit les séries temporelles échantillonnées pour les graphiques du tableau de bord."""
     active_mode = get_active_mode()
     now_epoch = int(time.time())
     durations = {
@@ -666,59 +406,37 @@ async def api_dashboard(range_key: str = Query("24h")):
         "24h": 24 * 3600,
         "7j": 7 * 86400,
         "30j": 30 * 86400,
-        "3M": 90 * 86400
+        "3M": 90 * 86400,
     }
-    duration_s = durations.get(range_key, 86400)
-    min_epoch = now_epoch - duration_s
+    min_epoch = now_epoch - durations.get(range_key, 86400)
 
     conn = get_db(active_mode)
     try:
-        latest = conn.execute("SELECT * FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
-    finally:
-        conn.close()
+        if active_mode == "agua_cloud":
+            rows = conn.execute("""
+                SELECT * FROM telemetry
+                WHERE epoch >= ?
+                  AND id NOT BETWEEN 1 AND 27
+                  AND NOT (status_code != -1 AND (raw_buffer_json = '{}' OR raw_buffer_json IS NULL))
+                ORDER BY epoch ASC
+            """, (min_epoch,)).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM telemetry WHERE epoch >= ? ORDER BY epoch ASC", (min_epoch,)).fetchall()
 
-    if not latest:
-        await collect_telemetry_cycle(active_mode)
-
-    # Agrégation par tranche SQL directe pour les longues périodes (jusqu'à ~360 points max)
-    bucket_s = max(1, duration_s // 360)
-    conn = get_db(active_mode)
-    try:
-        latest = conn.execute("SELECT * FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
-        latest_dict = dict(latest) if latest else {}
+        latest_row = conn.execute("SELECT * FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
+        latest_dict = dict(latest_row) if latest_row else {}
         if latest_dict:
             enrich_telemetry_record(conn, latest_dict)
-
-        # Filtre d'exclusion des données reconstituées ou orphelines (ex: id 1 à 27)
-        where_clause = "epoch >= ?"
-        params: List[Any] = [min_epoch]
-        if active_mode == "agua_cloud":
-            where_clause += " AND id NOT BETWEEN 1 AND 27 AND NOT (status_code != -1 AND (raw_buffer_json = '{}' OR raw_buffer_json IS NULL))"
-
-        if bucket_s <= 120:
-            rows = conn.execute(
-                f"SELECT * FROM telemetry WHERE {where_clause} ORDER BY epoch ASC",
-                tuple(params)
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                f"""
-                SELECT * FROM telemetry
-                WHERE id IN (
-                    SELECT MAX(id) FROM telemetry
-                    WHERE {where_clause}
-                    GROUP BY CAST(epoch / ? AS INTEGER)
-                )
-                ORDER BY epoch ASC
-                """,
-                tuple(params + [bucket_s])
-            ).fetchall()
     finally:
         conn.close()
 
-    sampled = [dict(r) for r in rows] if rows else []
-    if latest_dict and sampled and sampled[-1]["epoch"] != latest_dict["epoch"]:
-        sampled.append(latest_dict)
+    total_pts = len(rows)
+    max_pts = 600
+    if total_pts > max_pts:
+        step = total_pts / max_pts
+        sampled = [dict(rows[int(i * step)]) for i in range(max_pts)]
+    else:
+        sampled = [dict(r) for r in rows]
 
     if len(sampled) == 1:
         dup = dict(sampled[0])
@@ -730,12 +448,12 @@ async def api_dashboard(range_key: str = Query("24h")):
 
     stats = {
         "conso_week_kg": latest_dict.get("conso_week_kg", 0.0),
-        "conso_month_kg": latest_dict.get("conso_month_kg", 0.0)
+        "conso_month_kg": latest_dict.get("conso_month_kg", 0.0),
     }
 
     return {
         "active_mode": active_mode,
-        "active_db_file": os.path.basename(MODE_DB_PATHS[active_mode]),
+        "active_db_file": os.path.basename(MODE_DB_PATHS.get(active_mode, MODE_DB_PATHS["simulation"])),
         "latest": latest_dict,
         "comm_status": get_comm_status(),
         "series": sampled,
@@ -744,914 +462,39 @@ async def api_dashboard(range_key: str = Query("24h")):
         "consumption_stats": stats,
         "pellet_quality": latest_dict.get("pellet_quality"),
         "exhaust_quality": latest_dict.get("exhaust_quality"),
-        "silence_mode": get_silence_status()
+        "silence_mode": get_silence_status(),
     }
 
 
 @app.post("/api/poll-now")
 async def api_poll_now():
+    """Déclenche une interrogation manuelle immédiate du poêle."""
     record = await collect_telemetry_cycle()
     return {"status": "ok", "latest": record, "comm_status": get_comm_status()}
 
 
-@app.post("/api/command")
-async def api_command(payload: CommandPayload):
-    return await execute_register_write(payload.reg_key, payload.value, payload.offset)
-
-
-@app.post("/api/command-batch")
-async def api_command_batch(payload: BatchCommandPayload):
-    cmds = [{"reg_key": c.reg_key, "value": c.value, "offset": c.offset} for c in payload.commands]
-    return await execute_registers_batch_write(cmds)
-
-
-@app.post("/api/stove/set")
-async def api_stove_set(payload: StoveSetPayload):
-    """Point d'entrée unifié de pilotage pour le composant modulaire NobisPilotage (temp, fan, power)."""
-    cmd_type = (payload.type or "").strip().lower()
-    zone = (payload.zone or "salon").strip().lower()
-    val = float(payload.value)
-
-    if cmd_type == "temp":
-        zone_map = {
-            "salon": ("temp_amb_setpoint", 33122),
-            "front": ("temp_amb_setpoint", 33122),
-            "sx": ("duct_left_setpoint", 33126),
-            "dx": ("duct_right_setpoint", 33124),
-        }
-        if zone not in zone_map:
-            raise HTTPException(status_code=400, detail=f"Zone de température inconnue : {zone}")
-        reg_key, offset = zone_map[zone]
-        if val <= 6.0:
-            mapped_val = 7.0
-        elif val >= 31.0 and val < 41.0:
-            mapped_val = 41.0
-        else:
-            mapped_val = max(7.0, min(41.0, round(val * 2.0) / 2.0))
-        return await execute_register_write(reg_key, mapped_val, offset)
-
-    elif cmd_type == "fan":
-        zone_map = {
-            "salon": ("fan_front_speed", 33132),
-            "front": ("fan_front_speed", 33132),
-            "sx": ("duct_left_speed", 33136),
-            "dx": ("duct_right_speed", 33134),
-        }
-        if zone not in zone_map:
-            raise HTTPException(status_code=400, detail=f"Zone de ventilation inconnue : {zone}")
-        reg_key, offset = zone_map[zone]
-        iv = int(round(val))
-        if iv < 0 or iv > 8:
-            raise HTTPException(status_code=400, detail=f"Vitesse de ventilation hors plage (0..8) : {iv}")
-        return await execute_register_write(reg_key, float(iv), offset)
-
-    elif cmd_type == "power":
-        iv = int(round(val))
-        if iv < 0 or iv > 8:
-            raise HTTPException(status_code=400, detail=f"Niveau de puissance hors plage (0..8) : {iv}")
-        if iv == 0:
-            return {
-                "status": "ok",
-                "reg_key": "power_level",
-                "new_value": 0.0,
-                "message": "P0 (Éco) est un ralenti automatique enclenché lorsque la température atteint la consigne."
-            }
-        if iv == 8:
-            return await execute_register_write("fun_pwf_set", 1.0, 33154)
-        active_mode = get_active_mode()
-        regs = get_registers_dict(active_mode)
-        pwf_cur = float(regs.get("fun_pwf_set", {}).get("current_val", 0.0))
-        if pwf_cur > 0.0:
-            await execute_register_write("fun_pwf_set", 0.0, 33154, skip_poll=True)
-        return await execute_register_write("power_level", float(iv), 33130)
-
-    raise HTTPException(status_code=400, detail=f"Type de commande inconnu : {cmd_type}")
-
-
-@app.post("/api/silence/activate")
-async def api_silence_activate(payload: SilenceActivatePayload = Body(default=SilenceActivatePayload())):
-    """Active le mode Silence intelligent : si poêle éteint -> toutes consignes en hors gel (7°C) ; si allumé -> coupure Boost/Éco/Chrono, activation Auto total, consignes en hors gel (passage P0 et Ventil 0 sans extinction), compte à rebours et restauration automatique."""
-    return await activate_silence_mode(payload.duration_hours)
-
-
-@app.post("/api/silence/deactivate")
-async def api_silence_deactivate(payload: Optional[SilenceDeactivatePayload] = Body(default=None)):
-    """Désactive le mode Silence intelligent et restaure immédiatement les consignes et paramètres initiaux (avec surcharges éventuelles)."""
-    override_cmds = payload.override_commands if payload else None
-    return await deactivate_silence_mode(is_auto_expired=False, override_commands=override_cmds)
-
-
-@app.get("/api/silence/status")
-async def api_silence_status():
-    """Retourne l'état actuel du mode Silence intelligent, le compte à rebours restant, le statut du poêle et les valeurs initiales."""
-    return get_silence_status()
-
-
-# ==============================================================================
-# PONT THERMOSTAT MATTER LOCAL (GOOGLE HOME / NEST HUB MAX / APPLE HOME)
-# ==============================================================================
-@app.get("/api/matter/status")
-async def api_matter_status():
-    """Retourne l'état du pont Thermostat Matter, le QR Code SVG et le code d'appairage à 11 chiffres."""
-    return await matter_manager.get_status()
-
-
-@app.post("/api/matter/restart")
-async def api_matter_restart():
-    """Redémarre le pont Thermostat Matter."""
-    await matter_manager.stop()
-    return await matter_manager.ensure_started()
-
-
-@app.post("/api/matter/factory-reset")
-async def api_matter_factory_reset():
-    """Réinitialise l'appairage Matter et génère un nouveau code d'appairage."""
-    return await matter_manager.factory_reset()
-
-
-@app.post("/api/matter/webhook")
-async def api_matter_webhook(payload: MatterWebhookPayload, request: Request):
-    """Point d'entrée interne appelé par le pont Matter lors d'une commande Google Home / Nest Hub Max."""
-    client_ip = request.client.host if request.client else ""
-    if client_ip not in ("127.0.0.1", "::1", "localhost", "testclient"):
-        raise HTTPException(status_code=403, detail="Accès réservé au pont local Matter (127.0.0.1)")
-
-    action = payload.action.strip()
-    active_mode = get_active_mode()
-
-    if action == "set_power":
-        target_state = (payload.state or "OFF").upper()
-        cmd_val = 85.0 if target_state == "ON" else 170.0
-        label_action = "Allumage (85)" if target_state == "ON" else "Extinction (170)"
-        db_log(
-            "COMMAND",
-            "GOOGLE_MATTER",
-            f"Commande Google Home / Nest Hub Max reçue : {label_action} du poêle.",
-            active_mode,
-        )
-        res = await execute_register_write("status_code", cmd_val, 232)
-        return {"status": "ok", "action": action, "state": target_state, "result": res}
-
-    elif action == "set_temperature":
-        if payload.temperature is None:
-            raise HTTPException(status_code=400, detail="Température Matter requise")
-        temp_c = float(max(7, min(40, round(payload.temperature))))
-        db_log(
-            "COMMAND",
-            "GOOGLE_MATTER",
-            f"Commande Google Home / Nest Hub Max reçue : Consigne T° Ambiante réglée à {temp_c:g} °C.",
-            active_mode,
-        )
-        res = await execute_register_write("temp_amb_setpoint", temp_c, 33122)
-        return {"status": "ok", "action": action, "temperature": temp_c, "result": res}
-
-    raise HTTPException(status_code=400, detail=f"Action Matter inconnue : {action}")
-
-
-
-@app.post("/api/refill-hopper")
-async def api_refill_hopper(payload: Optional[RefillHopperPayload] = Body(default=None)):
-    bags_added = payload.bags_added if payload is not None else 2.0
-    active_mode = get_active_mode()
-
-    conn = get_db(active_mode)
-    try:
-        last_row = conn.execute("SELECT id, pellet_hopper_pct FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
-        prev_pct = float(last_row["pellet_hopper_pct"]) if last_row else 50.0
-        if payload is not None and payload.bags_added == 1.0 and payload.level_pct is None and payload.target_pct == 100.0:
-            added_pct = (PELLET_BAG_WEIGHT_KG / HOPPER_CAPACITY_KG) * 100.0
-            new_pct = round(min(100.0, prev_pct + added_pct), 1)
-        else:
-            req_pct = (payload.level_pct if (payload is not None and payload.level_pct is not None) else (payload.target_pct if payload is not None else 100.0))
-            new_pct = round(min(100.0, req_pct), 1)
-
-        if last_row:
-            conn.execute(
-                "UPDATE telemetry SET pellet_hopper_pct = ?, popup_pellet_empty = 0, epoch = ? WHERE id = ?",
-                (new_pct, int(time.time()), last_row["id"])
-            )
-            conn.commit()
-    finally:
-        conn.close()
-
-    # Mise à jour du stock de sacs de 15 kg et du compteur saisonnier
-    settings = get_settings_dict()
-    try:
-        cur_stock = float(settings.get("pellet_bags_stock", "40"))
-    except (ValueError, TypeError):
-        cur_stock = 40.0
-    try:
-        cur_used = float(settings.get("pellet_bags_used_season", "0"))
-    except (ValueError, TypeError):
-        cur_used = 0.0
-
-    new_stock = max(0.0, round(cur_stock - bags_added, 1))
-    new_used = round(cur_used + bags_added, 1)
-
-    sconn = get_sys_db()
-    try:
-        sconn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('pellet_bags_stock', ?)", (str(new_stock),))
-        sconn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('pellet_bags_used_season', ?)", (str(new_used),))
-        sconn.commit()
-    finally:
-        sconn.close()
-
-    kg_added = round(bags_added * PELLET_BAG_WEIGHT_KG, 1)
-    db_log(
-        "COMMAND",
-        "HOPPER",
-        f"Trémie rechargée (+{bags_added:g} sac(s) / +{kg_added:g} kg) -> {new_pct}% (Capacité {int(HOPPER_CAPACITY_KG)} kg | Stock restant: {new_stock:g} sacs).",
-        active_mode
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        openapi_version=app.openapi_version,
+        description=app.description,
+        routes=app.routes,
     )
-    latest = await collect_telemetry_cycle(active_mode)
-    conn = get_db(active_mode)
-    try:
-        new_last = conn.execute("SELECT id FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
-        if new_last:
-            conn.execute("UPDATE telemetry SET pellet_hopper_pct = ? WHERE id = ?", (new_pct, new_last["id"]))
-            conn.commit()
-    finally:
-        conn.close()
-    latest["pellet_hopper_pct"] = new_pct
-    return {
-        "status": "ok",
-        "pellet_hopper_pct": new_pct,
-        "hopper_capacity_kg": HOPPER_CAPACITY_KG,
-        "bags_stock": new_stock,
-        "pellet_bags_stock": new_stock,
-        "bags_used_season": new_used,
-        "latest": latest
-    }
-
-
-@app.post("/api/pellet-batch/raz")
-async def api_pellet_batch_raz(payload: Dict[str, Any] = Body(default={})):
-    """Réinitialise l'évaluation algorithmique lors d'un changement de marque de granulés."""
-    brand = str(payload.get("pellet_brand") or "Nouveau Lot Certifié A1")
-    return await reset_pellet_batch_calibration(brand)
-
-
-@app.get("/api/pellet-batch/status")
-async def api_pellet_batch_status():
-    """Retourne l'état courant du lot de granulés évalué."""
-    return get_pellet_batch_state()
-
-
-# ==============================================================================
-# API CALIBRATION ASSISTÉE & EN ARRIÈRE-PLAN (NOBIS A10)
-# ==============================================================================
-
-@app.get("/api/calibration/status")
-async def api_calibration_status():
-    """Retourne l'état complet de la session de calibration active (persiste en arrière-plan)."""
-    from src.calibration.calibration_service import get_calibration_service
-    calib_srv = get_calibration_service()
-
-    active_mode = get_active_mode()
-    conn = get_db(active_mode)
-    try:
-        last_row = conn.execute("SELECT * FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
-        latest = dict(last_row) if last_row else {}
-    finally:
-        conn.close()
-
-    return calib_srv.get_status(latest)
-
-
-@app.post("/api/calibration/step1-start")
-async def api_calibration_step1_start(payload: Dict[str, Any] = Body(default={})):
-    """Étape 1 : Choix du mode et désactivation automatique de POWERFUL (P8)."""
-    from src.calibration.calibration_service import get_calibration_service, build_sample_from_record
-    calib_srv = get_calibration_service()
-    mode_str = str(payload.get("mode") or "COMBINED_BOTH")
-
-    active_mode = get_active_mode()
-    conn = get_db(active_mode)
-    try:
-        last_row = conn.execute("SELECT * FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
-        latest = dict(last_row) if last_row else {}
-    finally:
-        conn.close()
-
-    sample = build_sample_from_record(latest)
-
-    def _disable_pwf_cb():
-        try:
-            asyncio.create_task(execute_register_write("fun_pwf_set", 0.0, 33154, skip_poll=True))
-            return True
-        except Exception:
-            return False
-
-    return calib_srv.start_preflight(mode_str, sample, disable_p8_fn=_disable_pwf_cb)
-
-
-@app.post("/api/calibration/step2-confirm-al03")
-async def api_calibration_step2_confirm():
-    """Étape 2 : Confirmation de l'état initial AL-03 et réarmement automatique."""
-    from src.calibration.calibration_service import get_calibration_service, build_sample_from_record
-    calib_srv = get_calibration_service()
-
-    active_mode = get_active_mode()
-    conn = get_db(active_mode)
-    try:
-        last_row = conn.execute("SELECT * FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
-        latest = dict(last_row) if last_row else {}
-    finally:
-        conn.close()
-
-    sample = build_sample_from_record(latest)
-
-    def _reset_alarm_cb():
-        try:
-            asyncio.create_task(execute_register_write("status_code", 85.0, 232, skip_poll=True))
-            return True
-        except Exception:
-            return False
-
-    return calib_srv.confirm_initial_al03(sample, reset_alarm_fn=_reset_alarm_cb)
-
-
-@app.post("/api/calibration/step3-load-charge")
-async def api_calibration_step3_load(payload: Dict[str, Any] = Body(default={})):
-    """Étape 3 : Verrouille le poids du sac étalon et lance l'acquisition en arrière-plan."""
-    from src.calibration.calibration_service import get_calibration_service, build_sample_from_record
-    calib_srv = get_calibration_service()
-    weighed_kg = float(payload.get("weighed_bag_kg", 15.0))
-    aspirated_g = float(payload.get("aspirated_priming_grams", 0.0))
-
-    active_mode = get_active_mode()
-    conn = get_db(active_mode)
-    try:
-        last_row = conn.execute("SELECT * FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
-        latest = dict(last_row) if last_row else {}
-    finally:
-        conn.close()
-
-    sample = build_sample_from_record(latest)
-    return calib_srv.load_weighed_charge(sample, weighed_bag_kg=weighed_kg, aspirated_priming_g=aspirated_g)
-
-
-@app.post("/api/calibration/step5-apply")
-async def api_calibration_step5_apply():
-    """Étape 5 : Application en 1 clic des Offsets 70 et 71 dans l'EEPROM Micronova."""
-    from src.calibration.calibration_service import get_calibration_service
-    calib_srv = get_calibration_service()
-
-    written_vals = {}
-
-    def _write_reg(reg: int, val: int) -> bool:
-        written_vals[reg] = val
-        rk = "trim_pellet_pct" if reg == 70 else "trim_exhaust_pct"
-        asyncio.create_task(execute_register_write(rk, float(val), reg))
-        return True
-
-    def _read_reg(reg: int) -> int:
-        return written_vals.get(reg, 0)
-
-    return calib_srv.apply_recommendations(write_fn=_write_reg, read_fn=_read_reg)
-
-
-@app.post("/api/calibration/reset")
-async def api_calibration_reset():
-    """Réinitialise la calibration pour repartir de zéro si souhaité."""
-    from src.calibration.calibration_service import get_calibration_service
-    calib_srv = get_calibration_service()
-    return calib_srv.reset_session()
-
-
-
-@app.post("/api/sync-clock")
-async def api_sync_clock():
-    now = datetime.now()
-    clock_commands = [
-        {"reg_key": "clock_hour_set", "offset": 34048, "value": float(now.hour)},
-        {"reg_key": "clock_minute_set", "offset": 34049, "value": float(now.minute)},
-        {"reg_key": "calendar_day_set", "offset": 34050, "value": float(now.day)},
-        {"reg_key": "calendar_month_set", "offset": 34051, "value": float(now.month)},
-        {"reg_key": "calendar_year_set", "offset": 34052, "value": float(now.year - 2000)},
-        {"reg_key": "calendar_day_week_set", "offset": 34053, "value": float(now.isoweekday())},
-    ]
-    await execute_registers_batch_write(clock_commands, skip_poll=True)
-    active_mode = get_active_mode()
-    db_log("COMMAND", "RTC_SYNC", f"Horloge synchronisée sur {now.strftime('%H:%M %d/%m/%Y')}", active_mode)
-    latest = await collect_telemetry_cycle(active_mode)
-    return {"status": "ok", "synced_to": now.strftime("%H:%M %d/%m/%Y"), "latest": latest}
-
-
-@app.post("/api/rollback/{audit_id}")
-async def api_rollback(audit_id: int):
-    active_mode = get_active_mode()
-    conn = get_db(active_mode)
-    try:
-        row = conn.execute("SELECT * FROM command_audit WHERE id = ?", (audit_id,)).fetchone()
-    finally:
-        conn.close()
-    if not row:
-        raise HTTPException(status_code=404, detail="Entrée d'audit introuvable")
-    return await execute_register_write(row["reg_key"], float(row["old_value"]), int(row["offset"]))
-
-
-# ==============================================================================
-# SÉCURITÉ ACCÈS INSTALLATEUR (AUTHENTIFICATION PAR MOT DE PASSE AGUA CLOUD)
-# ==============================================================================
-_installer_sessions: Dict[str, float] = {}  # token -> expires_at
-_failed_auth_attempts: Dict[str, List[float]] = {}  # ip -> timestamps
-
-
-def _clean_expired_installer_sessions():
-    now_ts = time.time()
-    for tok in list(_installer_sessions.keys()):
-        if _installer_sessions[tok] <= now_ts:
-            _installer_sessions.pop(tok, None)
-
-
-def is_installer_authenticated(request: Request) -> bool:
-    _clean_expired_installer_sessions()
-    tok = request.headers.get("X-Installer-Token", "").strip()
-    return bool(tok and tok in _installer_sessions and _installer_sessions[tok] > time.time())
-
-
-@app.post("/api/installer/verify")
-async def api_installer_verify(payload: InstallerVerifyPayload, request: Request):
-    """Vérifie le mot de passe Agua Cloud pour déverrouiller l'accès au menu installateur et registres."""
-    client_ip = request.client.host if request.client else "unknown"
-    now_ts = time.time()
-
-    # Protection anti force-brute (max 5 échecs consécutifs en 60 secondes par IP)
-    attempts = [t for t in _failed_auth_attempts.get(client_ip, []) if now_ts - t < 60.0]
-    if len(attempts) >= 5:
-        db_log("WARNING", "SECURITY", f"Blocage anti force-brute accès installateur déclenché pour l'IP {client_ip}.", get_active_mode())
-        raise HTTPException(
-            status_code=429,
-            detail="Trop de tentatives erronées. Veuillez patienter 60 secondes avant de réessayer."
-        )
-
-    settings = get_settings_dict()
-    stored_pwd = (settings.get("agua_password") or "").strip()
-    active_mode = get_active_mode()
-
-    if not stored_pwd:
-        db_log("WARNING", "SECURITY", "Tentative d'accès installateur rejetée : aucun mot de passe Agua Cloud configuré.", active_mode)
-        raise HTTPException(
-            status_code=400,
-            detail="Aucun mot de passe Agua Cloud n'est configuré dans les réglages. Veuillez d'abord le renseigner."
-        )
-
-    # Comparaison à temps constant contre les attaques temporelles (timing attacks)
-    submitted_bytes = payload.password.strip().encode("utf-8")
-    stored_bytes = stored_pwd.encode("utf-8")
-    if not hmac.compare_digest(submitted_bytes, stored_bytes):
-        attempts.append(now_ts)
-        _failed_auth_attempts[client_ip] = attempts
-        db_log("WARNING", "SECURITY", f"Échec d'authentification installateur depuis {client_ip} : mot de passe incorrect.", active_mode)
-        raise HTTPException(status_code=401, detail="Mot de passe Agua Cloud incorrect.")
-
-    # Succès : réinitialiser le compteur d'échecs
-    _failed_auth_attempts.pop(client_ip, None)
-    token = secrets.token_hex(24)
-    # Session valide 2 heures (7200s)
-    expires_at = now_ts + 7200.0
-    _installer_sessions[token] = expires_at
-
-    db_log("INFO", "SECURITY", f"Accès menu installateur déverrouillé avec succès (IP {client_ip}).", active_mode)
-    return {
-        "status": "ok",
-        "success": True,
-        "authenticated": True,
-        "token": token,
-        "expires_in_s": 7200
-    }
-
-
-@app.get("/api/installer/status")
-async def api_installer_status(request: Request):
-    """Retourne l'état d'authentification actuel du menu installateur."""
-    settings = get_settings_dict()
-    has_pwd = bool((settings.get("agua_password") or "").strip())
-    authenticated = is_installer_authenticated(request)
-    return {
-        "authenticated": authenticated,
-        "has_password_configured": has_pwd
-    }
-
-
-@app.post("/api/installer/lock")
-async def api_installer_lock(request: Request):
-    """Verrouille immédiatement la session du menu installateur."""
-    tok = request.headers.get("X-Installer-Token", "").strip()
-    if tok:
-        _installer_sessions.pop(tok, None)
-    active_mode = get_active_mode()
-    db_log("INFO", "SECURITY", "Verrouillage manuel du menu installateur.", active_mode)
-    return {"status": "ok", "authenticated": False}
-
-
-@app.get("/api/snapshots")
-async def api_list_snapshots():
-    active_mode = get_active_mode()
-    conn = get_db(active_mode)
-    try:
-        rows = conn.execute("SELECT id, timestamp, name, comm_mode, registers_json, raw_buffer_json FROM registers_snapshots ORDER BY id DESC LIMIT 100").fetchall()
-    finally:
-        conn.close()
-    result = []
-    for r in rows:
-        regs_d = json.loads(r["registers_json"] or "{}")
-        raw_d = json.loads(r["raw_buffer_json"] or "{}")
-        result.append({
-            "id": r["id"],
-            "timestamp": r["timestamp"],
-            "name": r["name"],
-            "comm_mode": r["comm_mode"],
-            "registers_count": len(regs_d),
-            "raw_offsets_count": len(raw_d),
-            "registers": regs_d,
-            "raw_buffer": raw_d
-        })
-    return result
-
-
-@app.post("/api/snapshots")
-async def api_create_snapshot(payload: SnapshotCreatePayload = Body(default=SnapshotCreatePayload())):
-    active_mode = get_active_mode()
-    if payload.refresh_live:
-        await collect_telemetry_cycle(active_mode)
-    regs = get_registers_dict(active_mode)
-    conn = get_db(active_mode)
-    try:
-        last_row = conn.execute("SELECT raw_buffer_json FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
-        raw_json_str = last_row["raw_buffer_json"] if (last_row and last_row["raw_buffer_json"]) else "{}"
-
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        snap_name = (payload.name or "").strip() or f"Snapshot {now_str}"
-        regs_snapshot = {
-            k: {"offset": v["offset"], "label": v["label"], "category": v["category"], "unit": v["unit"], "value": v["current_val"]}
-            for k, v in regs.items()
-        }
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO registers_snapshots (timestamp, name, comm_mode, registers_json, raw_buffer_json) VALUES (?, ?, ?, ?, ?)",
-            (now_str, snap_name, active_mode, json.dumps(regs_snapshot), raw_json_str)
-        )
-        snap_id = cur.lastrowid
-        conn.commit()
-    finally:
-        conn.close()
-    db_log("INFO", "SNAPSHOT", f"Snapshot #{snap_id} créé : '{snap_name}'.", active_mode)
-    return {"status": "ok", "id": snap_id, "name": snap_name, "timestamp": now_str}
-
-
-@app.post("/api/snapshots/{snap_id}/restore")
-async def api_restore_snapshot(snap_id: int):
-    active_mode = get_active_mode()
-    conn = get_db(active_mode)
-    try:
-        row = conn.execute("SELECT * FROM registers_snapshots WHERE id = ?", (snap_id,)).fetchone()
-    finally:
-        conn.close()
-    if not row:
-        raise HTTPException(status_code=404, detail="Snapshot introuvable")
-    snap_regs = json.loads(row["registers_json"] or "{}")
-    current_regs = get_registers_dict(active_mode)
-    batch_cmds: List[Dict[str, Any]] = []
-    for rk, meta in snap_regs.items():
-        if rk == "status_code":
-            continue
-        target_val = float(meta.get("value", 0))
-        cur_val = float(current_regs.get(rk, {}).get("current_val", target_val))
-        if abs(target_val - cur_val) > 1e-4:
-            batch_cmds.append({"reg_key": rk, "value": target_val, "offset": int(meta.get("offset", 0))})
-    if batch_cmds:
-        await execute_registers_batch_write(batch_cmds, skip_poll=True)
-    latest = await collect_telemetry_cycle(active_mode)
-    return {"status": "ok", "restored_registers": len(batch_cmds), "latest": latest}
-
-
-@app.delete("/api/snapshots/{snap_id}")
-async def api_delete_snapshot(snap_id: int):
-    active_mode = get_active_mode()
-    conn = get_db(active_mode)
-    try:
-        conn.execute("DELETE FROM registers_snapshots WHERE id = ?", (snap_id,))
-        conn.commit()
-    finally:
-        conn.close()
-    return {"status": "ok"}
-
-
-def sanitize_csv_cell(val: Any) -> str:
-    """Neutralise le risque d'injection de formules CSV (CWE-1236 / OWASP Formula Injection)."""
-    s = str(val if val is not None else "")
-    if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
-        s = "'" + s
-    return s.replace(";", ",").replace("\r", " ").replace("\n", " ")
-
-
-@app.get("/api/snapshots/{snap_id}/export-csv")
-async def api_export_snapshot_csv(snap_id: int):
-    active_mode = get_active_mode()
-    conn = get_db(active_mode)
-    try:
-        row = conn.execute("SELECT * FROM registers_snapshots WHERE id = ?", (snap_id,)).fetchone()
-    finally:
-        conn.close()
-    if not row:
-        raise HTTPException(status_code=404, detail="Snapshot introuvable")
-
-    snap_regs = json.loads(row["registers_json"] or "{}")
-    raw_buf = json.loads(row["raw_buffer_json"] or "{}")
-
-    def generate():
-        yield "\ufefftype_donnee;cle_registre;offset;categorie;description;valeur;unite\r\n"
-        for rk, m in snap_regs.items():
-            val_str = f"{float(m.get('value', 0)):.2f}".replace(".", ",")
-            desc = sanitize_csv_cell(m.get("label", ""))
-            yield f"CATALOG_REGISTER;{sanitize_csv_cell(rk)};{m.get('offset')};{sanitize_csv_cell(m.get('category'))};{desc};{val_str};{sanitize_csv_cell(m.get('unit', ''))}\r\n"
-        for off_k, off_v in sorted(raw_buf.items(), key=lambda x: int(x[0])):
-            val_str = f"{float(off_v):.2f}".replace(".", ",")
-            yield f"RAW_BUFFER_OFFSET;OFFSET_{off_k};{off_k};RAW_BUFFER;Offset mémoire brut #{off_k};{val_str};raw\r\n"
-
-    filename = f"snapshot_{snap_id}_{active_mode}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
-    return StreamingResponse(
-        generate(),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-    )
-
-
-@app.get("/api/audit")
-async def api_get_audit():
-    conn = get_db(get_active_mode())
-    try:
-        rows = conn.execute("SELECT * FROM command_audit ORDER BY id DESC LIMIT 100").fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
-
-
-@app.get("/api/logs")
-async def api_get_logs(severity: str = Query("ALL")):
-    conn = get_db(get_active_mode())
-    try:
-        sev = (severity or "ALL").strip().upper()
-        if sev == "ALL":
-            rows = conn.execute("SELECT * FROM app_logs ORDER BY id DESC LIMIT 250").fetchall()
-        elif sev in ("WARNING", "WARN"):
-            rows = conn.execute("SELECT * FROM app_logs WHERE severity IN ('WARNING', 'WARN') ORDER BY id DESC LIMIT 250").fetchall()
-        else:
-            rows = conn.execute("SELECT * FROM app_logs WHERE severity = ? ORDER BY id DESC LIMIT 250", (sev,)).fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
-
-
-@app.post("/api/logs/client-error")
-async def api_log_client_error(payload: ClientErrorPayload):
-    severity = payload.severity.strip().upper()
-    source = payload.source.strip()[:25]
-    message = payload.message[:500]
-    active_mode = get_active_mode()
-    db_log(severity, source, message, active_mode)
-    return {"status": "ok"}
-
-
-@app.get("/api/export-logs-csv")
-async def api_export_logs_csv(severity: str = Query("ALL")):
-    active_mode = get_active_mode()
-    conn = get_db(active_mode)
-    try:
-        sev = (severity or "ALL").strip().upper()
-        if sev == "ALL":
-            rows = conn.execute("SELECT id, timestamp, severity, source, message FROM app_logs ORDER BY id DESC").fetchall()
-        elif sev in ("WARNING", "WARN"):
-            rows = conn.execute("SELECT id, timestamp, severity, source, message FROM app_logs WHERE severity IN ('WARNING', 'WARN') ORDER BY id DESC").fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT id, timestamp, severity, source, message FROM app_logs WHERE severity = ? ORDER BY id DESC",
-                (sev,)
-            ).fetchall()
-    finally:
-        conn.close()
-
-    def generate():
-        yield "\ufeffid;timestamp;severity;source;message\r\n"
-        for r in rows:
-            msg = sanitize_csv_cell(r["message"])
-            src = sanitize_csv_cell(r["source"])
-            sev_clean = sanitize_csv_cell(r["severity"])
-            yield f"{r['id']};{r['timestamp']};{sev_clean};{src};{msg}\r\n"
-
-    filename = f"nobis_a10_logs_{active_mode}_{severity.lower()}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
-    return StreamingResponse(
-        generate(),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-    )
-
-
-@app.post("/api/settings")
-async def api_save_settings(payload: SettingsPayload):
-    raw_dict = payload.model_dump(exclude_none=True)
-    conn = get_sys_db()
-    try:
-        for k, v in raw_dict.items():
-            if v is not None and str(v) != "********":
-                conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (str(k), str(v)))
-        conn.commit()
-    finally:
-        conn.close()
-
-    if "agua_password" in raw_dict and raw_dict["agua_password"] != "********":
-        _installer_sessions.clear()
-
-    if "poll_interval_s" in raw_dict and str(raw_dict["poll_interval_s"]).strip():
-        try:
-            interval_s = max(15, min(3600, int(float(str(raw_dict["poll_interval_s"]).strip()))))
-        except (ValueError, TypeError):
-            interval_s = 120
-        if scheduler.get_job("telemetry_job"):
-            scheduler.reschedule_job("telemetry_job", trigger="interval", seconds=interval_s)
-        else:
-            scheduler.add_job(collect_telemetry_cycle, "interval", seconds=interval_s, id="telemetry_job", replace_existing=True)
-
-    new_mode = get_active_mode()
-    db_log("INFO", "SETTINGS", f"Configuration enregistrée. Base active : {os.path.basename(MODE_DB_PATHS[new_mode])}", new_mode)
-
-    # Réévaluation de l'état du pont Matter selon la configuration
-    matter_keys = {"matter_enabled", "matter_device_name", "matter_port"}
-    if any(k in raw_dict for k in matter_keys):
-        try:
-            if matter_manager.is_enabled():
-                await matter_manager.stop()
-                await matter_manager.ensure_started()
-            else:
-                await matter_manager.stop()
-        except Exception as e:
-            db_log("WARNING", "MATTER", f"Erreur ajustement pont Matter post-settings: {e}", new_mode)
-
-    await collect_telemetry_cycle(new_mode)
-    return {"status": "ok", "settings": get_public_settings_dict(), "active_db": os.path.basename(MODE_DB_PATHS[new_mode])}
-
-
-@app.post("/api/test-webhook")
-async def api_test_webhook(payload: TestWebhookPayload = Body(default=TestWebhookPayload())):
-    settings = get_settings_dict()
-    url = (payload.webhook_url or settings.get("webhook_url") or "").strip()
-    if not url:
-        raise HTTPException(status_code=400, detail="Aucune URL de Webhook / ntfy.sh renseignée.")
-    if not is_safe_webhook_url(url):
-        raise HTTPException(status_code=400, detail="URL de webhook invalide ou rejetée par le filtre de sécurité anti-SSRF.")
-    active_mode = get_active_mode()
-    notification_service._last_sent_by_key.pop("test_alert", None)
-    ok = await notification_service.send_webhook(
-        url,
-        "🔥 Test Superviseur Nobis A10",
-        "Connexion notifications Push/Webhook opérationnelle (Trémie 35 kg).",
-        "test_alert",
-        active_mode
-    )
-    if not ok:
-        raise HTTPException(status_code=502, detail="Échec de l'envoi vers l'URL Webhook.")
-    return {"status": "ok", "message": "Notification de test envoyée avec succès !"}
-
-
-@app.post("/api/test-connection")
-async def api_test_connection(payload: TestConnectionPayload):
-    raw_dict = payload.model_dump(exclude_none=True)
-    mode = raw_dict.get("comm_mode", "agua_cloud")
-    settings = get_settings_dict()
-    settings.update({k: str(v) for k, v in raw_dict.items() if str(v) != "********"})
-    weather = await weather_service.fetch_current(settings.get("weather_lat", "48.1636"), settings.get("weather_lon", "2.0436"))
-    if mode == "simulation":
-        return {"status": "ok", "mode": "simulation", "active_db": os.path.basename(MODE_DB_PATHS["simulation"]), "weather": weather}
-    elif mode == "agua_cloud":
-        try:
-            res = await agua_client.login_and_discover(settings.get("agua_email", ""), settings.get("agua_password", ""), settings.get("agua_uuid", ""))
-            return {"status": "ok", "mode": "agua_cloud", "active_db": os.path.basename(MODE_DB_PATHS["agua_cloud"]), "details": res, "weather": weather}
-        except Exception as e:
-            db_log("ERROR", "AGUA_CLOUD", f"Échec test connexion Agua IOT : {str(e)}", "agua_cloud")
-            return JSONResponse(status_code=502, content={"status": "error", "details": f"Erreur Cloud Agua IOT : {str(e)}"})
-    elif mode == "local_gateway":
-        gw_url = settings.get("local_gateway_url", "http://192.168.1.150")
-        try:
-            res = await local_gateway_client.test_connection(gw_url)
-            return {"status": "ok", "mode": "local_gateway", "details": res, "weather": weather}
-        except Exception as e:
-            db_log("ERROR", "LOCAL_GATEWAY", f"Échec test connexion Passerelle UART : {str(e)}", "local_gateway")
-            return JSONResponse(status_code=502, content={"status": "error", "details": f"Erreur Passerelle UART : {str(e)}"})
-
-
-@app.get("/api/agua-registers-map")
-async def api_agua_registers_map():
-    settings = get_settings_dict()
-    reg_map = await agua_client.scan_registers_map(settings)
-    raw_buffer = await agua_client.read_buffer(settings)
-    return {
-        "id_device": agua_client.id_device,
-        "id_product": agua_client.id_product,
-        "working_write_endpoint": agua_client.working_write_endpoint,
-        "cached_offsets_count": len(agua_client.registers_map_by_offset),
-        "raw_buffer_count": len(raw_buffer),
-        "raw_buffer": raw_buffer,
-        "registers_map": reg_map
-    }
-
-
-@app.get("/api/export-csv")
-async def api_export_csv(range_key: str = Query("24h")):
-    active_mode = get_active_mode()
-    now_epoch = int(time.time())
-    durations = {
-        "3h": 3 * 3600,
-        "6h": 6 * 3600,
-        "24h": 24 * 3600,
-        "7j": 7 * 86400,
-        "30j": 30 * 86400,
-        "3M": 90 * 86400
-    }
-    min_epoch = now_epoch - durations.get(range_key, 86400)
-
-    conn = get_db(active_mode)
-    try:
-        # Exclusion stricte des lignes reconstituées (id 1 à 27) et buffers vides invalides
-        if active_mode == "agua_cloud":
-            rows = conn.execute("""
-                SELECT * FROM telemetry 
-                WHERE epoch >= ? 
-                  AND id NOT BETWEEN 1 AND 27
-                  AND NOT (status_code != -1 AND (raw_buffer_json = '{}' OR raw_buffer_json IS NULL))
-                ORDER BY epoch DESC
-            """, (min_epoch,)).fetchall()
-        else:
-            rows = conn.execute("SELECT * FROM telemetry WHERE epoch >= ? ORDER BY epoch DESC", (min_epoch,)).fetchall()
-    finally:
-        conn.close()
-
-    regs_catalog = get_registers_dict(active_mode)
-    reg_keys = list(regs_catalog.keys())
-
-    all_raw_offsets_set = set()
-    parsed_buffers: List[Dict[str, Any]] = []
-    for r in rows:
-        try:
-            b = json.loads(r["raw_buffer_json"] or "{}")
-        except Exception:
-            b = {}
-        parsed_buffers.append(b)
-        for k in b.keys():
-            if str(k).isdigit():
-                all_raw_offsets_set.add(int(k))
-    sorted_offsets = sorted(all_raw_offsets_set)
-
-    base_cols = [c for c in TELEMETRY_COLUMNS.keys() if c != "raw_buffer_json"]
-    reg_cols = [f"REG_{rk}" for rk in reg_keys]
-    off_cols = [f"OFFSET_{off}" for off in sorted_offsets]
-    header_cols = base_cols + reg_cols + off_cols
-
-    def generate():
-        yield "\ufeff" + ";".join(header_cols) + "\r\n"
-        for idx, r in enumerate(rows):
-            row_dict = dict(r)
-            buf = parsed_buffers[idx]
-            vals = []
-            for c in base_cols:
-                v = row_dict.get(c)
-                if isinstance(v, float):
-                    vals.append(f"{v:.2f}".replace(".", ","))
-                elif v is None:
-                    vals.append("")
-                else:
-                    vals.append(sanitize_csv_cell(v))
-            for rk in reg_keys:
-                meta = regs_catalog[rk]
-                off_str = str(meta["offset"])
-                if off_str in buf:
-                    rv = buf[off_str]
-                elif rk in row_dict and row_dict[rk] is not None and rk != "status_code":
-                    rv = row_dict[rk]
-                else:
-                    rv = meta["current_val"]
-                if isinstance(rv, float):
-                    vals.append(f"{rv:.2f}".replace(".", ","))
-                else:
-                    vals.append(sanitize_csv_cell(rv))
-            for off in sorted_offsets:
-                ov = buf.get(str(off), "")
-                if isinstance(ov, float):
-                    vals.append(f"{ov:.2f}".replace(".", ","))
-                else:
-                    vals.append(sanitize_csv_cell(ov))
-            yield ";".join(vals) + "\r\n"
-
-    filename = f"nobis_a10_supervision_et_registres_{active_mode}_{range_key}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
-    return StreamingResponse(
-        generate(),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-    )
+    for path, path_item in openapi_schema.get("paths", {}).items():
+        for method, op in path_item.items():
+            if method.lower() in ("get", "post", "put", "delete", "patch"):
+                if "responses" in op:
+                    op["responses"].setdefault("400", {"description": "Bad Request / Requête invalide"})
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=True)
-

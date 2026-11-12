@@ -8,9 +8,9 @@ Dépôt cible : https://github.com/malexxx/Nobis.Supervisor
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from enum import Enum
-from typing import Dict, List, Optional, Tuple, Callable
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 class CalibrationMode(str, Enum):
@@ -688,4 +688,3 @@ class NobisA10CalibrationEngine:
             engine.result = CalibrationResult(**res_copy)
 
         return engine
-

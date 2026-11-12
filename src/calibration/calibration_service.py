@@ -10,13 +10,12 @@ from __future__ import annotations
 import json
 import time
 import logging
-from typing import Dict, Any, Optional, Tuple, Callable
+from typing import Dict, Any, Optional, Callable
 from dataclasses import asdict
 
 from database import get_sys_db
 from .nobis_calibration import (
     NobisA10CalibrationEngine,
-    CalibrationMode,
     CalibrationState,
     StoveOperationalPhase,
     TelemetrySample,
@@ -347,4 +346,3 @@ def get_calibration_service() -> NobisCalibrationService:
     if _calibration_service_instance is None:
         _calibration_service_instance = NobisCalibrationService()
     return _calibration_service_instance
-

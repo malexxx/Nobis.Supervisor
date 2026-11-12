@@ -196,4 +196,3 @@ class MatterBridgeManager:
 
 
 matter_manager = MatterBridgeManager()
-

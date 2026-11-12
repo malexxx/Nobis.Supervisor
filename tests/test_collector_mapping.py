@@ -1,5 +1,4 @@
 import unittest
-import sqlite3
 from config import TELEMETRY_COLUMNS
 from database import get_db, init_all_databases
 
@@ -54,4 +53,3 @@ class TestCollectorMapping(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

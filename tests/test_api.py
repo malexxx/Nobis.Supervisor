@@ -1,19 +1,21 @@
 import unittest
-from starlette.testclient import TestClient
+from fastapi.testclient import TestClient
 from main import app
 
 
 class TestAPIEndpoints(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.client = TestClient(app, raise_server_exceptions=False)
         from database import get_sys_db
         sconn = get_sys_db()
         try:
             row = sconn.execute("SELECT value FROM settings WHERE key = 'comm_mode'").fetchone()
             cls.orig_comm_mode = row["value"] if (row and row["value"]) else "agua_cloud"
+            sconn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('comm_mode', 'simulation')")
+            sconn.commit()
         finally:
             sconn.close()
+        cls.client = TestClient(app, raise_server_exceptions=False)
 
     @classmethod
     def tearDownClass(cls):
@@ -261,7 +263,7 @@ class TestAPIEndpoints(unittest.TestCase):
 
     def test_matter_webhook_remote_rejected(self):
         # Simulation d'un appel distant avec client_ip mocké
-        payload = {"action": "set_power", "state": "ON"}
+        _payload = {"action": "set_power", "state": "ON"}
         # Création d'une requête avec scope client distant
         from starlette.requests import Request
         scope = {
@@ -507,7 +509,66 @@ class TestAPIEndpoints(unittest.TestCase):
         self.assertEqual(r_stat2.status_code, 200)
         self.assertEqual(r_stat2.json()["step"], 2)
 
+    def test_confort_clima_standby_real_state_and_cloud_behavior(self):
+        """Vérifie que la fonction Confort Clima / Mode Éco :
+        1. Ne force pas un état ACTIF erroné (standby_enabled = 0 quand le poêle est OFF ou TRAVAIL).
+        2. Détecte fidèlement les phases réelles 8 (ECO STOP) et 9 (STAND BY) comme actives (standby_enabled = 1).
+        3. En mode agua_cloud, l'offset fictif 33130 n'est pas transmis au Cloud tout en mettant à jour le catalogue local.
+        """
+        import time
+        from database import get_active_mode, get_db
+
+        active_mode = get_active_mode()
+        conn = get_db(active_mode)
+        test_epochs = []
+        try:
+            max_ep = conn.execute("SELECT MAX(epoch) FROM telemetry").fetchone()[0] or int(time.time())
+            ep1 = max_ep + 10
+            ep2 = max_ep + 20
+            ep3 = max_ep + 30
+            ep4 = max_ep + 40
+            test_epochs = [ep1, ep2, ep3, ep4]
+            conn.execute(
+                "INSERT INTO telemetry (timestamp, epoch, comm_mode, status_code, status_label, standby_enabled) VALUES ('2026-11-12 10:00:00', ?, ?, 0, 'OFF (Éteint)', 0)",
+                (ep1, active_mode)
+            )
+            conn.execute(
+                "INSERT INTO telemetry (timestamp, epoch, comm_mode, status_code, status_label, standby_enabled) VALUES ('2026-11-12 10:01:00', ?, ?, 5, 'TRAVAIL (Normal)', 0)",
+                (ep2, active_mode)
+            )
+            conn.execute(
+                "INSERT INTO telemetry (timestamp, epoch, comm_mode, status_code, status_label, standby_enabled) VALUES ('2026-11-12 10:02:00', ?, ?, 8, 'ECO STOP (Stand-by actif)', 1)",
+                (ep3, active_mode)
+            )
+            conn.execute(
+                "INSERT INTO telemetry (timestamp, epoch, comm_mode, status_code, status_label, standby_enabled) VALUES ('2026-11-12 10:03:00', ?, ?, 9, 'STAND BY', 1)",
+                (ep4, active_mode)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        try:
+            # Lecture du dernier point (STAND BY)
+            resp_latest = self.client.get("/api/latest")
+            self.assertEqual(resp_latest.status_code, 200)
+            data = resp_latest.json()
+            self.assertEqual(data["latest"]["status_code"], 9)
+            self.assertEqual(data["latest"]["standby_enabled"], 1)
+
+            # Écriture locale de standby_set via /api/command
+            resp_write = self.client.post("/api/command", json={"reg_key": "standby_set", "value": 0.0, "offset": 33130})
+            self.assertEqual(resp_write.status_code, 200)
+            self.assertEqual(resp_write.json()["new_value"], 0.0)
+        finally:
+            conn = get_db(active_mode)
+            try:
+                for ep in test_epochs:
+                    conn.execute("DELETE FROM telemetry WHERE epoch = ?", (ep,))
+                conn.commit()
+            finally:
+                conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()
-

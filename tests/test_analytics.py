@@ -12,7 +12,7 @@ from telemetry import (
     evaluate_batch_combustion_and_trim,
 )
 from config import HOPPER_CAPACITY_KG, DEFAULT_REGISTERS_CATALOG
-from database import get_db, init_all_databases
+from database import get_db, get_sys_db, init_all_databases
 
 
 class TestAnalytics(unittest.TestCase):
@@ -43,6 +43,12 @@ class TestAnalytics(unittest.TestCase):
         weather = {"weather_temp_ext": 10.0, "forecast_daily_means": []}
         runway = calculate_forecast_runway(0.0, weather)
         self.assertEqual(runway, 0.0)
+
+    def test_calculate_forecast_runway_fractional_stock(self):
+        weather = {"weather_temp_ext": 10.0, "forecast_daily_means": [10.0]}
+        # 0.5 kg de pellets restant : doit produire une autonomie fractionnaire > 0.0
+        runway = calculate_forecast_runway(0.5, weather)
+        self.assertGreater(runway, 0.0)
 
     def test_evaluate_pellet_quality_active_nominal(self):
         # En travail P4 (cible 430 + 4*40 = 590), sonde flamme à 590°C -> Optimale
@@ -219,6 +225,8 @@ class TestAnalytics(unittest.TestCase):
         data = [10.0, 20.0, 30.0, 40.0, 50.0]
         self.assertAlmostEqual(_percentile(data, 0.5), 30.0)
         self.assertAlmostEqual(_percentile(data, 0.9), 46.0)
+        # Test d'interpolation intermédiaire (non-entier, f+1 < len-1) pour valider l'index plafond
+        self.assertAlmostEqual(_percentile(data, 0.3), 22.0)
 
     def test_pellet_batch_state_lifecycle(self):
         initial_state = get_pellet_batch_state()
@@ -239,6 +247,22 @@ class TestAnalytics(unittest.TestCase):
 
         # Restore initial state
         save_pellet_batch_state(initial_state)
+
+    def test_pellet_batch_state_fallback_defaults(self):
+        initial_state = get_pellet_batch_state()
+        conn = get_sys_db()
+        try:
+            conn.execute("DELETE FROM settings WHERE key = 'pellet_batch_state'")
+            conn.commit()
+            state = get_pellet_batch_state()
+            self.assertEqual(state["raz_epoch"], 0)
+            self.assertEqual(state["raz_timestamp"], "Initialisation")
+            self.assertEqual(state["pellet_brand"], "Lot Standard DINplus / ENplus A1")
+            self.assertIsNone(state["baseline_rpm_per_pa"])
+            self.assertEqual(state["last_applied_epoch"], 0)
+        finally:
+            conn.close()
+            save_pellet_batch_state(initial_state)
 
     def test_evaluate_batch_combustion_and_trim(self):
         conn = get_db("simulation")
@@ -273,4 +297,3 @@ class TestAnalytics(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

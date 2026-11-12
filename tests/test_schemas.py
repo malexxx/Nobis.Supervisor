@@ -5,9 +5,7 @@ from schemas import (
     RefillHopperPayload,
     SettingsPayload,
     MatterWebhookPayload,
-    TestWebhookPayload,
     ClientErrorPayload,
-    SilenceActivatePayload,
 )
 
 
@@ -60,4 +58,3 @@ class TestSchemas(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

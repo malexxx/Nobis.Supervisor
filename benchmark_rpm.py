@@ -9,7 +9,6 @@ import argparse
 import asyncio
 import getpass
 import json
-import os
 import sys
 import time
 import uuid
@@ -206,7 +205,7 @@ async def run_stage(
     stage_num: int,
 ) -> StepResult:
     """Exécute un palier à un rythme régulier (target_rpm) pendant duration_s."""
-    target_rps = target_rpm / 60.0
+    _target_rps = target_rpm / 60.0
     interval_s = 60.0 / target_rpm if target_rpm > 0 else 60.0
     total_expected = max(1, int(round((duration_s / 60.0) * target_rpm)))
 
@@ -362,7 +361,7 @@ async def main_benchmark():
         print("📊 BILAN DU TEST DE CHARGE")
         print("=" * 75)
         if last_success:
-            print(f"🏆 Débit MAXIMUM validé sans AUCUNE erreur :")
+            print("🏆 Débit MAXIMUM validé sans AUCUNE erreur :")
             print(f"   ➤ {last_success.target_rpm:.1f} requêtes / minute")
             interval = 60.0 / last_success.target_rpm
             print(f"   ➤ Soit 1 requête toutes les {interval:.1f} secondes")

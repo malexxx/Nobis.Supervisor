@@ -102,7 +102,7 @@ DEFAULT_REGISTERS_CATALOG: List[Dict[str, Any]] = [
     {"reg_key": "status_code", "offset": 232, "mem_type": "RAM", "label": "Commande Marche/Arrêt (85=ON, 170=OFF)", "unit": "cmd", "min_val": 0, "max_val": 255, "step": 1, "default_val": 0, "category": "STATE"},
     {"reg_key": "power_level", "offset": 33120, "mem_type": "EEPROM", "label": "Puissance de combustion (P1 à P7)", "unit": "P", "min_val": 1, "max_val": 7, "step": 1, "default_val": 4, "category": "CONTROL"},
     {"reg_key": "fun_auto_set", "offset": 33128, "mem_type": "EEPROM", "label": "Modulation Automatique - Auto puissance (0=OFF, 1=ON)", "unit": "bool", "min_val": 0, "max_val": 1, "step": 1, "default_val": 1, "category": "CONTROL"},
-    {"reg_key": "standby_set", "offset": 33130, "mem_type": "EEPROM", "label": "Mode ECO - Stand-by auto sur consigne (0=OFF, 1=ON)", "unit": "bool", "min_val": 0, "max_val": 1, "step": 1, "default_val": 1, "category": "CONTROL"},
+    {"reg_key": "standby_set", "offset": 33130, "mem_type": "EEPROM", "label": "Mode ECO - Stand-by auto sur consigne (Réglage radiocommande Nobis, 0=OFF, 1=ON)", "unit": "bool", "min_val": 0, "max_val": 1, "step": 1, "default_val": 0, "category": "CONTROL"},
     {"reg_key": "fun_pwf_set", "offset": 33154, "mem_type": "EEPROM", "label": "Mode BOOST - Surpuissance (0=OFF, 1=ON, 2=CRONO)", "unit": "mode", "min_val": 0, "max_val": 2, "step": 1, "default_val": 0, "category": "CONTROL"},
     {"reg_key": "set_silece_set", "offset": 33250, "mem_type": "EEPROM", "label": "Silencieux - Confort acoustique (0=OFF, 1=ON)", "unit": "bool", "min_val": 0, "max_val": 1, "step": 1, "default_val": 0, "category": "CONTROL"},
     {"reg_key": "temp_amb_setpoint", "offset": 33122, "mem_type": "EEPROM", "label": "Consigne T° Ambiante Salon (7..40°C, 41=MAN)", "unit": "°C", "min_val": 7, "max_val": 41, "step": 1, "default_val": 19, "category": "CONTROL"},
@@ -194,7 +194,7 @@ TELEMETRY_COLUMNS: Dict[str, str] = {
     "power_level": "INTEGER DEFAULT 4",
     "power_actual": "INTEGER DEFAULT 4",
     "fun_auto_set": "INTEGER DEFAULT 1",
-    "standby_enabled": "INTEGER DEFAULT 1",
+    "standby_enabled": "INTEGER DEFAULT 0",
     "fun_pwf_set": "INTEGER DEFAULT 0",
     "set_silece_set": "INTEGER DEFAULT 0",
     "fan_front_speed": "INTEGER DEFAULT 3",
@@ -254,4 +254,3 @@ TELEMETRY_COLUMNS: Dict[str, str] = {
     "dep_delta_avg": "REAL DEFAULT 0.0",
     "raw_buffer_json": "TEXT DEFAULT '{}'"
 }
-

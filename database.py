@@ -31,6 +31,7 @@ _DB_INITIALIZED = False
 
 
 def get_sys_db() -> sqlite3.Connection:
+    """Ouvre une connexion SQLite vers la base système globale (WAL, row factory)."""
     conn = sqlite3.connect(SYSTEM_DB_PATH, timeout=30.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
@@ -53,12 +54,14 @@ def sys_db_session() -> Iterator[sqlite3.Connection]:
 
 
 def get_settings_dict() -> Dict[str, str]:
+    """Charge l'intégralité des paramètres système depuis la table settings."""
     with sys_db_session() as conn:
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
         return {r["key"]: r["value"] for r in rows}
 
 
 def get_public_settings_dict() -> Dict[str, str]:
+    """Retourne les paramètres système en masquant les données sensibles (mot de passe Agua Cloud)."""
     s = get_settings_dict()
     if "agua_password" in s:
         s["agua_password"] = "********" if s["agua_password"] else ""
@@ -66,15 +69,17 @@ def get_public_settings_dict() -> Dict[str, str]:
 
 
 def get_active_mode() -> str:
+    """Détermine le mode de communication actif ('agua_cloud', 'local_gateway' ou 'simulation')."""
     try:
         s = get_settings_dict()
-        m = s.get("comm_mode", "agua_cloud")
-        return m if m in MODE_DB_PATHS else "agua_cloud"
+        m = s.get("comm_mode", "simulation")
+        return m if m in MODE_DB_PATHS else "simulation"
     except Exception:
-        return "agua_cloud"
+        return "simulation"
 
 
 def _ensure_mode_tables(conn: sqlite3.Connection):
+    """Crée et migre les tables de télémétrie, catalogues et journaux pour un mode donné."""
     cur = conn.cursor()
     cols_sql = ", ".join([f"{k} {v}" for k, v in TELEMETRY_COLUMNS.items()])
     cur.execute(f"CREATE TABLE IF NOT EXISTS telemetry ({cols_sql})")
@@ -145,11 +150,12 @@ def _ensure_mode_tables(conn: sqlite3.Connection):
 
 
 def get_db(mode: Optional[str] = None) -> sqlite3.Connection:
+    """Ouvre une connexion SQLite vers la base de données du mode de communication ciblé."""
     global _DB_INITIALIZED
     if not _DB_INITIALIZED:
         init_all_databases()
     target_mode = mode if (mode and mode in MODE_DB_PATHS) else get_active_mode()
-    db_file = MODE_DB_PATHS[target_mode]
+    db_file = MODE_DB_PATHS.get(target_mode, MODE_DB_PATHS["simulation"])
     conn = sqlite3.connect(db_file, timeout=30.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
@@ -172,6 +178,7 @@ def db_session(mode: Optional[str] = None) -> Iterator[sqlite3.Connection]:
 
 
 def init_all_databases():
+    """Initialise la base système et les bases de modes (création des tables et catalogues par défaut)."""
     global _DB_INITIALIZED
     _DB_INITIALIZED = True
     sconn = get_sys_db()
@@ -241,6 +248,7 @@ def init_all_databases():
 
 
 def db_log(severity: str, source: str, message: str, mode: Optional[str] = None):
+    """Enregistre un événement dans la table des journaux applicatifs (app_logs)."""
     s = (severity or "INFO").strip().upper()
     if s == "WARN":
         s = "WARNING"
@@ -252,12 +260,14 @@ def db_log(severity: str, source: str, message: str, mode: Optional[str] = None)
 
 
 def get_registers_dict(mode: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+    """Retourne l'intégralité du catalogue des registres indexé par reg_key."""
     with db_session(mode) as conn:
         rows = conn.execute("SELECT * FROM registers_catalog").fetchall()
         return {r["reg_key"]: dict(r) for r in rows}
 
 
 def seed_simulation_db_if_empty():
+    """Peuple la base du mode simulation avec 30 jours d'historique réaliste si elle est vide."""
     conn = get_db("simulation")
     try:
         count = conn.execute("SELECT COUNT(*) as c FROM telemetry").fetchone()["c"]
@@ -399,7 +409,7 @@ def seed_simulation_db_if_empty():
                 "power_level": 4,
                 "power_actual": p_actual,
                 "fun_auto_set": 1,
-                "standby_enabled": 1,
+                "standby_enabled": 0,
                 "fun_pwf_set": 0,
                 "set_silece_set": 0,
                 "fan_front_speed": 8,
@@ -504,5 +514,3 @@ def get_rolling_consumption_stats(conn: sqlite3.Connection, ref_epoch: Optional[
         "conso_week_kg": conso_week_kg,
         "conso_month_kg": conso_month_kg
     }
-
-

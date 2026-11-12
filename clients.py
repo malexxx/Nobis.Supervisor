@@ -20,7 +20,7 @@ from database import db_log
 # SÉCURITÉ : VALIDATION ANTI-SSRF POUR LES WEBHOOKS & NOTIFICATIONS
 # ==============================================================================
 _FORBIDDEN_HOSTS = {
-    "127.0.0.1", "localhost", "::1", "0.0.0.0", "169.254.169.254", "metadata.google.internal"
+    "127.0.0.1", "localhost", "::1", "0.0.0.0", "0", "169.254.169.254", "metadata.google.internal", "broadcasthost"
 }
 
 
@@ -63,7 +63,7 @@ async def close_http_client():
 
 
 @asynccontextmanager
-async def borrow_http_client(timeout: float = 20.0) -> AsyncIterator[httpx.AsyncClient]:
+async def borrow_http_client(timeout: float = 5.0) -> AsyncIterator[httpx.AsyncClient]:
     """Réutilise le client HTTP partagé (connection pooling) ou en crée un temporaire hors lifespan."""
     if _shared_http_client is not None and not _shared_http_client.is_closed:
         yield _shared_http_client
@@ -81,6 +81,7 @@ class NotificationService:
         self.cooldown_s: float = 3600.0  # 1h anti-spam par type d'alerte
 
     async def send_webhook(self, webhook_url: str, title: str, message: str, alert_key: str, mode: str) -> bool:
+        """Envoie une notification push vers une URL Webhook (ntfy.sh, Home Assistant, etc.) avec cooldown anti-spam."""
         url = (webhook_url or "").strip()
         if not url or not is_safe_webhook_url(url):
             if url and not is_safe_webhook_url(url):
@@ -119,6 +120,7 @@ class NotificationService:
             return False
 
     async def evaluate_telemetry_alerts(self, record: Dict[str, Any], settings: Dict[str, str]):
+        """Évalue les alarmes et seuils critiques (trémie vide, alarme AL, blackout) et déclenche les webhooks."""
         webhook_url = (settings.get("webhook_url") or "").strip()
         if not webhook_url:
             return
@@ -188,22 +190,31 @@ class WeatherService:
         self.last_coords: tuple = ("", "")
 
     async def fetch_current(self, lat: str, lon: str, force: bool = False) -> Dict[str, Any]:
+        """Récupère les observations et prévisions météo Open-Meteo pour les coordonnées spécifiées (avec cache TTL 10 min)."""
         now = time.time()
         coords = (str(lat).strip(), str(lon).strip())
         if not force and coords == self.last_coords and (now - self.last_fetch_ts) < self.CACHE_TTL_S:
             return self.last_weather
 
+        try:
+            f_lat = float(coords[0])
+            f_lon = float(coords[1])
+            if not (-90.0 <= f_lat <= 90.0 and -180.0 <= f_lon <= 180.0):
+                return self.last_weather
+        except (ValueError, TypeError):
+            return self.last_weather
+
         url = (
             f"https://api.open-meteo.com/v1/forecast"
-            f"?latitude={lat}&longitude={lon}"
+            f"?latitude={f_lat}&longitude={f_lon}"
             f"&current=temperature_2m,relative_humidity_2m,wind_speed_10m"
             f"&daily=temperature_2m_mean,temperature_2m_min,temperature_2m_max"
             f"&forecast_days=14"
             f"&timezone=Europe%2FParis"
         )
         try:
-            async with borrow_http_client(timeout=8.0) as client:
-                resp = await client.get(url, timeout=8.0)
+            async with borrow_http_client(timeout=3.0) as client:
+                resp = await client.get(url, timeout=3.0)
                 resp.raise_for_status()
                 payload = resp.json()
                 data = payload.get("current", {})
@@ -326,14 +337,15 @@ class AguaCloudClient:
             pass
 
     async def login_and_discover(self, email: str, password: str, app_uuid: str) -> Dict[str, Any]:
+        """Authentification auprès de l'API Agua Cloud, obtention du jeton JWT et découverte du poêle."""
         email = (email or "").strip()
         password = (password or "").strip()
         app_uuid = (app_uuid or str(uuid.uuid4())).strip()
 
-        if not email or not password or password == "********":
+        if not email or not password or password == "********" or "@" not in email:
             raise ValueError("Veuillez saisir votre email et votre vrai mot de passe Agua IOT.")
 
-        async with borrow_http_client(timeout=20.0) as client:
+        async with borrow_http_client(timeout=5.0) as client:
             if app_uuid not in self._registered_uuids:
                 signup_headers = self._headers_for_login(app_uuid)
                 signup_headers.pop("Authorization", None)
@@ -350,7 +362,7 @@ class AguaCloudClient:
                     f"{self.BASE_URL}{self.API_PATH_APP_SIGNUP}",
                     headers=signup_headers,
                     json=signup_payload,
-                    timeout=20.0
+                    timeout=5.0
                 )
                 if r_sig.status_code in (200, 201):
                     self._registered_uuids.add(app_uuid)
@@ -359,7 +371,7 @@ class AguaCloudClient:
                 f"{self.BASE_URL}{self.API_PATH_LOGIN}",
                 headers=self._headers_for_login(app_uuid),
                 json={"email": email, "password": password},
-                timeout=20.0
+                timeout=5.0
             )
             if r_login.status_code >= 400:
                 raise RuntimeError(f"HTTP {r_login.status_code} sur /userLogin -> {r_login.text}")
@@ -414,6 +426,7 @@ class AguaCloudClient:
             }
 
     async def _wait_job_answer(self, client: httpx.AsyncClient, id_request: str) -> Dict[str, Any]:
+        """Attend la complétion asynchrone d'une tâche d'écriture ou lecture sur l'API Agua IOT (polling status)."""
         last_status = "pending"
         for _ in range(15):
             await asyncio.sleep(1.0)
@@ -433,6 +446,7 @@ class AguaCloudClient:
         raise TimeoutError(f"Délai d'attente dépassé pour la réponse Agua IOT #{id_request} (statut final: {last_status})")
 
     async def read_buffer(self, settings: Dict[str, str]) -> Dict[int, float]:
+        """Interroge le buffer brut des registres de la carte Micronova via POST /deviceGetBufferReading."""
         app_uuid = settings.get("agua_uuid", "")
         if not self.token_jwt:
             await self.login_and_discover(settings.get("agua_email", ""), settings.get("agua_password", ""), app_uuid)
@@ -440,12 +454,12 @@ class AguaCloudClient:
         id_prod = settings.get("agua_id_product") or self.id_product
         payload = {"id_device": id_dev, "id_product": id_prod, "BufferId": 1}
 
-        async with borrow_http_client(timeout=25.0) as client:
+        async with borrow_http_client(timeout=5.0) as client:
             resp = await client.post(
                 f"{self.BASE_URL}{self.API_PATH_DEVICE_BUFFER_READING}",
                 headers=self._headers_for_api(),
                 json=payload,
-                timeout=25.0
+                timeout=5.0
             )
             if resp.status_code == 401:
                 await self.login_and_discover(settings.get("agua_email", ""), settings.get("agua_password", ""), app_uuid)
@@ -453,7 +467,7 @@ class AguaCloudClient:
                     f"{self.BASE_URL}{self.API_PATH_DEVICE_BUFFER_READING}",
                     headers=self._headers_for_api(),
                     json=payload,
-                    timeout=25.0
+                    timeout=5.0
                 )
             resp.raise_for_status()
             body = resp.json()
@@ -477,6 +491,7 @@ class AguaCloudClient:
             return clean_buf
 
     async def scan_registers_map(self, settings: Dict[str, str]) -> Dict[str, Any]:
+        """Scanne la cartographie complète des registres exposée par l'API Agua Cloud (/deviceGetRegistersMap)."""
         app_uuid = settings.get("agua_uuid", "")
         if not self.token_jwt:
             await self.login_and_discover(settings.get("agua_email", ""), settings.get("agua_password", ""), app_uuid)
@@ -496,6 +511,7 @@ class AguaCloudClient:
             return data
 
     def _resolve_register_write_params(self, offset: int, reg_key: Optional[str] = None) -> Tuple[int, int, str, int]:
+        """Résout les métadonnées de registre (offset réel, longueur binaire, endianness, masque) pour l'écriture."""
         meta = None
         matched_by_key = False
         if reg_key:
@@ -590,7 +606,7 @@ class AguaCloudClient:
             "Values": values_list
         }
 
-        candidate_endpoints = [
+        candidate_endpoints = [self.working_write_endpoint] if self.working_write_endpoint else [
             "/deviceRequestWriting",
             "/deviceWriting",
             "/deviceGetBufferWriting",
@@ -598,22 +614,31 @@ class AguaCloudClient:
         ]
 
         tried_errors: List[str] = []
-        async with borrow_http_client(timeout=25.0) as client:
+        async with borrow_http_client(timeout=5.0) as client:
             for ep in candidate_endpoints:
-                resp = await client.post(
-                    f"{self.BASE_URL}{ep}",
-                    headers=self._headers_for_api("false"),
-                    json=payload_rwms,
-                    timeout=25.0
-                )
-                if resp.status_code == 401:
-                    await self.login_and_discover(settings.get("agua_email", ""), settings.get("agua_password", ""), app_uuid)
+                try:
                     resp = await client.post(
                         f"{self.BASE_URL}{ep}",
                         headers=self._headers_for_api("false"),
                         json=payload_rwms,
-                        timeout=25.0
+                        timeout=5.0
                     )
+                except Exception as ex:
+                    tried_errors.append(f"{ep}->err:{str(ex)}")
+                    break
+
+                if resp.status_code == 401:
+                    try:
+                        await self.login_and_discover(settings.get("agua_email", ""), settings.get("agua_password", ""), app_uuid)
+                        resp = await client.post(
+                            f"{self.BASE_URL}{ep}",
+                            headers=self._headers_for_api("false"),
+                            json=payload_rwms,
+                            timeout=5.0
+                        )
+                    except Exception as ex:
+                        tried_errors.append(f"{ep}->auth_err:{str(ex)}")
+                        break
 
                 if resp.status_code in (200, 201, 202):
                     self.working_write_endpoint = ep
@@ -624,12 +649,10 @@ class AguaCloudClient:
                     return {"endpoint": ep, "response": body}
 
                 tried_errors.append(f"{ep}->{resp.status_code}:{resp.text[:60]}")
+                if resp.status_code in (401, 403):
+                    break
 
             raise RuntimeError(f"Échec écriture Agua IOT ({', '.join(tried_errors)})")
-
-    async def write_register(self, settings: Dict[str, str], offset: int, value: float, reg_key: Optional[str] = None) -> Dict[str, Any]:
-        """Écriture unitaire Cloud Agua IOT via POST /deviceRequestWriting."""
-        return await self.write_registers_batch(settings, [(offset, value, reg_key)])
 
 
 agua_client = AguaCloudClient()
@@ -675,4 +698,3 @@ class LocalGatewayClient:
 
 
 local_gateway_client = LocalGatewayClient()
-

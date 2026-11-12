@@ -42,6 +42,10 @@ data/
 app/.pytest_cache/
 .coverage
 htmlcov/
+html/
+.mutmut-cache
+.schemathesis/
+.hypothesis/
 
 # Operating System files
 .DS_Store
@@ -53,4 +57,3 @@ Dockerfile.txt
 
 # Logs
 *.log
-

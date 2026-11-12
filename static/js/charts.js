@@ -618,7 +618,7 @@ function setSynchronizedHoverIndex(idx, pctLeft) {
   const silOn = Number(row.set_silece_set ?? 0) > 0;
   document.getElementById("ribbon-val-auto").textContent = autoOn ? "ON (Modulation)" : "OFF";
   const climValEl = document.getElementById("ribbon-val-clim");
-  if (climValEl) climValEl.textContent = climOn ? (stCode === 8 ? "ECO STOP (8)" : "STAND BY (9)") : "OFF";
+  if (climValEl) climValEl.textContent = climOn ? (stCode === 8 ? "ECO STOP (8)" : (stCode === 9 ? "STAND BY (9)" : "ACTIF")) : "OFF";
   document.getElementById("ribbon-val-pwf").textContent = pwfMode === 2 ? "CRONO (2)" : (pwfMode === 1 ? "ON (Boost)" : "OFF");
   document.getElementById("ribbon-val-sil").textContent = silOn ? "ON (Silence)" : "OFF";
   document.getElementById("ribbon-hover-state").textContent = row.timestamp ? row.timestamp.slice(11, 16) : "";
@@ -1225,4 +1225,3 @@ function renderSecurityRibbons() {
     updateSecurityHoverViews(cachedSeriesRows.length - 1, false);
   }
 }
-
