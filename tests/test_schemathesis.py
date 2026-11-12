@@ -2,6 +2,15 @@
 import unittest
 import schemathesis
 from main import app
+from database import get_sys_db
+
+# S'assurer que le mode simulation est actif pour l'introspection OpenAPI ASGI
+_sconn = get_sys_db()
+try:
+    _sconn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('comm_mode', 'simulation')")
+    _sconn.commit()
+finally:
+    _sconn.close()
 
 # Chargement in-process de la spécification OpenAPI depuis l'application FastAPI
 schema = schemathesis.openapi.from_asgi("/openapi.json", app)

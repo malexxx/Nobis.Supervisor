@@ -7,6 +7,12 @@ class TestCollectorMapping(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         init_all_databases()
+        conn = get_db("agua_cloud")
+        try:
+            conn.execute("DELETE FROM telemetry WHERE id BETWEEN 1 AND 27")
+            conn.commit()
+        finally:
+            conn.close()
 
     def test_pellet_rate_nominal_formula(self):
         # Test de la formule théorique P1..P8 : round(0.60 + p_actual * 0.22, 2)

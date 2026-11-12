@@ -242,6 +242,9 @@ def init_all_databases():
                     reg["min_val"], reg["max_val"], reg["step"], reg["reg_key"], reg["default_val"], reg["default_val"],
                     reg["category"], now_iso
                 ))
+            if mode_name == "agua_cloud":
+                cur.execute("INSERT OR IGNORE INTO sqlite_sequence (name, seq) VALUES ('telemetry', 27)")
+                cur.execute("UPDATE sqlite_sequence SET seq = 27 WHERE name = 'telemetry' AND seq < 27")
             conn.commit()
         finally:
             conn.close()

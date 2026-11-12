@@ -1,3 +1,4 @@
+import re
 import unittest
 from fastapi.testclient import TestClient
 from main import app
@@ -475,7 +476,8 @@ class TestAPIEndpoints(unittest.TestCase):
         self.assertIn("@media (min-width: 768px)", css)
         self.assertIn("nav.md\\:flex", css)
         # La classe générique .hidden ne doit PAS avoir !important pour ne pas casser md:flex
-        self.assertNotIn(".hidden,\n", css)
+        self.assertIsNone(re.search(r'(?m)^\.hidden\s*[,{]', css))
+        self.assertNotIn("\n.hidden,\n", css.replace("\r\n", "\n"))
         self.assertNotIn(".hidden { display: none !important", css)
 
     def test_calibration_wizard_endpoint(self):

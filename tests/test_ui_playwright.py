@@ -11,9 +11,14 @@ INDEX_URL = f"file:///{INDEX_HTML_PATH.replace(os.sep, '/')}"
 def browser_instance():
     """Lance une instance de navigateur Chromium headless pour les tests E2E."""
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        yield browser
-        browser.close()
+        try:
+            browser = p.chromium.launch(headless=True)
+        except Exception as e:
+            pytest.skip(f"Navigateur Chromium Playwright non disponible : {e}")
+        try:
+            yield browser
+        finally:
+            browser.close()
 
 
 @pytest.fixture
