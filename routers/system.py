@@ -4,6 +4,7 @@ Regroupe les snapshots de registres, exports CSV, consultation des journaux appl
 enregistrement de configuration, test de connexion Agua IOT/Passerelle et notifications Webhook.
 """
 from datetime import datetime
+import hmac
 import json
 import os
 import time
@@ -14,9 +15,11 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from clients import (
     agua_client,
+    format_exc,
     is_safe_gateway_url,
     is_safe_webhook_url,
     local_gateway_client,
+    normalize_agua_email,
     notification_service,
     weather_service,
 )
@@ -283,6 +286,18 @@ async def api_save_settings(payload: SettingsPayload, request: Request):
     """Sauvegarde les paramètres de configuration dans la base système SQLite."""
     raw_dict = payload.model_dump(exclude_none=True)
     current_settings = get_settings_dict()
+
+    submitted_pwd = raw_dict.get("agua_password")
+    if "agua_password" in raw_dict and str(submitted_pwd).strip() in ("", "********"):
+        raw_dict.pop("agua_password", None)
+        submitted_pwd = None
+
+    if "agua_email" in raw_dict and str(raw_dict["agua_email"]).strip():
+        raw_dict["agua_email"] = normalize_agua_email(
+            str(raw_dict["agua_email"]),
+            current_settings.get("agua_email", ""),
+        )
+
     sensitive_changed = any(
         k in _SENSITIVE_SETTINGS
         and raw_dict[k] is not None
@@ -291,7 +306,15 @@ async def api_save_settings(payload: SettingsPayload, request: Request):
         for k in raw_dict
     )
     if sensitive_changed:
-        require_installer_auth_if_configured(request)
+        stored_pwd = (current_settings.get("agua_password") or "").strip()
+        inline_pwd_valid = (
+            bool(stored_pwd)
+            and isinstance(submitted_pwd, str)
+            and bool(submitted_pwd.strip())
+            and hmac.compare_digest(submitted_pwd.strip().encode("utf-8"), stored_pwd.encode("utf-8"))
+        )
+        if not inline_pwd_valid:
+            require_installer_auth_if_configured(request)
 
     if "webhook_url" in raw_dict:
         wh_url = str(raw_dict["webhook_url"] or "").strip()
@@ -314,7 +337,8 @@ async def api_save_settings(payload: SettingsPayload, request: Request):
     finally:
         conn.close()
 
-    if "agua_password" in raw_dict and raw_dict["agua_password"] != "********":
+    old_pwd = current_settings.get("agua_password", "")
+    if submitted_pwd is not None and str(submitted_pwd) != str(old_pwd):
         clear_installer_sessions()
 
     if "poll_interval_s" in raw_dict and str(raw_dict["poll_interval_s"]).strip():
@@ -331,8 +355,16 @@ async def api_save_settings(payload: SettingsPayload, request: Request):
     db_file_name = os.path.basename(MODE_DB_PATHS.get(new_mode, MODE_DB_PATHS["simulation"]))
     db_log("INFO", "SETTINGS", f"Configuration enregistrée. Base active : {db_file_name}", new_mode)
 
-    matter_keys = {"matter_enabled", "matter_device_name", "matter_port"}
-    if any(k in raw_dict for k in matter_keys):
+    matter_defaults = {
+        "matter_enabled": "1",
+        "matter_device_name": "Poêle Nobis A10",
+        "matter_port": "5540",
+    }
+    matter_changed = any(
+        k in raw_dict and str(raw_dict[k]) != str(current_settings.get(k, matter_defaults[k]))
+        for k in matter_defaults
+    )
+    if matter_changed:
         try:
             if matter_manager.is_enabled():
                 await matter_manager.stop()
@@ -340,7 +372,7 @@ async def api_save_settings(payload: SettingsPayload, request: Request):
             else:
                 await matter_manager.stop()
         except Exception as e:
-            db_log("WARNING", "MATTER", f"Erreur ajustement pont Matter post-settings: {e}", new_mode)
+            db_log("WARNING", "MATTER", f"Erreur ajustement pont Matter post-settings: {format_exc(e)}", new_mode)
 
     await collect_telemetry_cycle(new_mode)
     return {"status": "ok", "settings": get_public_settings_dict(), "active_db": db_file_name}
@@ -374,7 +406,14 @@ async def api_test_connection(payload: TestConnectionPayload):
     raw_dict = payload.model_dump(exclude_none=True)
     mode = raw_dict.get("comm_mode", "agua_cloud")
     settings = get_settings_dict()
-    settings.update({k: str(v) for k, v in raw_dict.items() if str(v) != "********"})
+    stored_email = settings.get("agua_email", "")
+    for k, v in raw_dict.items():
+        if k == "agua_password" and str(v).strip() in ("", "********"):
+            continue
+        if str(v) != "********":
+            settings[k] = str(v)
+    if settings.get("agua_email"):
+        settings["agua_email"] = normalize_agua_email(settings["agua_email"], stored_email)
     weather = await weather_service.fetch_current(settings.get("weather_lat", "48.1636"), settings.get("weather_lon", "2.0436"))
     if mode == "simulation":
         return {"status": "ok", "mode": "simulation", "active_db": os.path.basename(MODE_DB_PATHS["simulation"]), "weather": weather}
@@ -395,8 +434,9 @@ async def api_test_connection(payload: TestConnectionPayload):
             )
             return {"status": "ok", "mode": "agua_cloud", "active_db": os.path.basename(MODE_DB_PATHS["agua_cloud"]), "details": res, "weather": weather}
         except Exception as e:
-            db_log("ERROR", "AGUA_CLOUD", f"Échec test connexion Agua IOT : {str(e)}", "agua_cloud")
-            return JSONResponse(status_code=200, content={"status": "error", "details": f"Erreur Cloud Agua IOT : {str(e)}"})
+            err_msg = format_exc(e)
+            db_log("ERROR", "AGUA_CLOUD", f"Échec test connexion Agua IOT : {err_msg}", "agua_cloud")
+            return JSONResponse(status_code=200, content={"status": "error", "details": f"Erreur Cloud Agua IOT : {err_msg}"})
         finally:
             (
                 agua_client.token_jwt,
@@ -413,8 +453,9 @@ async def api_test_connection(payload: TestConnectionPayload):
             res = await local_gateway_client.test_connection(gw_url)
             return {"status": "ok", "mode": "local_gateway", "details": res, "weather": weather}
         except Exception as e:
-            db_log("ERROR", "LOCAL_GATEWAY", f"Échec test connexion Passerelle UART : {str(e)}", "local_gateway")
-            return JSONResponse(status_code=200, content={"status": "error", "details": f"Erreur Passerelle UART : {str(e)}"})
+            err_msg = format_exc(e)
+            db_log("ERROR", "LOCAL_GATEWAY", f"Échec test connexion Passerelle UART : {err_msg}", "local_gateway")
+            return JSONResponse(status_code=200, content={"status": "error", "details": f"Erreur Passerelle UART : {err_msg}"})
 
 
 @router.get("/agua-registers-map")
@@ -434,7 +475,7 @@ async def api_agua_registers_map():
             "raw_buffer": {},
             "registers_map": [],
             "status": "offline",
-            "details": f"Agua IOT non accessible : {str(e)}",
+            "details": f"Agua IOT non accessible : {format_exc(e)}",
         }
     return {
         "id_device": agua_client.id_device,

@@ -34,6 +34,7 @@ from clients import (
     agua_client,
     local_gateway_client,
     notification_service,
+    format_exc,
 )
 from matter_service import matter_manager
 
@@ -188,7 +189,7 @@ async def collect_telemetry_cycle(force_mode: Optional[str] = None) -> Dict[str,
             return await _collect_telemetry_unlocked(force_mode)
         except Exception as e:
             active_m = force_mode or get_active_mode()
-            db_log("ERROR", "TELEMETRY", f"Échec inattendu cycle télémétrie : {str(e)}", active_m)
+            db_log("ERROR", "TELEMETRY", f"Échec inattendu cycle télémétrie : {format_exc(e)}", active_m)
             raise
     finally:
         _stove_io_lock.release()
@@ -221,8 +222,8 @@ async def _collect_telemetry_unlocked(force_mode: Optional[str] = None) -> Dict[
             try:
                 raw_buf = await agua_client.read_buffer(settings)
             except Exception as e:
-                cloud_error = str(e)
-                db_log("ERROR", "AGUA_CLOUD", f"Échec lecture buffer Agua IOT : {str(e)}", "agua_cloud")
+                cloud_error = format_exc(e)
+                db_log("ERROR", "AGUA_CLOUD", f"Échec lecture buffer Agua IOT : {cloud_error}", "agua_cloud")
         else:
             cloud_error = "Identifiants Cloud Nobis Agua IOT non renseignés"
     elif comm_mode == "local_gateway":
@@ -230,8 +231,8 @@ async def _collect_telemetry_unlocked(force_mode: Optional[str] = None) -> Dict[
         try:
             raw_buf = await local_gateway_client.read_buffer(gw_url)
         except Exception as e:
-            cloud_error = str(e)
-            db_log("ERROR", "LOCAL_GATEWAY", f"Échec lecture passerelle UART : {str(e)}", "local_gateway")
+            cloud_error = format_exc(e)
+            db_log("ERROR", "LOCAL_GATEWAY", f"Échec lecture passerelle UART : {cloud_error}", "local_gateway")
 
     if raw_buf:
         for signed_off in (70, 71):
@@ -957,8 +958,9 @@ async def execute_registers_batch_write(
                         details_str = f"Écriture Agua IOT via {w_res.get('endpoint', '/deviceRequestWriting')}"
                     except Exception as e:
                         first = normalized_cmds[0]
-                        db_log("ERROR", "WRITE_CMD", f"Échec écriture Cloud {first['label']} (#{first['offset']}) : {str(e)}", comm_mode)
-                        raise HTTPException(status_code=502, detail=f"Erreur Cloud Agua IOT : {str(e)}")
+                        err_msg = format_exc(e)
+                        db_log("ERROR", "WRITE_CMD", f"Échec écriture Cloud {first['label']} (#{first['offset']}) : {err_msg}", comm_mode)
+                        raise HTTPException(status_code=502, detail=f"Erreur Cloud Agua IOT : {err_msg}")
             else:
                 details_str = "Mémorisé localement (à valider sur radiocommande: MENU ▸ PROG. UTILISATEUR ▸ MÉLANGE G/A ou COMFORT CLIMA)"
         elif comm_mode == "local_gateway" and cloud_items_spec:
@@ -966,8 +968,9 @@ async def execute_registers_batch_write(
             try:
                 await local_gateway_client.write_registers(gw_url, normalized_cmds)
             except Exception as e:
-                db_log("ERROR", "WRITE_CMD", f"Échec écriture UART : {str(e)}", comm_mode)
-                raise HTTPException(status_code=502, detail=f"Erreur passerelle UART : {str(e)}")
+                err_msg = format_exc(e)
+                db_log("ERROR", "WRITE_CMD", f"Échec écriture UART : {err_msg}", comm_mode)
+                raise HTTPException(status_code=502, detail=f"Erreur passerelle UART : {err_msg}")
 
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         conn = get_db(comm_mode)

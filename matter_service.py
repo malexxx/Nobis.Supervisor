@@ -46,21 +46,63 @@ class MatterBridgeManager:
         s = get_settings_dict()
         return s.get("matter_enabled", "1") not in ("0", "false", "False")
 
-    async def is_control_alive(self) -> bool:
+    def _is_proc_running(self) -> bool:
+        """Indique si le processus enfant Node.js Matter est actuellement actif."""
+        return self._proc is not None and self._proc.poll() is None
+
+    async def _probe_control_once(self, timeout: float = 4.0) -> bool:
+        """Sonde l'endpoint HTTP local du pont Matter (127.0.0.1:5549/status)."""
         try:
-            async with borrow_http_client(timeout=1.5) as client:
-                r = await client.get(f"{MATTER_CONTROL_URL}/status", timeout=1.5)
+            async with borrow_http_client(timeout=timeout) as client:
+                r = await client.get(f"{MATTER_CONTROL_URL}/status", timeout=timeout)
                 return r.status_code == 200
         except Exception:
             return False
 
+    async def is_control_alive(self) -> bool:
+        """Vérifie si l'API HTTP interne du pont Matter répond (avec tolérance anti-faux-positif)."""
+        if await self._probe_control_once(timeout=4.0):
+            return True
+        if self._is_proc_running():
+            await asyncio.sleep(0.3)
+            return await self._probe_control_once(timeout=4.0)
+        return False
+
+    async def _terminate_proc_unlocked(self) -> None:
+        """Arrête proprement le processus enfant Node.js existant (appelé sous _lock)."""
+        proc = self._proc
+        if proc is not None:
+            if proc.poll() is None:
+                try:
+                    proc.terminate()
+                    try:
+                        await asyncio.to_thread(proc.wait, timeout=3)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        try:
+                            await asyncio.to_thread(proc.wait, timeout=2)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            self._proc = None
+
     async def ensure_started(self) -> Dict[str, Any]:
+        """Garantit qu'un unique pont Matter actif est démarré sans jamais dupliquer le processus."""
         async with self._lock:
             if not self.is_enabled():
                 return {"running": False, "enabled": False, "reason": "Pont Matter désactivé dans la configuration"}
 
             if await self.is_control_alive():
                 return await self._fetch_status_unlocked()
+
+            if self._is_proc_running():
+                # Le processus existe toujours mais n'a pas encore répondu : ultime vérification avant redémarrage
+                if await self._probe_control_once(timeout=4.0):
+                    return await self._fetch_status_unlocked()
+                await self._terminate_proc_unlocked()
+            elif self._proc is not None:
+                self._proc = None
 
             node_bin = _find_node_binary()
             if not node_bin:
@@ -110,15 +152,27 @@ class MatterBridgeManager:
             # Attendre que le serveur HTTP local du pont Matter (127.0.0.1:5549) réponde
             for _ in range(25):
                 await asyncio.sleep(0.25)
-                if await self.is_control_alive():
+                if not self._is_proc_running():
+                    exit_code = self._proc.poll() if self._proc is not None else -1
+                    self._proc = None
+                    if await self._probe_control_once(timeout=2.0):
+                        # Un pont déjà actif répond sur 127.0.0.1:5549 (sans logguer de faux redémarrage)
+                        return await self._fetch_status_unlocked()
+                    return {
+                        "running": False,
+                        "enabled": True,
+                        "error": f"Le processus du pont Matter s'est arrêté prématurément (code {exit_code}).",
+                    }
+                if await self._probe_control_once(timeout=1.5):
                     status = await self._fetch_status_unlocked()
-                    code = status.get("manualPairingCodeFormatted") or status.get("manualPairingCode") or "---"
-                    db_log(
-                        "INFO",
-                        "MATTER",
-                        f"Pont Thermostat Matter '{device_name}' démarré (UDP:{matter_port} | Code d'appairage: {code}).",
-                        get_active_mode(),
-                    )
+                    if self._is_proc_running():
+                        code = status.get("manualPairingCodeFormatted") or status.get("manualPairingCode") or "---"
+                        db_log(
+                            "INFO",
+                            "MATTER",
+                            f"Pont Thermostat Matter '{device_name}' démarré (UDP:{matter_port} | Code d'appairage: {code}).",
+                            get_active_mode(),
+                        )
                     return status
 
             return {
@@ -128,28 +182,20 @@ class MatterBridgeManager:
             }
 
     async def stop(self) -> None:
-        self._stopping = True
-        if self._proc and self._proc.poll() is None:
-            try:
-                self._proc.terminate()
-                try:
-                    self._proc.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    self._proc.kill()
-            except Exception:
-                pass
-        self._proc = None
+        async with self._lock:
+            self._stopping = True
+            await self._terminate_proc_unlocked()
 
     async def _fetch_status_unlocked(self) -> Dict[str, Any]:
         try:
-            async with borrow_http_client(timeout=2.5) as client:
-                r = await client.get(f"{MATTER_CONTROL_URL}/status", timeout=2.5)
+            async with borrow_http_client(timeout=4.0) as client:
+                r = await client.get(f"{MATTER_CONTROL_URL}/status", timeout=4.0)
                 if r.status_code == 200:
                     data = r.json()
                     data["enabled"] = self.is_enabled()
                     return data
         except Exception as e:
-            return {"running": False, "enabled": self.is_enabled(), "error": str(e)}
+            return {"running": False, "enabled": self.is_enabled(), "error": str(e) or type(e).__name__}
         return {"running": False, "enabled": self.is_enabled()}
 
     async def get_status(self) -> Dict[str, Any]:

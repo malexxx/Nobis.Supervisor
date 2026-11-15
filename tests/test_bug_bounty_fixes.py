@@ -17,9 +17,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
+import httpx
 from starlette.requests import Request
 
 import clients
+from matter_service import MatterBridgeManager
 import telemetry
 from analytics import evaluate_batch_combustion_and_trim
 from config import BASE_DIR, TELEMETRY_COLUMNS
@@ -936,6 +938,136 @@ class TestBugBountyFixes(unittest.TestCase):
             sw_js = f.read()
         self.assertIn("nobis-cockpit-v2.0.0", sw_js)
         self.assertIn("app.js", sw_js)
+
+    # ------------------------------------------------------------------
+    # Correctifs Production : Déduplication Matter, Settings/Auth & Retry Agua
+    # ------------------------------------------------------------------
+    def test_prod_fixes_matter_dedup_settings_auth_and_agua_retry(self):
+        import sys
+
+        # 1. Formatage d'exceptions non vide et normalisation d'identifiant Agua
+        self.assertEqual(clients.format_exc(httpx.ReadTimeout("")), "ReadTimeout")
+        self.assertEqual(clients.format_exc(ValueError("bad value")), "ValueError: bad value")
+        self.assertEqual(
+            clients.normalize_agua_email("martin.zidani", "martin.zidani@gmail.com"),
+            "martin.zidani@gmail.com",
+        )
+        self.assertEqual(
+            clients.normalize_agua_email("martin.zidani", ""),
+            "martin.zidani@gmail.com",
+        )
+        self.assertEqual(
+            clients.normalize_agua_email("alice", "alice@orange.fr"),
+            "alice@orange.fr",
+        )
+
+        # 2. Retry automatique sur timeout transitoire dans AguaCloudClient.read_buffer
+        agua = clients.AguaCloudClient()
+        agua.token_jwt = "fake-jwt"
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        ok_resp.raise_for_status = MagicMock()
+        ok_resp.json.return_value = {"Items": [8, 103], "Values": [5, 20.5]}
+
+        mock_http = AsyncMock()
+        mock_http.post.side_effect = [httpx.ReadTimeout(""), ok_resp]
+
+        class _AsyncCtx:
+            async def __aenter__(self):
+                return mock_http
+
+            async def __aexit__(self, *args):
+                return False
+
+        with patch("clients.borrow_http_client", return_value=_AsyncCtx()), \
+             patch("clients.asyncio.sleep", new_callable=AsyncMock):
+            buf = asyncio.run(agua.read_buffer({"agua_id_device": "d1", "agua_id_product": "p1"}))
+        self.assertEqual(mock_http.post.await_count, 2)
+        self.assertEqual(buf[8], 5.0)
+        self.assertEqual(buf[103], 20.5)
+
+        # 3. POST /api/settings préserve agua_password vide, normalise agua_email,
+        #    accepte le mot de passe courant inline, et ne redémarre pas Matter si inchangé
+        clear_installer_sessions()
+        with temporary_settings({
+            "comm_mode": "simulation",
+            "agua_email": "martin.zidani@gmail.com",
+            "agua_password": "prod-secret-password",
+            "matter_enabled": "1",
+            "matter_device_name": "Poêle Nobis A10",
+            "matter_port": "5540",
+            "weather_city": "OrigCity",
+            "webhook_url": "",
+        }):
+            with patch("routers.system.matter_manager.stop", new_callable=AsyncMock) as mock_stop, \
+                 patch("routers.system.matter_manager.ensure_started", new_callable=AsyncMock) as mock_start:
+                r_save = self.client.post(
+                    "/api/settings",
+                    json={
+                        "comm_mode": "simulation",
+                        "agua_email": "martin.zidani",
+                        "agua_password": "",
+                        "matter_enabled": "1",
+                        "matter_device_name": "Poêle Nobis A10",
+                        "matter_port": "5540",
+                        "weather_city": "TestVille",
+                    },
+                )
+                self.assertEqual(r_save.status_code, 200)
+                mock_stop.assert_not_awaited()
+                mock_start.assert_not_awaited()
+
+                sconn = get_sys_db()
+                try:
+                    pwd_row = sconn.execute("SELECT value FROM settings WHERE key='agua_password'").fetchone()
+                    mail_row = sconn.execute("SELECT value FROM settings WHERE key='agua_email'").fetchone()
+                    self.assertEqual(pwd_row["value"], "prod-secret-password")
+                    self.assertEqual(mail_row["value"], "martin.zidani@gmail.com")
+                finally:
+                    sconn.close()
+
+                r_inline = self.client.post(
+                    "/api/settings",
+                    json={
+                        "comm_mode": "simulation",
+                        "agua_password": "prod-secret-password",
+                        "webhook_url": "https://example.com/notify",
+                    },
+                )
+                self.assertEqual(r_inline.status_code, 200)
+
+        # 4. Déduplication MatterBridgeManager.ensure_started() & arrêt d'un processus zombie
+        mgr = MatterBridgeManager()
+        active_proc = MagicMock()
+        active_proc.poll.return_value = None
+        mgr._proc = active_proc
+
+        with temporary_settings({"matter_enabled": "1", "matter_device_name": "Nobis Test", "matter_port": "5540"}), \
+             patch.object(mgr, "_probe_control_once", new_callable=AsyncMock, side_effect=[False, True]), \
+             patch.object(mgr, "_fetch_status_unlocked", new_callable=AsyncMock, return_value={"running": True}), \
+             patch("matter_service.subprocess.Popen") as mock_popen, \
+             patch("matter_service.asyncio.sleep", new_callable=AsyncMock):
+            st = asyncio.run(mgr.ensure_started())
+        self.assertTrue(st["running"])
+        mock_popen.assert_not_called()
+
+        stale_proc = MagicMock()
+        stale_proc.poll.return_value = None
+        new_proc = MagicMock()
+        new_proc.poll.return_value = None
+        mgr._proc = stale_proc
+
+        with temporary_settings({"matter_enabled": "1", "matter_device_name": "Nobis Test", "matter_port": "5540"}), \
+             patch("matter_service._find_node_binary", return_value=sys.executable), \
+             patch.object(mgr, "_probe_control_once", new_callable=AsyncMock, side_effect=[False, False, False, True]), \
+             patch.object(mgr, "_fetch_status_unlocked", new_callable=AsyncMock, return_value={"running": True, "manualPairingCode": "1234"}), \
+             patch("matter_service.subprocess.Popen", return_value=new_proc) as mock_popen2, \
+             patch("matter_service.asyncio.sleep", new_callable=AsyncMock), \
+             patch("matter_service.db_log"):
+            st2 = asyncio.run(mgr.ensure_started())
+        stale_proc.terminate.assert_called_once()
+        mock_popen2.assert_called_once()
+        self.assertTrue(st2["running"])
 
 
 if __name__ == "__main__":

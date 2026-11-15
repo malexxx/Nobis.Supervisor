@@ -94,9 +94,15 @@
             <span>Fonctionnement intelligent du mode Silence :</span>
           </div>
           <ul class="space-y-1.5 text-[11px] text-gray-300 pl-4 list-disc">
-            <li><strong>Si poêle éteint :</strong> toutes les consignes de température (Salon, Canalisations SX & DX) passent immédiatement en <strong>hors gel (7°C)</strong>.</li>
-            <li><strong>Si poêle allumé :</strong> désactivation immédiate du <strong>Boost</strong>, du <strong>Mode Éco</strong> et de la <strong>programmation horaire (Chrono)</strong>, activation du <strong>Mode Auto total</strong> et bascule des consignes en <strong>hors gel (7°C)</strong>. Le poêle régule ainsi automatiquement en puissance minimale <strong>P0</strong> et ventilation <strong>Ventil 0</strong> (convection 100% silencieuse) <strong>sans s'éteindre</strong>.</li>
-            <li><strong>Fin de période :</strong> compte à rebours dynamique et <strong>restauration automatique</strong> intégrale de toutes les consignes et réglages initiaux.</li>
+            <li><strong>Si poêle éteint :</strong> toutes les consignes de température (Salon, Canalisations SX & DX)
+              passent immédiatement en <strong>hors gel (7°C)</strong>.</li>
+            <li><strong>Si poêle allumé :</strong> désactivation immédiate du <strong>Boost</strong>, du <strong>Mode
+                Éco</strong> et de la <strong>programmation horaire (Chrono)</strong>, activation du <strong>Mode Auto
+                total</strong> et bascule des consignes en <strong>hors gel (7°C)</strong>. Le poêle régule ainsi
+              automatiquement en puissance minimale <strong>P0</strong> et ventilation <strong>Ventil 0</strong>
+              (convection 100% silencieuse) <strong>sans s'éteindre</strong>.</li>
+            <li><strong>Fin de période :</strong> compte à rebours dynamique et <strong>restauration
+                automatique</strong> intégrale de toutes les consignes et réglages initiaux.</li>
           </ul>
         </div>
 
@@ -503,7 +509,8 @@
         class="flex items-center gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg text-xs font-medium border cursor-pointer transition shadow-inner bg-gray-950/80 border-gray-800 text-sky-400 hover:border-sky-500/60"
         title="Liaison de communication active • Cliquer pour ouvrir les réglages">
         <span id="hdr-mode-icon" class="text-xs">☁️</span>
-        <span id="hdr-mode" class="truncate max-w-[85px] sm:max-w-none text-[11px] sm:text-xs font-semibold">Cloud Nobis</span>
+        <span id="hdr-mode" class="truncate max-w-[85px] sm:max-w-none text-[11px] sm:text-xs font-semibold">Cloud
+          Nobis</span>
       </button>
 
       <!-- 1) État Cloud Nobis (Bulle verte ou rouge avec uniquement l'icône) -->
@@ -1366,7 +1373,8 @@
 
           <!-- Titre & Badge d'autorisation -->
           <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-orange-600/20 border border-orange-500/30 flex items-center justify-center text-xl shadow-inner shrink-0">
+            <div
+              class="w-10 h-10 rounded-xl bg-orange-600/20 border border-orange-500/30 flex items-center justify-center text-xl shadow-inner shrink-0">
               🔧
             </div>
             <div>
@@ -1374,15 +1382,18 @@
                 <h2 class="text-sm sm:text-base font-bold text-white tracking-wide">Paramètres & Observabilité</h2>
                 <span id="installer-auth-pill"
                   class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700 flex items-center gap-1">
-                  <span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span><span id="installer-auth-pill-text">Expert Verrouillé</span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span><span id="installer-auth-pill-text">Expert
+                    Verrouillé</span>
                 </span>
               </div>
-              <p class="text-[11px] text-gray-400">Réglages système, tarages combustion, registres mémoire et observabilité</p>
+              <p class="text-[11px] text-gray-400">Réglages système, tarages combustion, registres mémoire et
+                observabilité</p>
             </div>
           </div>
 
           <!-- Les 4 Sous-onglets -->
-          <div class="flex items-center gap-1 bg-gray-950 p-1 rounded-xl border border-gray-800/90 text-xs overflow-x-auto">
+          <div
+            class="flex items-center gap-1 bg-gray-950 p-1 rounded-xl border border-gray-800/90 text-xs overflow-x-auto">
             <button type="button" id="subtab-btn-settings" onclick="switchInstallerSubTab('settings')"
               class="subtab-installer-btn flex items-center gap-1.5 px-3 py-2 rounded-lg font-semibold transition whitespace-nowrap bg-orange-600 text-white shadow-md cursor-pointer">
               <span>⚙️</span><span>Réglages</span>
@@ -1416,7 +1427,8 @@
               <h3 class="text-sm sm:text-base font-bold text-white flex items-center gap-2">
                 <span>🎛️</span><span>État Système & Environnement Actif</span>
               </h3>
-              <p class="text-xs text-gray-400">Synthèse de la base SQLite active, de la carte Micronova et synchronisation de l'horloge</p>
+              <p class="text-xs text-gray-400">Synthèse de la base SQLite active, de la carte Micronova et
+                synchronisation de l'horloge</p>
             </div>
             <div class="flex items-center gap-2">
               <button type="button" onclick="syncStoveClock()"
@@ -1429,20 +1441,27 @@
 
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
             <div class="bg-gray-950/80 border border-gray-800/90 rounded-xl p-2.5">
-              <span class="text-gray-400 block text-[10px] uppercase tracking-wider font-semibold">Base de données</span>
-              <strong id="hdr-db" class="text-cyan-400 font-mono text-xs truncate block mt-0.5" title="Base active">nobis_a10_agua_cloud.db</strong>
+              <span class="text-gray-400 block text-[10px] uppercase tracking-wider font-semibold">Base de
+                données</span>
+              <strong id="hdr-db" class="text-cyan-400 font-mono text-xs truncate block mt-0.5"
+                title="Base active">nobis_a10_agua_cloud.db</strong>
             </div>
             <div class="bg-gray-950/80 border border-gray-800/90 rounded-xl p-2.5">
-              <span class="text-gray-400 block text-[10px] uppercase tracking-wider font-semibold">Carte / Firmware</span>
+              <span class="text-gray-400 block text-[10px] uppercase tracking-wider font-semibold">Carte /
+                Firmware</span>
               <span class="text-orange-400 font-semibold text-xs block mt-0.5">Firmware V018_1</span>
             </div>
             <div class="bg-gray-950/80 border border-gray-800/90 rounded-xl p-2.5">
-              <span class="text-gray-400 block text-[10px] uppercase tracking-wider font-semibold">Horloge Poêle (RTC)</span>
-              <strong id="inst-clock-val" class="text-sky-400 font-mono text-xs tabular-nums block mt-0.5">--:--</strong>
+              <span class="text-gray-400 block text-[10px] uppercase tracking-wider font-semibold">Horloge Poêle
+                (RTC)</span>
+              <strong id="inst-clock-val"
+                class="text-sky-400 font-mono text-xs tabular-nums block mt-0.5">--:--</strong>
             </div>
             <div class="bg-gray-950/80 border border-gray-800/90 rounded-xl p-2.5">
-              <span class="text-gray-400 block text-[10px] uppercase tracking-wider font-semibold">Conteneur & SSE</span>
-              <span id="cfg-diag-container" class="text-emerald-400 font-semibold text-xs flex items-center gap-1.5 mt-0.5">
+              <span class="text-gray-400 block text-[10px] uppercase tracking-wider font-semibold">Conteneur &
+                SSE</span>
+              <span id="cfg-diag-container"
+                class="text-emerald-400 font-semibold text-xs flex items-center gap-1.5 mt-0.5">
                 <span class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]"></span>En ligne
               </span>
             </div>
@@ -1456,13 +1475,15 @@
               <h3 class="text-sm sm:text-base font-bold text-white flex items-center gap-2">
                 <span>📡</span><span>Protocole de Communication & Fréquence de Télémétrie</span>
               </h3>
-              <p class="text-xs text-gray-400">Sélectionnez la liaison de communication vers le poêle et l'intervalle de scrutation</p>
+              <p class="text-xs text-gray-400">Sélectionnez la liaison de communication vers le poêle et l'intervalle de
+                scrutation</p>
             </div>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div class="sm:col-span-2">
-              <label for="cfg-mode" class="text-xs text-gray-300 font-semibold block mb-1.5">Liaison de communication active</label>
+              <label for="cfg-mode" class="text-xs text-gray-300 font-semibold block mb-1.5">Liaison de communication
+                active</label>
               <select id="cfg-mode" onchange="updateConfigModalFields()"
                 class="w-full bg-gray-950 border border-gray-700 focus:border-orange-500 rounded-lg px-3 py-2 text-xs sm:text-sm text-white font-medium outline-none transition">
                 <option value="agua_cloud">☁️ Cloud Agua IOT (nobis_a10_agua_cloud.db)</option>
@@ -1471,7 +1492,8 @@
               </select>
             </div>
             <div>
-              <label for="cfg-interval" class="text-xs text-gray-300 font-semibold block mb-1.5">Collecte Télémétrie (s)</label>
+              <label for="cfg-interval" class="text-xs text-gray-300 font-semibold block mb-1.5">Collecte Télémétrie
+                (s)</label>
               <input id="cfg-interval" type="number" min="15" max="3600"
                 class="w-full bg-gray-950 border border-gray-700 focus:border-orange-500 rounded-lg px-3 py-2 text-xs sm:text-sm text-white tabular-nums outline-none transition"
                 title="Fréquence de scrutation de la télémétrie en secondes (ex: 120s recommandé)" />
@@ -1485,8 +1507,8 @@
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label for="cfg-email" class="text-xs text-gray-400 block mb-1">Email Agua IOT</label>
-                <input id="cfg-email" type="email" placeholder="votre.email@domaine.fr"
+                <label for="cfg-email" class="text-xs text-gray-400 block mb-1">Email ou identifiant Agua IOT</label>
+                <input id="cfg-email" type="text" placeholder="votre.email@domaine.fr ou identifiant"
                   class="w-full bg-gray-900 border border-gray-700 focus:border-amber-500 rounded-lg px-3 py-2 text-xs text-white outline-none" />
               </div>
               <div>
@@ -1494,8 +1516,10 @@
                 <div class="relative">
                   <input id="cfg-pass" type="password" value="********"
                     class="w-full bg-gray-900 border border-gray-700 focus:border-amber-500 rounded-lg px-3 py-2 text-xs text-white outline-none pr-10" />
-                  <button type="button" onclick="const p=document.getElementById('cfg-pass'); p.type=(p.type==='password'?'text':'password');"
-                    class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-200 cursor-pointer" title="Afficher/Masquer">
+                  <button type="button"
+                    onclick="const p=document.getElementById('cfg-pass'); p.type=(p.type==='password'?'text':'password');"
+                    class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-200 cursor-pointer"
+                    title="Afficher/Masquer">
                     👁️
                   </button>
                 </div>
@@ -1504,7 +1528,8 @@
           </div>
 
           <!-- Champs conditionnels : Passerelle UART Locale -->
-          <div id="cfg-fields-gateway" class="hidden space-y-2 bg-gray-950/80 border border-gray-800/90 rounded-xl p-3.5">
+          <div id="cfg-fields-gateway"
+            class="hidden space-y-2 bg-gray-950/80 border border-gray-800/90 rounded-xl p-3.5">
             <div class="text-xs font-semibold text-cyan-400 flex items-center gap-1.5">
               <span>🔌</span><span>Passerelle Matérielle UART Locale (ESP32 / RS232 Micronova)</span>
             </div>
@@ -1516,9 +1541,12 @@
           </div>
 
           <!-- Encart conditionnel : Simulation -->
-          <div id="cfg-fields-sim" class="hidden bg-emerald-950/30 border border-emerald-800/60 rounded-xl p-3 text-xs text-emerald-200">
-            🧪 <strong>Mode Simulation Thermodynamique actif :</strong> Aucun identifiant externe n'est requis. Le jumeau
-            numérique simule la physique du Nobis A10 (Trémie 35 kg) dans sa base dédiée <code class="font-mono text-emerald-300">nobis_a10_simulation.db</code>.
+          <div id="cfg-fields-sim"
+            class="hidden bg-emerald-950/30 border border-emerald-800/60 rounded-xl p-3 text-xs text-emerald-200">
+            🧪 <strong>Mode Simulation Thermodynamique actif :</strong> Aucun identifiant externe n'est requis. Le
+            jumeau
+            numérique simule la physique du Nobis A10 (Trémie 35 kg) dans sa base dédiée <code
+              class="font-mono text-emerald-300">nobis_a10_simulation.db</code>.
           </div>
 
           <!-- Actions de test de communication -->
@@ -1548,9 +1576,12 @@
               <div>
                 <h3 class="text-sm sm:text-base font-bold text-white flex items-center gap-2">
                   <span>Pont Thermostat Matter</span>
-                  <span class="text-[10px] text-cyan-300 bg-cyan-950 border border-cyan-800 px-2 py-0.5 rounded font-semibold">Local sans cloud tiers</span>
+                  <span
+                    class="text-[10px] text-cyan-300 bg-cyan-950 border border-cyan-800 px-2 py-0.5 rounded font-semibold">Local
+                    sans cloud tiers</span>
                 </h3>
-                <p class="text-xs text-gray-400">Expose le poêle en thermostat natif Matter pour Google Nest Hub Max, Apple Home & Home Assistant</p>
+                <p class="text-xs text-gray-400">Expose le poêle en thermostat natif Matter pour Google Nest Hub Max,
+                  Apple Home & Home Assistant</p>
               </div>
             </div>
             <button type="button" onclick="openMatterModal()"
@@ -1569,7 +1600,8 @@
               </select>
             </div>
             <div>
-              <label for="cfg-matter-name" class="text-gray-300 font-semibold block mb-1.5">Nom d'appareil exposé</label>
+              <label for="cfg-matter-name" class="text-gray-300 font-semibold block mb-1.5">Nom d'appareil
+                exposé</label>
               <input id="cfg-matter-name" type="text" placeholder="Poêle Nobis A10"
                 class="w-full bg-gray-950 border border-gray-700 focus:border-cyan-500 rounded-lg px-3 py-2 text-xs text-white outline-none" />
             </div>
@@ -1589,7 +1621,8 @@
               <span class="text-xs font-bold text-[#e8b693] flex items-center gap-1.5">
                 <span>🪵</span><span>Gestion Granulés (Sacs 15 kg)</span>
               </span>
-              <span class="text-[10px] text-[#c98a5e] bg-[#3b2014] border border-[#6e3b1f] px-2 py-0.5 rounded">Trémie & Stock</span>
+              <span class="text-[10px] text-[#c98a5e] bg-[#3b2014] border border-[#6e3b1f] px-2 py-0.5 rounded">Trémie &
+                Stock</span>
             </div>
             <div class="grid grid-cols-2 gap-2.5 text-xs">
               <div>
@@ -1611,7 +1644,9 @@
               <span class="text-xs font-bold text-sky-300 flex items-center gap-1.5">
                 <span>🌦️</span><span>Station Météo Extérieure</span>
               </span>
-              <span class="text-[10px] text-sky-300 bg-sky-900/50 border border-sky-700/60 px-2 py-0.5 rounded">Open-Meteo Arome</span>
+              <span
+                class="text-[10px] text-sky-300 bg-sky-900/50 border border-sky-700/60 px-2 py-0.5 rounded">Open-Meteo
+                Arome</span>
             </div>
             <div class="grid grid-cols-3 gap-2 text-xs">
               <div class="col-span-3 sm:col-span-1">
@@ -1714,7 +1749,8 @@
                 </div>
                 <div>
                   <span class="text-[9px] text-gray-400 block uppercase font-semibold"
-                    title="Écart thermique moyenné sur 30 minutes à consigne de puissance constante (sans variation) pour filtrer les fluctuations thermiques">Écart (30m)</span>
+                    title="Écart thermique moyenné sur 30 minutes à consigne de puissance constante (sans variation) pour filtrer les fluctuations thermiques">Écart
+                    (30m)</span>
                   <span id="pellet-delta-val" class="font-bold text-emerald-400 text-xs mt-0.5 block">--</span>
                 </div>
                 <div>
@@ -1759,7 +1795,8 @@
                 <div class="flex items-center gap-2.5">
                   <input id="inst-trim-pellet" type="number" min="-5" max="5" step="1"
                     class="inst-input bg-gray-900 border border-gray-700 focus:border-amber-500 rounded-lg px-3 py-1.5 text-xs sm:text-sm font-bold text-white w-28 tabular-nums text-center outline-none" />
-                  <button type="button" onclick="sendCommand('trim_pellet_pct', document.getElementById('inst-trim-pellet').value)"
+                  <button type="button"
+                    onclick="sendCommand('trim_pellet_pct', document.getElementById('inst-trim-pellet').value)"
                     class="inst-input flex-1 py-1.5 px-3 rounded-lg bg-[#6e3b1f] hover:bg-[#854726] border border-[#a0522d] text-white text-xs font-bold cursor-pointer transition shadow">
                     Appliquer le Tarage
                   </button>
@@ -1792,7 +1829,8 @@
                 </div>
                 <div>
                   <span class="text-[9px] text-gray-400 block uppercase font-semibold"
-                    title="Écart de dépression moyenné sur 30 minutes à consigne de puissance constante (sans variation) pour filtrer les bourrasques de vent">Écart (30m)</span>
+                    title="Écart de dépression moyenné sur 30 minutes à consigne de puissance constante (sans variation) pour filtrer les bourrasques de vent">Écart
+                    (30m)</span>
                   <span id="exhaust-delta-val" class="font-bold text-emerald-400 text-xs mt-0.5 block">--</span>
                 </div>
                 <div>
@@ -1837,7 +1875,8 @@
                 <div class="flex items-center gap-2.5">
                   <input id="inst-trim-exhaust" type="number" min="-5" max="5" step="1"
                     class="inst-input bg-gray-900 border border-gray-700 focus:border-sky-500 rounded-lg px-3 py-1.5 text-xs sm:text-sm font-bold text-white w-28 tabular-nums text-center outline-none" />
-                  <button type="button" onclick="sendCommand('trim_exhaust_pct', document.getElementById('inst-trim-exhaust').value)"
+                  <button type="button"
+                    onclick="sendCommand('trim_exhaust_pct', document.getElementById('inst-trim-exhaust').value)"
                     class="inst-input flex-1 py-1.5 px-3 rounded-lg bg-sky-700 hover:bg-sky-600 border border-sky-500 text-white text-xs font-bold cursor-pointer transition shadow">
                     Appliquer le Tarage
                   </button>
@@ -1867,7 +1906,8 @@
           <div class="space-y-1.5">
             <h2 class="text-base sm:text-lg font-bold text-white tracking-wide">Accès Expert & Registres Sécurisé</h2>
             <p class="text-xs text-gray-400 leading-relaxed">
-              L'accès aux registres EEPROM usine, sauvegardes système et injecteur d'offset requiert une authentification par le mot de passe Agua Cloud du poêle.
+              L'accès aux registres EEPROM usine, sauvegardes système et injecteur d'offset requiert une
+              authentification par le mot de passe Agua Cloud du poêle.
             </p>
           </div>
 
@@ -1878,7 +1918,8 @@
               <span class="text-amber-400 text-base">⚠️</span>
               <div class="text-xs text-amber-200">
                 <p class="font-semibold text-amber-300">Aucun mot de passe Cloud configuré</p>
-                <p class="text-amber-400/80 mt-0.5">Veuillez d'abord renseigner votre mot de passe Agua Cloud dans l'onglet Réglages pour déverrouiller ce menu.</p>
+                <p class="text-amber-400/80 mt-0.5">Veuillez d'abord renseigner votre mot de passe Agua Cloud dans
+                  l'onglet Réglages pour déverrouiller ce menu.</p>
               </div>
             </div>
             <button type="button" onclick="openConfigModal('cfg-pass')"
@@ -1950,7 +1991,8 @@
                   title="Sauvegarde une image complète à un instant T de tous les registres (CONTROL, TRIM, DUCT, CHRONO, PR_PARAM) et des 76 offsets bruts du poêle dans la base SQLite active. Permet d'exporter en CSV ou de restaurer une configuration en écriture groupée (batch).">
                   <span>📸</span><span>Snapshots des Registres & Buffer Mémoire (76 Offsets)</span>
                 </h3>
-                <p class="text-xs text-gray-400">Sauvegardez, comparez, exportez en CSV (Excel FR) ou restaurez l'état complet des registres en 1 clic</p>
+                <p class="text-xs text-gray-400">Sauvegardez, comparez, exportez en CSV (Excel FR) ou restaurez l'état
+                  complet des registres en 1 clic</p>
               </div>
               <div class="flex flex-wrap items-center gap-2">
                 <input id="snap-name-input" type="text" placeholder="Nom du snapshot (ex: Réglage Hiver Optimal)"
@@ -1992,7 +2034,8 @@
                   </h3>
                   <p class="text-xs text-gray-400">
                     Vue fusionnée des <span id="raw-buf-count" class="text-cyan-400 font-semibold font-mono">0</span>
-                    offsets de télémétrie temps réel (buffer RAM) et des registres de configuration non-volatils (EEPROM).
+                    offsets de télémétrie temps réel (buffer RAM) et des registres de configuration non-volatils
+                    (EEPROM).
                   </p>
                 </div>
               </div>
@@ -2031,7 +2074,8 @@
                 </button>
               </div>
               <div class="flex-1 min-w-[200px] max-w-sm">
-                <input id="catalog-search" type="text" placeholder="Filtrer par offset, nom, valeur (ex: 37, fan, P4)..."
+                <input id="catalog-search" type="text"
+                  placeholder="Filtrer par offset, nom, valeur (ex: 37, fan, P4)..."
                   oninput="filterCatalogTable(this.value)"
                   class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1 text-xs text-white w-full placeholder-gray-500 focus:outline-none focus:border-cyan-500" />
               </div>
@@ -2076,7 +2120,8 @@
                   title="Permet d'écrire directement dans n'importe quel offset RAM ou EEPROM de la carte Micronova V018_1 via /deviceRequestWriting.">
                   <span>🧪</span><span>Injecteur d'Offset Mémoire Brut (RWMSmaster)</span>
                 </h4>
-                <p class="text-xs text-rose-300/80">Usage réservé aux techniciens et installateurs certifiés. Écriture directe dans la mémoire carte mère.</p>
+                <p class="text-xs text-rose-300/80">Usage réservé aux techniciens et installateurs certifiés. Écriture
+                  directe dans la mémoire carte mère.</p>
               </div>
             </div>
             <div class="flex flex-wrap items-center gap-2 pt-1">
@@ -2128,7 +2173,8 @@
               <h3 class="text-sm sm:text-base font-bold text-white flex items-center gap-2">
                 <span>📜</span><span>Console des Logs & Cycles Système</span>
               </h3>
-              <p class="text-xs text-gray-400">Cycles de scrutation, communications Cloud/Passerelle, télémétrie et alertes</p>
+              <p class="text-xs text-gray-400">Cycles de scrutation, communications Cloud/Passerelle, télémétrie et
+                alertes</p>
             </div>
 
             <!-- Filtres de sévérité & Recherche -->
@@ -2182,7 +2228,8 @@
                 title="Historique inaltérable de toutes les commandes et écritures de registres exécutées, avec possibilité de restaurer instantanément la valeur antérieure (Rollback).">
                 <span>🛡️</span><span>Journal d'Audit des Écritures & Rollback en 1-Clic</span>
               </h3>
-              <p class="text-xs text-gray-400">Traçabilité complète des modifications de consignes et restauration sécurisée en un clic</p>
+              <p class="text-xs text-gray-400">Traçabilité complète des modifications de consignes et restauration
+                sécurisée en un clic</p>
             </div>
             <button type="button" onclick="loadAudit()"
               class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs font-semibold text-gray-200 border border-gray-700 transition flex items-center gap-1.5 cursor-pointer shadow-sm">

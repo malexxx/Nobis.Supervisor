@@ -29,6 +29,7 @@ function openActionModal({
   message,
   htmlContent = null,
   showInput = false,
+  inputType = "text",
   defaultValue = "",
   confirmText = "Confirmer",
   cancelText = "Annuler",
@@ -50,9 +51,11 @@ function openActionModal({
   const inp = document.getElementById("action-modal-input");
   if (showInput) {
     inpWrap.classList.remove("hidden");
+    inp.type = inputType || "text";
     inp.value = defaultValue;
   } else {
     inpWrap.classList.add("hidden");
+    inp.type = "text";
   }
 
   const cancelBtn = document.getElementById("action-modal-cancel-btn");
@@ -77,6 +80,14 @@ function openActionModal({
     if (onConfirm) onConfirm(val);
   };
   btn.onclick = actionModalCallback;
+  inp.onkeydown = showInput
+    ? (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          if (actionModalCallback) actionModalCallback();
+        }
+      }
+    : null;
   document.getElementById("action-modal").classList.remove("hidden");
   if (showInput) setTimeout(() => inp.focus(), 50);
 }
@@ -87,6 +98,53 @@ function closeActionModal() {
 }
 
 const showActionModal = openActionModal;
+
+function promptInstallerUnlockAndRetry(onUnlockedCallback, customMsg = null) {
+  openActionModal({
+    title: "🔐 Authentification Installateur Requise",
+    message: customMsg || "Cette action modifie un paramètre protégé ou un registre système. Saisissez votre mot de passe Agua Cloud pour déverrouiller et poursuivre :",
+    showInput: true,
+    inputType: "password",
+    defaultValue: "",
+    confirmText: "Déverrouiller & Poursuivre",
+    onConfirm: async (pwd) => {
+      if (!pwd || !pwd.trim()) {
+        showToast("Mot de passe Agua Cloud requis.", true);
+        return;
+      }
+      try {
+        const res = await fetch("/api/installer/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password: pwd.trim() })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && (data.authenticated || data.success || data.status === "ok") && data.token) {
+          installerAuthToken = data.token;
+          sessionStorage.setItem("nobis_installer_token", installerAuthToken);
+          await checkInstallerAuthStatus();
+          if (typeof onUnlockedCallback === "function") {
+            await onUnlockedCallback();
+          }
+        } else {
+          showToast(data.detail || "Mot de passe Agua Cloud incorrect.", true);
+        }
+      } catch (err) {
+        showToast("Erreur authentification : " + err.message, true);
+      }
+    }
+  });
+}
+
+async function handleProtectedApiFailure(res, retryFn, errPrefix = "Erreur", authMsg = null) {
+  if (res.status === 403) {
+    promptInstallerUnlockAndRetry(retryFn, authMsg);
+    return true;
+  }
+  const err = await res.json().catch(() => ({}));
+  showToast(`${errPrefix} : ${err.detail || res.statusText || ("HTTP " + res.status)}`, true);
+  return false;
+}
 
 // Mode de communication actif (Cloud / Passerelle / Simulation)
 let currentCommMode = "agua_cloud";
@@ -2504,6 +2562,8 @@ async function createSnapshot() {
     if (nameInp) nameInp.value = "";
     await loadSnapshots();
     showToast("Snapshot des registres et paramètres enregistré !");
+  } else {
+    await handleProtectedApiFailure(res, () => createSnapshot(), "Erreur snapshot");
   }
 }
 
@@ -2513,16 +2573,18 @@ function restoreSnapshot(id, name) {
     message: `Confirmez-vous la restauration complète du Snapshot #${id} (${name}) vers les registres du poêle ?`,
     confirmText: "Restaurer",
     onConfirm: async () => {
-      const res = await fetch(`/api/snapshots/${id}/restore`, { method: "POST", headers: getInstallerHeaders() });
-      if (res.ok) {
-        const j = await res.json();
-        await loadDashboard();
-        await loadAudit();
-        showToast(`Snapshot restauré (${j.restored_registers} registres réécrits en batch).`);
-      } else {
-        const err = await res.json().catch(() => ({}));
-        showToast("Erreur restauration : " + (err.detail || res.statusText), true);
-      }
+      const execRestore = async () => {
+        const res = await fetch(`/api/snapshots/${id}/restore`, { method: "POST", headers: getInstallerHeaders() });
+        if (res.ok) {
+          const j = await res.json();
+          await loadDashboard();
+          await loadAudit();
+          showToast(`Snapshot restauré (${j.restored_registers} registres réécrits en batch).`);
+        } else {
+          await handleProtectedApiFailure(res, execRestore, "Erreur restauration");
+        }
+      };
+      await execRestore();
     }
   });
 }
@@ -2533,9 +2595,16 @@ function deleteSnapshot(id) {
     message: `Supprimer définitivement le Snapshot #${id} de la base SQLite ?`,
     confirmText: "Supprimer",
     onConfirm: async () => {
-      await fetch(`/api/snapshots/${id}`, { method: "DELETE", headers: getInstallerHeaders() });
-      await loadSnapshots();
-      showToast(`Snapshot #${id} supprimé.`);
+      const execDelete = async () => {
+        const res = await fetch(`/api/snapshots/${id}`, { method: "DELETE", headers: getInstallerHeaders() });
+        if (res.ok) {
+          await loadSnapshots();
+          showToast(`Snapshot #${id} supprimé.`);
+        } else {
+          await handleProtectedApiFailure(res, execDelete, "Erreur suppression");
+        }
+      };
+      await execDelete();
     }
   });
 }
@@ -4354,10 +4423,17 @@ function rollbackAudit(id, oldVal) {
     message: `Restaurer immédiatement l'ancienne valeur (${oldVal}) dans le registre ?`,
     confirmText: "Restaurer",
     onConfirm: async () => {
-      await fetch(`/api/rollback/${id}`, { method: "POST" });
-      await refreshLatestOnly();
-      await loadAudit();
-      showToast("Rollback effectué !");
+      const execRollback = async () => {
+        const res = await fetch(`/api/rollback/${id}`, { method: "POST", headers: getInstallerHeaders() });
+        if (res.ok) {
+          await refreshLatestOnly();
+          await loadAudit();
+          showToast("Rollback effectué !");
+        } else {
+          await handleProtectedApiFailure(res, execRollback, "Erreur rollback");
+        }
+      };
+      await execRollback();
     }
   });
 }
@@ -4413,26 +4489,68 @@ async function saveSettings() {
     weather_lon: document.getElementById("cfg-lon").value,
     pellet_bag_price_eur: document.getElementById("cfg-bag-price") ? document.getElementById("cfg-bag-price").value : "5.80",
     pellet_bags_stock: document.getElementById("cfg-bags-stock") ? document.getElementById("cfg-bags-stock").value : "40",
-    webhook_url: document.getElementById("cfg-webhook") ? document.getElementById("cfg-webhook").value : "",
+    webhook_url: document.getElementById("cfg-webhook") ? document.getElementById("cfg-webhook").value.trim() : "",
     matter_enabled: document.getElementById("cfg-matter-enabled") ? document.getElementById("cfg-matter-enabled").value : "1",
     matter_device_name: document.getElementById("cfg-matter-name") ? document.getElementById("cfg-matter-name").value : "Poêle Nobis A10",
     matter_port: document.getElementById("cfg-matter-port") ? document.getElementById("cfg-matter-port").value : "5540"
   };
+  let enteredRealPwd = "";
   if (mode === "agua_cloud") {
-    payload.agua_email = document.getElementById("cfg-email").value;
-    payload.agua_password = document.getElementById("cfg-pass").value;
+    payload.agua_email = document.getElementById("cfg-email").value.trim();
+    const passVal = document.getElementById("cfg-pass").value;
+    if (passVal && passVal !== "********") {
+      payload.agua_password = passVal;
+      enteredRealPwd = passVal;
+    }
   } else if (mode === "local_gateway") {
-    payload.local_gateway_url = document.getElementById("cfg-gw").value;
+    payload.local_gateway_url = document.getElementById("cfg-gw").value.trim();
   }
-  const res = await fetch("/api/settings", {
-    method: "POST",
-    headers: getInstallerHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify(payload)
-  });
-  const j = await res.json();
-  closeConfigModal();
-  await loadDashboard();
-  showToast("Configuration enregistrée ! Base active : " + (j.active_db || ""));
+
+  try {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: getInstallerHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      await handleProtectedApiFailure(
+        res,
+        () => saveSettings(),
+        "Erreur sauvegarde",
+        "La modification de ces réglages sensibles nécessite votre mot de passe Agua Cloud actuel :"
+      );
+      return;
+    }
+    const j = await res.json();
+    const passInp = document.getElementById("cfg-pass");
+    if (passInp && enteredRealPwd) {
+      passInp.value = "********";
+      if (!installerAuthToken) {
+        try {
+          const authRes = await fetch("/api/installer/verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password: enteredRealPwd })
+          });
+          if (authRes.ok) {
+            const authJson = await authRes.json().catch(() => ({}));
+            if (authJson.token) {
+              installerAuthToken = authJson.token;
+              sessionStorage.setItem("nobis_installer_token", installerAuthToken);
+              await checkInstallerAuthStatus();
+            }
+          }
+        } catch {
+          // Déverrouillage optionnel post-sauvegarde
+        }
+      }
+    }
+    closeConfigModal();
+    await loadDashboard();
+    showToast("Configuration enregistrée ! Base active : " + (j.active_db || ""));
+  } catch (err) {
+    showToast("Erreur réseau lors de la sauvegarde : " + err.message, true);
+  }
 }
 
 async function testConnection() {
@@ -4442,10 +4560,13 @@ async function testConnection() {
   const mode = document.getElementById("cfg-mode").value;
   const payload = { comm_mode: mode };
   if (mode === "agua_cloud") {
-    payload.agua_email = document.getElementById("cfg-email").value;
-    payload.agua_password = document.getElementById("cfg-pass").value;
+    payload.agua_email = document.getElementById("cfg-email").value.trim();
+    const passVal = document.getElementById("cfg-pass").value;
+    if (passVal && passVal !== "********") {
+      payload.agua_password = passVal;
+    }
   } else if (mode === "local_gateway") {
-    payload.local_gateway_url = document.getElementById("cfg-gw").value;
+    payload.local_gateway_url = document.getElementById("cfg-gw").value.trim();
   }
   const res = await fetch("/api/test-connection", {
     method: "POST",
@@ -4463,12 +4584,6 @@ async function testWebhook() {
     showToast("Renseignez une URL Webhook / ntfy.sh avant de tester.", true);
     return;
   }
-  // Sauvegarde préalable de l'URL webhook
-  await fetch("/api/settings", {
-    method: "POST",
-    headers: getInstallerHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ webhook_url: url })
-  });
   const res = await fetch("/api/test-webhook", {
     method: "POST",
     headers: getInstallerHeaders({ "Content-Type": "application/json" }),
@@ -4478,7 +4593,7 @@ async function testWebhook() {
   if (res.ok && (j.status === "ok" || j.ok)) {
     showToast(j.message || "Notification de test envoyée avec succès !");
   } else {
-    showToast(j.detail || "Échec de l'envoi Webhook (vérifiez l'URL).", true);
+    showToast(j.detail || j.message || "Échec de l'envoi Webhook (vérifiez l'URL).", true);
   }
 }
 
@@ -4762,15 +4877,22 @@ function confirmResetMatterPairing() {
     message: "Cette action dissociera le poêle de Google Home / Nest Hub Max et générera un nouveau QR Code d'appairage vierge.",
     confirmText: "Réinitialiser",
     onConfirm: async () => {
-      try {
-        showToast("Réinitialisation du pont Matter en cours...");
-        const res = await fetch("/api/matter/factory-reset", { method: "POST", headers: getInstallerHeaders() });
-        const data = await res.json();
-        renderMatterStatus(data);
-        showToast("Nouveau QR Code Matter généré !");
-      } catch (err) {
-        showToast("Erreur lors de la réinitialisation Matter", true);
-      }
+      const execReset = async () => {
+        try {
+          showToast("Réinitialisation du pont Matter en cours...");
+          const res = await fetch("/api/matter/factory-reset", { method: "POST", headers: getInstallerHeaders() });
+          if (!res.ok) {
+            await handleProtectedApiFailure(res, execReset, "Erreur réinitialisation Matter");
+            return;
+          }
+          const data = await res.json();
+          renderMatterStatus(data);
+          showToast("Nouveau QR Code Matter généré !");
+        } catch (err) {
+          showToast("Erreur lors de la réinitialisation Matter : " + err.message, true);
+        }
+      };
+      await execReset();
     }
   });
 }
