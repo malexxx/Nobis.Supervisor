@@ -4,16 +4,17 @@ Regroupe le réglage des températures/ventilations/puissances (/api/stove/set),
 les écritures directes de registres, le réapprovisionnement de la trémie et la gestion des lots de pellets.
 """
 from datetime import datetime
-import time
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Body, HTTPException, Path
+from fastapi import APIRouter, Body, HTTPException, Path, Request
 
 from analytics import get_pellet_batch_state
 from config import HOPPER_CAPACITY_KG, PELLET_BAG_WEIGHT_KG
 from database import db_log, get_active_mode, get_db, get_registers_dict, get_settings_dict, get_sys_db
+from routers.installer import require_installer_auth_if_configured
 from schemas import BatchCommandPayload, CommandPayload, RefillHopperPayload, StoveSetPayload
 from telemetry import (
+    _stove_io_lock,
     collect_telemetry_cycle,
     execute_register_write,
     execute_registers_batch_write,
@@ -23,15 +24,31 @@ from telemetry import (
 router = APIRouter(prefix="/api", tags=["Stove Control"])
 
 
+def _is_raw_or_privileged_write(reg_key: str, offset: Optional[int], regs_catalog: Dict[str, Any]) -> bool:
+    """Identifie les écritures d'offsets bruts ou hors catalogue réservées à l'installateur."""
+    rk = (reg_key or "").strip()
+    if rk == "raw_offset" or rk.upper().startswith("RAW_") or rk not in regs_catalog:
+        return True
+    if offset is not None and int(offset) != int(regs_catalog[rk].get("offset", offset)):
+        return True
+    return False
+
+
 @router.post("/command")
-async def api_command(payload: CommandPayload):
+async def api_command(payload: CommandPayload, request: Request):
     """Écriture unitaire d'un registre."""
+    regs = get_registers_dict(get_active_mode())
+    if _is_raw_or_privileged_write(payload.reg_key, payload.offset, regs):
+        require_installer_auth_if_configured(request)
     return await execute_register_write(payload.reg_key, payload.value, payload.offset)
 
 
 @router.post("/command-batch")
-async def api_command_batch(payload: BatchCommandPayload):
+async def api_command_batch(payload: BatchCommandPayload, request: Request):
     """Écriture groupée de plusieurs registres en une seule transaction."""
+    regs = get_registers_dict(get_active_mode())
+    if any(_is_raw_or_privileged_write(c.reg_key, c.offset, regs) for c in payload.commands):
+        require_installer_auth_if_configured(request)
     cmds = [{"reg_key": c.reg_key, "value": c.value, "offset": c.offset} for c in payload.commands]
     return await execute_registers_batch_write(cmds)
 
@@ -97,25 +114,30 @@ async def api_refill_hopper(payload: Optional[RefillHopperPayload] = Body(defaul
     bags_added = payload.bags_added if payload is not None else 2.0
     active_mode = get_active_mode()
 
-    conn = get_db(active_mode)
-    try:
-        last_row = conn.execute("SELECT id, pellet_hopper_pct FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
-        prev_pct = float(last_row["pellet_hopper_pct"]) if last_row else 50.0
-        if payload is not None and payload.bags_added == 1.0 and payload.level_pct is None and payload.target_pct == 100.0:
-            added_pct = (PELLET_BAG_WEIGHT_KG / HOPPER_CAPACITY_KG) * 100.0
-            new_pct = round(min(100.0, prev_pct + added_pct), 1)
-        else:
-            req_pct = (payload.level_pct if (payload is not None and payload.level_pct is not None) else (payload.target_pct if payload is not None else 100.0))
-            new_pct = round(min(100.0, req_pct), 1)
+    async with _stove_io_lock:
+        conn = get_db(active_mode)
+        try:
+            last_row = conn.execute("SELECT id, pellet_hopper_pct FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
+            prev_pct = float(last_row["pellet_hopper_pct"]) if last_row else 50.0
+            if payload is not None and payload.level_pct is not None:
+                new_pct = round(min(100.0, max(0.0, float(payload.level_pct))), 1)
+            elif payload is not None and "target_pct" in payload.model_fields_set:
+                new_pct = round(min(100.0, max(0.0, float(payload.target_pct))), 1)
+            elif payload is not None and "bags_added" in payload.model_fields_set:
+                added_pct = (float(payload.bags_added) * PELLET_BAG_WEIGHT_KG / HOPPER_CAPACITY_KG) * 100.0
+                new_pct = round(min(100.0, prev_pct + added_pct), 1)
+            else:
+                req_pct = payload.target_pct if payload is not None else 100.0
+                new_pct = round(min(100.0, max(0.0, float(req_pct))), 1)
 
-        if last_row:
-            conn.execute(
-                "UPDATE telemetry SET pellet_hopper_pct = ?, popup_pellet_empty = 0, epoch = ? WHERE id = ?",
-                (new_pct, int(time.time()), last_row["id"]),
-            )
-            conn.commit()
-    finally:
-        conn.close()
+            if last_row:
+                conn.execute(
+                    "UPDATE telemetry SET pellet_hopper_pct = ?, popup_pellet_empty = 0 WHERE id = ?",
+                    (new_pct, last_row["id"]),
+                )
+                conn.commit()
+        finally:
+            conn.close()
 
     settings = get_settings_dict()
     try:
@@ -146,14 +168,15 @@ async def api_refill_hopper(payload: Optional[RefillHopperPayload] = Body(defaul
         active_mode,
     )
     latest = await collect_telemetry_cycle(active_mode)
-    conn = get_db(active_mode)
-    try:
-        new_last = conn.execute("SELECT id FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
-        if new_last:
-            conn.execute("UPDATE telemetry SET pellet_hopper_pct = ? WHERE id = ?", (new_pct, new_last["id"]))
-            conn.commit()
-    finally:
-        conn.close()
+    async with _stove_io_lock:
+        conn = get_db(active_mode)
+        try:
+            new_last = conn.execute("SELECT id FROM telemetry ORDER BY epoch DESC LIMIT 1").fetchone()
+            if new_last:
+                conn.execute("UPDATE telemetry SET pellet_hopper_pct = ?, popup_pellet_empty = 0 WHERE id = ?", (new_pct, new_last["id"]))
+                conn.commit()
+        finally:
+            conn.close()
     latest["pellet_hopper_pct"] = new_pct
     return {
         "status": "ok",
@@ -181,8 +204,12 @@ async def api_pellet_batch_status():
 
 @router.post("/sync-clock")
 async def api_sync_clock():
-    """Synchronise l'horloge interne de la carte électronique Micronova."""
-    now = datetime.now()
+    """Synchronise l'horloge interne de la carte électronique Micronova (heure Europe/Paris)."""
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("Europe/Paris"))
+    except Exception:
+        now = datetime.now()
     clock_commands = [
         {"reg_key": "clock_hour_set", "offset": 34048, "value": float(now.hour)},
         {"reg_key": "clock_minute_set", "offset": 34049, "value": float(now.minute)},

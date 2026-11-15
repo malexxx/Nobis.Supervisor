@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from database import db_log, get_active_mode
 from matter_service import matter_manager
+from routers.installer import require_installer_auth_if_configured
 from schemas import MatterWebhookPayload
 from telemetry import execute_register_write
 
@@ -26,8 +27,9 @@ async def api_matter_restart():
 
 
 @router.post("/factory-reset")
-async def api_matter_factory_reset():
+async def api_matter_factory_reset(request: Request):
     """Réinitialise l'appairage Matter et génère un nouveau code d'appairage."""
+    require_installer_auth_if_configured(request)
     return await matter_manager.factory_reset()
 
 

@@ -2,7 +2,6 @@
 Sous-routeur pour l'assistant d'étalonnage couplé Nobis A10 (Nobis.Supervisor).
 Gère la page HTML du wizard et les étapes d'acquisition multi-phases et tarage EEPROM.
 """
-import asyncio
 import os
 from typing import Any, Dict
 
@@ -10,8 +9,8 @@ from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import HTMLResponse
 
 from config import BASE_DIR
-from database import get_active_mode, get_db
-from telemetry import execute_register_write
+from database import get_active_mode, get_db, get_registers_dict
+from telemetry import execute_register_write, execute_registers_batch_write
 
 router = APIRouter(tags=["Calibration"])
 
@@ -62,14 +61,13 @@ async def api_calibration_step1_start(payload: Dict[str, Any] = Body(default={})
 
     sample = build_sample_from_record(latest)
 
-    def _disable_pwf_cb():
-        try:
-            asyncio.create_task(execute_register_write("fun_pwf_set", 0.0, 33154, skip_poll=True))
-            return True
-        except Exception:
-            return False
+    if sample.powerful_enabled_mode != "OFF" or sample.power_level == 8:
+        res_pwf = await execute_register_write("fun_pwf_set", 0.0, 33154, skip_poll=True)
+        pwf_ok = res_pwf.get("status") == "ok"
+    else:
+        pwf_ok = True
 
-    return calib_srv.start_preflight(mode_str, sample, disable_p8_fn=_disable_pwf_cb)
+    return calib_srv.start_preflight(mode_str, sample, disable_p8_fn=lambda: pwf_ok)
 
 
 @router.post("/api/calibration/step2-confirm-al03")
@@ -88,14 +86,14 @@ async def api_calibration_step2_confirm():
 
     sample = build_sample_from_record(latest)
 
-    def _reset_alarm_cb():
-        try:
-            asyncio.create_task(execute_register_write("status_code", 85.0, 232, skip_poll=True))
-            return True
-        except Exception:
-            return False
+    if sample.alarm_code == "AL-03":
+        # Sécurité physique (BB-02) : envoyer 170.0 (OFF / Reset Alarme) et JAMAIS 85.0 (Allumage) sur cuve vide
+        res_rst = await execute_register_write("status_code", 170.0, 232, skip_poll=True)
+        rst_ok = res_rst.get("status") == "ok"
+    else:
+        rst_ok = False
 
-    return calib_srv.confirm_initial_al03(sample, reset_alarm_fn=_reset_alarm_cb)
+    return calib_srv.confirm_initial_al03(sample, reset_alarm_fn=lambda: rst_ok)
 
 
 @router.post("/api/calibration/step3-load-charge")
@@ -123,19 +121,35 @@ async def api_calibration_step5_apply():
     """Étape 5 : Application en 1 clic des Offsets 70 et 71 dans l'EEPROM Micronova."""
     from src.calibration.calibration_service import get_calibration_service
     calib_srv = get_calibration_service()
+    active_mode = get_active_mode()
 
-    written_vals = {}
+    if calib_srv.engine.result is not None:
+        t70 = int(calib_srv.engine.result.recommended_offset_70)
+        t71 = int(calib_srv.engine.result.recommended_offset_71)
+        batch_res = await execute_registers_batch_write([
+            {"reg_key": "trim_pellet_pct", "value": float(t70), "offset": 70},
+            {"reg_key": "trim_exhaust_pct", "value": float(t71), "offset": 71},
+        ])
+        batch_ok = batch_res.get("status") == "ok"
+    else:
+        batch_ok = False
 
     def _write_reg(reg: int, val: int) -> bool:
-        written_vals[reg] = val
-        rk = "trim_pellet_pct" if reg == 70 else "trim_exhaust_pct"
-        asyncio.create_task(execute_register_write(rk, float(val), reg))
-        return True
+        return bool(batch_ok)
 
     def _read_reg(reg: int) -> int:
-        return written_vals.get(reg, 0)
+        regs = get_registers_dict(active_mode)
+        rk = "trim_pellet_pct" if reg == 70 else "trim_exhaust_pct"
+        return int(round(float(regs.get(rk, {}).get("current_val", 0))))
 
-    return calib_srv.apply_recommendations(write_fn=_write_reg, read_fn=_read_reg)
+    res = calib_srv.apply_recommendations(write_fn=_write_reg, read_fn=_read_reg)
+    if active_mode == "agua_cloud" and res.get("success"):
+        res["remote_manual_required"] = True
+        res["message"] = (
+            res.get("message", "")
+            + " (En mode Agua Cloud, reportez également ces valeurs sur la radiocommande physique)."
+        )
+    return res
 
 
 @router.post("/api/calibration/reset")

@@ -3,6 +3,13 @@
 .node
 .vscode
 .pytest_cache
+.ruff_cache
+.hypothesis
+.schemathesis
+.coverage
+.mutmut-cache
+htmlcov/
+tests/
 __pycache__
 *.pyc
 *.pyo

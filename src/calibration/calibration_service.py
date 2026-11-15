@@ -60,10 +60,9 @@ def build_sample_from_record(
     else:
         phase = StoveOperationalPhase.WORK
 
-    # Alarm code
+    # Alarm code (ne jamais assimiler popup_pellet_empty=1 [réserve ~12%] à l'alarme sèche AL-03)
     alarm_num = int(record.get("alarm_code") or 0)
-    pellet_empty = int(record.get("popup_pellet_empty") or 0)
-    if alarm_num == 3 or pellet_empty == 1:
+    if alarm_num == 3:
         alarm_str = "AL-03"
     elif alarm_num == 2:
         alarm_str = "AL-02"
@@ -88,13 +87,26 @@ def build_sample_from_record(
     else:
         rpm_act = 338.0 + (p_actual - 1) * ((850.0 - 338.0) / 6.0) if p_actual >= 1 else 338.0
 
-    # Détection de courant à vide
-    if alarm_str == "AL-03" or pellet_empty == 1:
+    # Détection de courant à vide (uniquement sur véritable alarme AL-03)
+    if alarm_str == "AL-03":
         cur_ma = 45.0
     else:
         cur_ma = 150.0
 
     pwf_mode = "ON" if fun_pwf == 1 else "OFF"
+
+    # Normalisation de l'échelle de dépression : coaxiale réelle (2.3-3.8 Pa) vs banc de test (>= 8 Pa / 18 Pa)
+    target_coax_pa = round(2.0 + max(1, min(7, p_actual)) * 0.25, 2)
+    raw_dep_pa = float(record.get("depression_pa") or 0.0)
+    if raw_dep_pa <= 0.0:
+        flue_pa = target_coax_pa
+        flue_set_pa = target_coax_pa
+    elif raw_dep_pa < 8.0:
+        flue_pa = raw_dep_pa
+        flue_set_pa = target_coax_pa
+    else:
+        flue_pa = raw_dep_pa
+        flue_set_pa = 18.0
 
     return TelemetrySample(
         timestamp=float(record.get("epoch") or time.time()),
@@ -104,8 +116,8 @@ def build_sample_from_record(
         auger_rpm_actual=round(rpm_act, 1),
         auger_rpm_set=round(rpm_act, 1),
         auger_current_ma=cur_ma,
-        flue_pressure_pa=float(record.get("depression_pa") or 18.0),
-        flue_pressure_set_pa=18.0,
+        flue_pressure_pa=flue_pa,
+        flue_pressure_set_pa=flue_set_pa,
         smoke_extractor_rpm=float(record.get("exhaust_rpm") or 1850.0),
         flame_temp_c=float(record.get("temp_probe_k") or 600.0),
         smoke_temp_c=float(record.get("temp_fumes") or 135.0),

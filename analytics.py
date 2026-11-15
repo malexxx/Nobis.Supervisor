@@ -9,7 +9,7 @@ import statistics
 from typing import Any, Dict, List, Optional, Tuple
 
 from clients import weather_service
-from database import get_rolling_consumption_stats, get_sys_db
+from database import get_rolling_consumption_stats, get_settings_dict, get_sys_db
 
 # ==============================================================================
 # ALGORITHME D'ÉVALUATION PAR LOT NOBIS A10 C LIGHT STYLE COAX (MÉLANGE P/A)
@@ -490,6 +490,14 @@ def evaluate_batch_combustion_and_trim(conn: Any, current_record: Dict[str, Any]
     cur_dep = float(current_record.get("depression_pa") or 0.0)
     cur_rpm = int(current_record.get("exhaust_rpm") or 0)
 
+    try:
+        poll_interval_s = max(15.0, min(3600.0, float(get_settings_dict().get("poll_interval_s", "120"))))
+    except (ValueError, TypeError):
+        poll_interval_s = 120.0
+    max_gap_s = max(360.0, poll_interval_s * 2.5)
+    max_dt_s = max(180.0, poll_interval_s * 1.5)
+    default_first_dt_s = min(60.0, poll_interval_s)
+
     rows = conn.execute("""
         SELECT id, epoch, status_code, alarm_code, popup_flags,
                temp_fumes, temp_probe_k, exhaust_rpm, depression_pa,
@@ -516,7 +524,7 @@ def evaluate_batch_combustion_and_trim(conn: Any, current_record: Dict[str, Any]
         al = int(r["alarm_code"] or 0)
         pop = int(r["popup_flags"] or 0)
 
-        is_break = (prev_epoch is not None and (ep - prev_epoch) > 300)
+        is_break = (prev_epoch is not None and (ep - prev_epoch) > max_gap_s)
         if st != 5 or al != 0 or pop != 0 or is_break:
             cycle_start_epoch = None
             cycle_counted = False
@@ -536,7 +544,7 @@ def evaluate_batch_combustion_and_trim(conn: Any, current_record: Dict[str, Any]
         vdr = int(r["duct_right_actual"] or 0)
         is_vented = (vf > 0 or vdl > 0 or vdr > 0)
 
-        dt = min(60.0, max(1.0, float(ep - prev_epoch))) if prev_epoch else 30.0
+        dt = min(max_dt_s, max(1.0, float(ep - prev_epoch))) if prev_epoch else default_first_dt_s
         prev_epoch = ep
 
         time_in_cycle = ep - cycle_start_epoch
@@ -722,14 +730,19 @@ def evaluate_batch_combustion_and_trim(conn: Any, current_record: Dict[str, Any]
             f"Réglage PRISE D'AIR ({cur_e_trim:+d}%) optimal."
         )
 
+    med_pwr = float(statistics.median(s["power_actual"] for s in stabilized_samples))
+    target_flame = round(430.0 + med_pwr * 40.0, 1)
+    flame_deltas = [float(s["temp_probe_k"]) - (430.0 + float(s["power_actual"]) * 40.0) for s in stabilized_samples]
+    flame_delta_avg = round(sum(flame_deltas) / len(flame_deltas), 1)
+
     pellet_quality = {
         "status": "active",
         "quality_score": 95 if p_color == "emerald" else (75 if p_color == "amber" else 55),
         "quality_label": p_label,
         "quality_color": p_color,
-        "target_flame_temp": round(med_fumes * 3.2, 1),
-        "flame_delta": round(cur_flame - med_flame, 1),
-        "flame_delta_avg": round(med_fumes - 150.0, 1),
+        "target_flame_temp": target_flame,
+        "flame_delta": round(cur_flame - target_flame, 1),
+        "flame_delta_avg": flame_delta_avg,
         "stable_minutes": int(stable_minutes),
         "current_trim": cur_p_trim,
         "suggested_trim": sug_p,

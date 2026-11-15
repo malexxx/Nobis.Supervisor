@@ -119,14 +119,22 @@ async def activate_silence_mode(duration_hours: float = 2.0) -> Dict[str, Any]:
         cmd_val = float(regs["status_code"].get("current_val", 0.0))
         is_stove_on = (cmd_val == 85.0)
 
-    initial_state = {}
+    existing_state = get_silence_state()
+    preserve_initial = (
+        bool(existing_state.get("active", False))
+        and float(existing_state.get("end_epoch", 0.0)) > time.time()
+        and isinstance(existing_state.get("initial_state"), dict)
+        and bool(existing_state.get("initial_state"))
+    )
+    initial_state = dict(existing_state["initial_state"]) if preserve_initial else {}
     for k in SILENCE_KEYS_TO_SAVE:
-        if k in regs:
-            initial_state[k] = float(regs[k].get("current_val", 0.0))
-        elif latest_dict and k in latest_dict and latest_dict[k] is not None:
-            initial_state[k] = float(latest_dict[k])
-        else:
-            initial_state[k] = 0.0
+        if k not in initial_state:
+            if k in regs:
+                initial_state[k] = float(regs[k].get("current_val", 0.0))
+            elif latest_dict and k in latest_dict and latest_dict[k] is not None:
+                initial_state[k] = float(latest_dict[k])
+            else:
+                initial_state[k] = 0.0
 
     if is_stove_on:
         activation_cmds = [
@@ -275,7 +283,8 @@ async def deactivate_silence_mode(is_auto_expired: bool = False, override_comman
             target_val = float(initial.get(k, def_val))
         restore_cmds.append({"reg_key": k, "value": target_val, "offset": off})
 
-    restore_cmds.append({"reg_key": "set_silece_set", "value": 0.0, "offset": int(regs.get("set_silece_set", {}).get("offset", 33250))})
+    target_silece = float(overrides_dict.get("set_silece_set", 0.0))
+    restore_cmds.append({"reg_key": "set_silece_set", "value": target_silece, "offset": int(regs.get("set_silece_set", {}).get("offset", 33250))})
 
     write_res = await execute_registers_batch_write(restore_cmds)
 

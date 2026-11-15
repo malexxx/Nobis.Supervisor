@@ -20,11 +20,30 @@ _failed_auth_attempts: Dict[str, List[float]] = {}  # ip -> timestamps
 
 
 def _clean_expired_installer_sessions():
-    """Purge de la mémoire les jetons de session installateur expirés."""
+    """Purge de la mémoire les jetons de session installateur expirés et les tentatives anciennes."""
     now_ts = time.time()
     for tok in list(_installer_sessions.keys()):
         if _installer_sessions[tok] <= now_ts:
             _installer_sessions.pop(tok, None)
+    for ip in list(_failed_auth_attempts.keys()):
+        valid = [t for t in _failed_auth_attempts[ip] if now_ts - t < 60.0]
+        if valid:
+            _failed_auth_attempts[ip] = valid
+        else:
+            _failed_auth_attempts.pop(ip, None)
+
+
+def _get_client_ip(request: Request) -> str:
+    """Identifie l'IP réelle du client y compris derrière un reverse-proxy local (Caddy / Docker)."""
+    host = request.client.host if request.client else "unknown"
+    if host in ("127.0.0.1", "::1", "localhost") or host.startswith("172.") or host.startswith("10."):
+        xff = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        if xff:
+            return xff
+        xri = request.headers.get("X-Real-IP", "").strip()
+        if xri:
+            return xri
+    return host
 
 
 def is_installer_authenticated(request: Request) -> bool:
@@ -32,6 +51,18 @@ def is_installer_authenticated(request: Request) -> bool:
     _clean_expired_installer_sessions()
     tok = request.headers.get("X-Installer-Token", "").strip()
     return bool(tok and tok in _installer_sessions and _installer_sessions[tok] > time.time())
+
+
+def require_installer_auth_if_configured(request: Request) -> None:
+    """Exige un jeton installateur valide si un mot de passe Agua Cloud est configuré en base."""
+    pwd = (get_settings_dict().get("agua_password") or "").strip()
+    if not pwd:
+        return None
+    if not is_installer_authenticated(request):
+        raise HTTPException(
+            status_code=403,
+            detail="Authentification installateur requise (jeton X-Installer-Token manquant ou expiré).",
+        )
 
 
 def clear_installer_sessions():
@@ -42,8 +73,9 @@ def clear_installer_sessions():
 @router.post("/verify", responses={400: {"description": "Mot de passe non configuré"}, 401: {"description": "Mot de passe Agua Cloud incorrect"}, 429: {"description": "Trop de tentatives échouées"}})
 async def api_installer_verify(payload: InstallerVerifyPayload, request: Request):
     """Vérifie le mot de passe Agua Cloud pour déverrouiller l'accès au menu installateur et registres."""
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _get_client_ip(request)
     now_ts = time.time()
+    _clean_expired_installer_sessions()
 
     attempts = [t for t in _failed_auth_attempts.get(client_ip, []) if now_ts - t < 60.0]
     if len(attempts) >= 5:

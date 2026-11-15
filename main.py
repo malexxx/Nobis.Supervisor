@@ -11,6 +11,7 @@ import logging
 import os
 import sys
 import time
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.openapi.utils import get_openapi
@@ -241,6 +242,19 @@ async def security_headers_middleware(request: Request, call_next):
             }
             return Response(status_code=200, headers=headers)
 
+    if request.method in ("POST", "PUT", "DELETE", "PATCH") and request.url.path.startswith("/api/") and request.url.path != "/api/matter/webhook":
+        ctype = (request.headers.get("content-type") or "").lower()
+        if ctype.startswith(("application/x-www-form-urlencoded", "multipart/form-data", "text/plain")):
+            return JSONResponse(status_code=403, content={"detail": "Type de contenu de formulaire refusé (protection anti-CSRF)."})
+        origin = (request.headers.get("origin") or "").strip()
+        if origin:
+            if origin == "null":
+                return JSONResponse(status_code=403, content={"detail": "Origine Cross-Origin refusée (protection anti-CSRF)."})
+            orig_host = urlparse(origin).netloc.lower()
+            req_host = (request.headers.get("host") or "").lower()
+            if orig_host and req_host and orig_host != req_host:
+                return JSONResponse(status_code=403, content={"detail": "Origine Cross-Origin refusée (protection anti-CSRF)."})
+
     response = await call_next(request)
     if response.status_code == 405:
         allowed = _get_allowed_methods_for_path(request.url.path)
@@ -251,6 +265,14 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "img-src 'self' data: blob: https:; "
+        "connect-src 'self' ws: wss: https:;"
+    )
     if request.url.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
     return response
@@ -324,9 +346,14 @@ async def healthcheck():
     }
 
 
-@app.get("/api/events", responses={200: {"content": {"text/event-stream": {}}}})
+MAX_SSE_SUBSCRIBERS = 32
+
+
+@app.get("/api/events", responses={200: {"content": {"text/event-stream": {}}}, 503: {"description": "Trop de connexions SSE simultanées"}})
 async def api_sse_events(request: Request):
     """Flux temps réel Server-Sent Events (SSE) poussant chaque mise à jour de télémétrie."""
+    if len(sse_subscribers) >= MAX_SSE_SUBSCRIBERS:
+        raise HTTPException(status_code=503, detail="Trop de connexions SSE simultanées.")
     queue: asyncio.Queue = asyncio.Queue(maxsize=10)
     sse_subscribers.add(queue)
 

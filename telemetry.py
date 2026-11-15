@@ -234,6 +234,16 @@ async def _collect_telemetry_unlocked(force_mode: Optional[str] = None) -> Dict[
             db_log("ERROR", "LOCAL_GATEWAY", f"Échec lecture passerelle UART : {str(e)}", "local_gateway")
 
     if raw_buf:
+        for signed_off in (70, 71):
+            if signed_off in raw_buf:
+                sv = float(raw_buf[signed_off])
+                if 128.0 <= sv <= 255.0:
+                    raw_buf[signed_off] = sv - 256.0
+        for rk, meta in regs.items():
+            off = int(meta["offset"])
+            if off in raw_buf:
+                r_val[rk] = float(raw_buf[off])
+
         _comm_status["connected"] = True
         _comm_status["last_sync_time"] = now_str
         _comm_status["last_sync_epoch"] = int(now.timestamp())
@@ -272,7 +282,8 @@ async def _collect_telemetry_unlocked(force_mode: Optional[str] = None) -> Dict[
         popup_door_open = 1 if (popup_flags & 16) else 0
         popup_pellet_empty = 1 if (popup_flags & 64) else 0
 
-        temp_amb = float(raw_buf.get(103, prev.get("temp_ambient") or 19.0))
+        raw_amb = raw_buf.get(103) if 103 in raw_buf else raw_buf.get(1)
+        temp_amb = float(raw_amb if raw_amb is not None else (prev.get("temp_ambient") or 19.0))
         setpoint_amb = float(raw_buf.get(33122, r_val.get("temp_amb_setpoint", 19.0)))
         temp_fumes = float(raw_buf.get(2, prev.get("temp_fumes") or 25.0))
         temp_probe_k = float(raw_buf.get(0, prev.get("temp_probe_k") or 25.0))
@@ -402,10 +413,13 @@ async def _collect_telemetry_unlocked(force_mode: Optional[str] = None) -> Dict[
         try:
             for rk, meta in regs.items():
                 off = int(meta["offset"])
-                if off in raw_buf:
+                val_to_store = raw_buf.get(off)
+                if val_to_store is None and rk == "temp_ambient" and 1 in raw_buf:
+                    val_to_store = raw_buf[1]
+                if val_to_store is not None:
                     conn.execute(
                         "UPDATE registers_catalog SET current_val = ?, updated_at = ? WHERE reg_key = ?",
-                        (float(raw_buf[off]), now_str, rk)
+                        (float(val_to_store), now_str, rk)
                     )
             conn.commit()
         finally:
@@ -660,8 +674,8 @@ async def _collect_telemetry_unlocked(force_mode: Optional[str] = None) -> Dict[
             "22": 64,
             "28": 40,
             "29": 40,
-            "31": duct_left_actual,
-            "32": duct_right_actual,
+            "31": duct_right_actual,
+            "32": duct_left_actual,
             "34": 0,
             "37": int(round(sim_dep * 10.0)),
             "40": 0,

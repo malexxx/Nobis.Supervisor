@@ -2,7 +2,9 @@ import os
 import sys
 import time
 import uuid
+import socket
 import asyncio
+import ipaddress
 from urllib.parse import urlparse
 from contextlib import asynccontextmanager
 from typing import Dict, Any, List, Optional, Tuple, AsyncIterator
@@ -14,27 +16,133 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from config import AGUA_REG_KEY_ALIASES, HOPPER_CAPACITY_KG
-from database import db_log
+from database import db_log, get_sys_db
 
 # ==============================================================================
-# SÉCURITÉ : VALIDATION ANTI-SSRF POUR LES WEBHOOKS & NOTIFICATIONS
+# SÉCURITÉ : VALIDATION ANTI-SSRF POUR LES WEBHOOKS, PASSERELLES & NOTIFICATIONS
 # ==============================================================================
 _FORBIDDEN_HOSTS = {
-    "127.0.0.1", "localhost", "::1", "0.0.0.0", "0", "169.254.169.254", "metadata.google.internal", "broadcasthost"
+    "127.0.0.1", "localhost", "localhost.localdomain", "::1", "0.0.0.0", "0",
+    "169.254.169.254", "metadata.google.internal", "broadcasthost"
 }
+
+_DEFAULT_HARDCODED_DEVICE = "597775E6-C29D-4CB0-ABF8-36F6C8E704ED"
+_DEFAULT_HARDCODED_PRODUCT = "CCC78CA4-E701-4976-A981-1F8F61C9D4F7"
+
+
+def _is_forbidden_webhook_ip(ip_obj: ipaddress._BaseAddress) -> bool:
+    """Retourne True si l'adresse IP appartient à un réseau local, privé, loopback ou réservé."""
+    mapped = getattr(ip_obj, "ipv4_mapped", None)
+    if mapped is not None and _is_forbidden_webhook_ip(mapped):
+        return True
+    return bool(
+        ip_obj.is_private
+        or ip_obj.is_loopback
+        or ip_obj.is_link_local
+        or ip_obj.is_multicast
+        or ip_obj.is_reserved
+        or ip_obj.is_unspecified
+    )
+
+
+def _is_loopback_or_metadata_ip(ip_obj: ipaddress._BaseAddress) -> bool:
+    """Retourne True si l'IP cible loopback, link-local (metadata), multicast ou unspecified."""
+    mapped = getattr(ip_obj, "ipv4_mapped", None)
+    if mapped is not None and _is_loopback_or_metadata_ip(mapped):
+        return True
+    return bool(
+        ip_obj.is_loopback
+        or ip_obj.is_link_local
+        or ip_obj.is_multicast
+        or ip_obj.is_unspecified
+    )
 
 
 def is_safe_webhook_url(url: str) -> bool:
-    """Vérifie qu'une URL de webhook est sûre et ne tente pas un SSRF vers la boucle locale ou les métadonnées."""
+    """Vérifie qu'une URL de webhook est sûre et ne tente pas un SSRF (loopback, IPv6 mappé, RFC1918, métadonnées)."""
     if not url or not isinstance(url, str):
         return False
     try:
         parsed = urlparse(url.strip())
         if parsed.scheme not in ("http", "https"):
             return False
-        hostname = (parsed.hostname or "").lower().strip()
-        if not hostname or hostname in _FORBIDDEN_HOSTS or hostname.startswith("127."):
+        hostname = (parsed.hostname or "").lower().strip().rstrip(".")
+        if (
+            not hostname
+            or hostname in _FORBIDDEN_HOSTS
+            or hostname.startswith("127.")
+            or hostname.endswith(".local")
+            or hostname.endswith(".internal")
+            or hostname.endswith(".localhost")
+            or hostname.endswith(".localdomain")
+            or "127.0.0.1" in hostname
+        ):
             return False
+
+        try:
+            ip_obj = ipaddress.ip_address(hostname)
+            return not _is_forbidden_webhook_ip(ip_obj)
+        except ValueError:
+            pass
+
+        # Résolution DNS pour bloquer les domaines pointant vers des IP internes (ex: 127.0.0.1.nip.io)
+        try:
+            infos = socket.getaddrinfo(hostname, None)
+            for info in infos:
+                raw_addr = str(info[4][0]).split("%")[0]
+                if _is_forbidden_webhook_ip(ipaddress.ip_address(raw_addr)):
+                    return False
+            return bool(infos)
+        except socket.gaierror:
+            # Environnement hors-ligne ou test unitaire : refuser les hôtes mono-label / numériques ambigus
+            if "." not in hostname:
+                return False
+            stripped = hostname.replace(".", "")
+            if stripped.isdigit() or stripped.startswith("0x"):
+                return False
+            return True
+    except Exception:
+        return False
+
+
+def is_safe_gateway_url(url: str) -> bool:
+    """Vérifie qu'une URL de passerelle UART LAN est sûre (autorise LAN privé, bloque loopback/metadata/ports internes)."""
+    if not url or not isinstance(url, str):
+        return False
+    try:
+        parsed = urlparse(url.strip())
+        if parsed.scheme not in ("http", "https"):
+            return False
+        hostname = (parsed.hostname or "").lower().strip().rstrip(".")
+        if (
+            not hostname
+            or hostname in _FORBIDDEN_HOSTS
+            or hostname.startswith("127.")
+            or hostname.endswith(".localhost")
+            or hostname.endswith(".internal")
+            or hostname.endswith(".localdomain")
+            or "127.0.0.1" in hostname
+        ):
+            return False
+        try:
+            port = parsed.port
+        except ValueError:
+            return False
+        if port in (5549, 8080, 1220, 1221):
+            return False
+        try:
+            ip_obj = ipaddress.ip_address(hostname)
+            return not _is_loopback_or_metadata_ip(ip_obj)
+        except ValueError:
+            pass
+        try:
+            infos = socket.getaddrinfo(hostname, None)
+            for info in infos:
+                raw_addr = str(info[4][0]).split("%")[0]
+                if _is_loopback_or_metadata_ip(ipaddress.ip_address(raw_addr)):
+                    return False
+        except socket.gaierror:
+            pass
         return True
     except Exception:
         return False
@@ -336,7 +444,29 @@ class AguaCloudClient:
         except Exception:
             pass
 
-    async def login_and_discover(self, email: str, password: str, app_uuid: str) -> Dict[str, Any]:
+    def _resolve_device_ids(self, settings: Dict[str, str]) -> Tuple[str, str]:
+        """Résout id_device et id_product en priorisant l'équipement découvert/configuré sur les valeurs par défaut."""
+        cfg_dev = (settings.get("agua_id_device") or "").strip()
+        cfg_prod = (settings.get("agua_id_product") or "").strip()
+        mem_dev = (self.id_device or "").strip()
+        mem_prod = (self.id_product or "").strip()
+
+        if mem_dev and mem_dev != _DEFAULT_HARDCODED_DEVICE:
+            id_dev = mem_dev
+        elif cfg_dev and cfg_dev != _DEFAULT_HARDCODED_DEVICE:
+            id_dev = cfg_dev
+        else:
+            id_dev = cfg_dev or mem_dev
+
+        if mem_prod and mem_prod != _DEFAULT_HARDCODED_PRODUCT:
+            id_prod = mem_prod
+        elif cfg_prod and cfg_prod != _DEFAULT_HARDCODED_PRODUCT:
+            id_prod = cfg_prod
+        else:
+            id_prod = cfg_prod or mem_prod
+        return id_dev, id_prod
+
+    async def login_and_discover(self, email: str, password: str, app_uuid: str, persist_discovery: bool = True) -> Dict[str, Any]:
         """Authentification auprès de l'API Agua Cloud, obtention du jeton JWT et découverte du poêle."""
         email = (email or "").strip()
         password = (password or "").strip()
@@ -395,6 +525,17 @@ class AguaCloudClient:
                     first_dev = devices[0]
                     self.id_device = str(first_dev.get("id_device") or self.id_device)
                     self.id_product = str(first_dev.get("id_product") or self.id_product)
+                    if persist_discovery and self.id_device and self.id_product:
+                        try:
+                            sconn = get_sys_db()
+                            try:
+                                sconn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('agua_id_device', ?)", (self.id_device,))
+                                sconn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('agua_id_product', ?)", (self.id_product,))
+                                sconn.commit()
+                            finally:
+                                sconn.close()
+                        except Exception:
+                            pass
             else:
                 devices = []
                 first_dev = None
@@ -450,8 +591,7 @@ class AguaCloudClient:
         app_uuid = settings.get("agua_uuid", "")
         if not self.token_jwt:
             await self.login_and_discover(settings.get("agua_email", ""), settings.get("agua_password", ""), app_uuid)
-        id_dev = settings.get("agua_id_device") or self.id_device
-        id_prod = settings.get("agua_id_product") or self.id_product
+        id_dev, id_prod = self._resolve_device_ids(settings)
         payload = {"id_device": id_dev, "id_product": id_prod, "BufferId": 1}
 
         async with borrow_http_client(timeout=5.0) as client:
@@ -463,6 +603,9 @@ class AguaCloudClient:
             )
             if resp.status_code == 401:
                 await self.login_and_discover(settings.get("agua_email", ""), settings.get("agua_password", ""), app_uuid)
+                id_dev, id_prod = self._resolve_device_ids(settings)
+                payload["id_device"] = id_dev
+                payload["id_product"] = id_prod
                 resp = await client.post(
                     f"{self.BASE_URL}{self.API_PATH_DEVICE_BUFFER_READING}",
                     headers=self._headers_for_api(),
@@ -485,7 +628,12 @@ class AguaCloudClient:
             for k, v in zip(items, values):
                 if k is not None and v is not None:
                     try:
-                        clean_buf[int(k)] = float(v)
+                        ik = int(k)
+                        fv = float(v)
+                        # Offsets 70 & 71 : entiers signés INT8 (complément à deux 8 bits : 253 -> -3)
+                        if ik in (70, 71) and 128.0 <= fv <= 255.0:
+                            fv -= 256.0
+                        clean_buf[ik] = fv
                     except (ValueError, TypeError):
                         pass
             return clean_buf
@@ -495,8 +643,7 @@ class AguaCloudClient:
         app_uuid = settings.get("agua_uuid", "")
         if not self.token_jwt:
             await self.login_and_discover(settings.get("agua_email", ""), settings.get("agua_password", ""), app_uuid)
-        id_dev = settings.get("agua_id_device") or self.id_device
-        id_prod = settings.get("agua_id_product") or self.id_product
+        id_dev, id_prod = self._resolve_device_ids(settings)
         payload = {"id_device": id_dev, "id_product": id_prod, "last_update": "2018-06-03T08:59:54.043"}
         async with borrow_http_client(timeout=20.0) as client:
             resp = await client.post(
@@ -575,8 +722,7 @@ class AguaCloudClient:
         app_uuid = settings.get("agua_uuid", "")
         if not self.token_jwt:
             await self.login_and_discover(settings.get("agua_email", ""), settings.get("agua_password", ""), app_uuid)
-        id_dev = settings.get("agua_id_device") or self.id_device
-        id_prod = settings.get("agua_id_product") or self.id_product
+        id_dev, id_prod = self._resolve_device_ids(settings)
 
         bit_data_list: List[int] = []
         endian_list: List[str] = []

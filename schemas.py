@@ -38,7 +38,7 @@ class CommandPayload(BaseModel):
 
 class BatchCommandPayload(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    commands: List[CommandPayload] = Field(..., min_length=1, description="Liste des écritures à exécuter en batch")
+    commands: List[CommandPayload] = Field(..., min_length=1, max_length=64, description="Liste des écritures à exécuter en batch")
 
 
 class RefillHopperPayload(BaseModel):
@@ -68,6 +68,8 @@ class SettingsPayload(BaseModel):
     poll_interval_s: Optional[Union[StrictInt, float, StrictStr]] = None
     agua_email: Optional[StrictStr] = None
     agua_password: Optional[StrictStr] = None
+    agua_id_device: Optional[StrictStr] = None
+    agua_id_product: Optional[StrictStr] = None
     local_gateway_url: Optional[StrictStr] = None
     weather_city: Optional[StrictStr] = None
     weather_lat: Optional[StrictStr] = None
@@ -95,6 +97,8 @@ class TestConnectionPayload(BaseModel):
     comm_mode: Literal["simulation", "agua_cloud", "local_gateway"] = "agua_cloud"
     agua_email: Optional[StrictStr] = None
     agua_password: Optional[StrictStr] = None
+    agua_id_device: Optional[StrictStr] = None
+    agua_id_product: Optional[StrictStr] = None
     local_gateway_url: Optional[StrictStr] = None
 
 

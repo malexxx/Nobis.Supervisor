@@ -5,8 +5,8 @@ services:
     restart: unless-stopped
     ports:
       - "5540:5540/udp"
-      # Accès HTTP direct conservé en secours sur le port 1220 si besoin :
-      - "1220:8080"
+      # Accès HTTP direct conservé en secours sur le port 1220 (boucle locale uniquement) :
+      - "127.0.0.1:1220:8080"
     volumes:
       - /volume1/docker/nobis.supervisor/data:/app/data
     environment:

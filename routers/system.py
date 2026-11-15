@@ -9,11 +9,12 @@ import os
 import time
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Body, HTTPException, Path, Query
+from fastapi import APIRouter, Body, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from clients import (
     agua_client,
+    is_safe_gateway_url,
     is_safe_webhook_url,
     local_gateway_client,
     notification_service,
@@ -30,7 +31,7 @@ from database import (
     get_sys_db,
 )
 from matter_service import matter_manager
-from routers.installer import clear_installer_sessions
+from routers.installer import clear_installer_sessions, require_installer_auth_if_configured
 from scheduler import scheduler
 from schemas import (
     ClientErrorPayload,
@@ -42,6 +43,19 @@ from schemas import (
 from telemetry import collect_telemetry_cycle, execute_registers_batch_write
 
 router = APIRouter(prefix="/api", tags=["System & Settings"])
+
+_SENSITIVE_SETTINGS = {
+    "comm_mode",
+    "agua_email",
+    "agua_password",
+    "agua_uuid",
+    "agua_id_device",
+    "agua_id_product",
+    "local_gateway_url",
+    "webhook_url",
+    "matter_enabled",
+    "matter_port",
+}
 
 
 def sanitize_csv_cell(val: Any) -> str:
@@ -81,8 +95,9 @@ async def api_list_snapshots():
 
 
 @router.post("/snapshots")
-async def api_create_snapshot(payload: SnapshotCreatePayload = Body(default=SnapshotCreatePayload())):
+async def api_create_snapshot(request: Request, payload: SnapshotCreatePayload = Body(default=SnapshotCreatePayload())):
     """Crée un snapshot instantané de tous les registres et du buffer brut."""
+    require_installer_auth_if_configured(request)
     active_mode = get_active_mode()
     if payload.refresh_live:
         await collect_telemetry_cycle(active_mode)
@@ -112,8 +127,9 @@ async def api_create_snapshot(payload: SnapshotCreatePayload = Body(default=Snap
 
 
 @router.post("/snapshots/{snap_id}/restore", responses={404: {"description": "Snapshot introuvable"}})
-async def api_restore_snapshot(snap_id: int = Path(..., ge=1, le=9223372036854775807)):
+async def api_restore_snapshot(request: Request, snap_id: int = Path(..., ge=1, le=9223372036854775807)):
     """Restaure les valeurs de registres depuis un snapshot sauvegardé."""
+    require_installer_auth_if_configured(request)
     active_mode = get_active_mode()
     conn = get_db(active_mode)
     try:
@@ -139,8 +155,9 @@ async def api_restore_snapshot(snap_id: int = Path(..., ge=1, le=922337203685477
 
 
 @router.delete("/snapshots/{snap_id}", responses={404: {"description": "Snapshot introuvable"}})
-async def api_delete_snapshot(snap_id: int = Path(..., ge=1, le=9223372036854775807)):
+async def api_delete_snapshot(request: Request, snap_id: int = Path(..., ge=1, le=9223372036854775807)):
     """Supprime un snapshot."""
+    require_installer_auth_if_configured(request)
     active_mode = get_active_mode()
     conn = get_db(active_mode)
     try:
@@ -262,9 +279,32 @@ async def api_export_logs_csv(severity: str = Query("ALL")):
 
 
 @router.post("/settings")
-async def api_save_settings(payload: SettingsPayload):
+async def api_save_settings(payload: SettingsPayload, request: Request):
     """Sauvegarde les paramètres de configuration dans la base système SQLite."""
     raw_dict = payload.model_dump(exclude_none=True)
+    current_settings = get_settings_dict()
+    sensitive_changed = any(
+        k in _SENSITIVE_SETTINGS
+        and raw_dict[k] is not None
+        and str(raw_dict[k]) != "********"
+        and str(raw_dict[k]) != str(current_settings.get(k, ""))
+        for k in raw_dict
+    )
+    if sensitive_changed:
+        require_installer_auth_if_configured(request)
+
+    if "webhook_url" in raw_dict:
+        wh_url = str(raw_dict["webhook_url"] or "").strip()
+        if wh_url and not is_safe_webhook_url(wh_url):
+            raise HTTPException(status_code=400, detail="URL de webhook invalide ou rejetée par le filtre de sécurité anti-SSRF.")
+        raw_dict["webhook_url"] = wh_url
+
+    if "local_gateway_url" in raw_dict:
+        gw_url_in = str(raw_dict["local_gateway_url"] or "").strip()
+        if gw_url_in and not is_safe_gateway_url(gw_url_in):
+            raise HTTPException(status_code=400, detail="URL de passerelle locale invalide ou rejetée par le filtre de sécurité anti-SSRF.")
+        raw_dict["local_gateway_url"] = gw_url_in
+
     conn = get_sys_db()
     try:
         for k, v in raw_dict.items():
@@ -339,14 +379,36 @@ async def api_test_connection(payload: TestConnectionPayload):
     if mode == "simulation":
         return {"status": "ok", "mode": "simulation", "active_db": os.path.basename(MODE_DB_PATHS["simulation"]), "weather": weather}
     elif mode == "agua_cloud":
+        prev_state = (
+            agua_client.token_jwt,
+            agua_client.refresh_token,
+            agua_client.id_device,
+            agua_client.id_product,
+            agua_client.working_write_endpoint,
+        )
         try:
-            res = await agua_client.login_and_discover(settings.get("agua_email", ""), settings.get("agua_password", ""), settings.get("agua_uuid", ""))
+            res = await agua_client.login_and_discover(
+                settings.get("agua_email", ""),
+                settings.get("agua_password", ""),
+                settings.get("agua_uuid", ""),
+                persist_discovery=False,
+            )
             return {"status": "ok", "mode": "agua_cloud", "active_db": os.path.basename(MODE_DB_PATHS["agua_cloud"]), "details": res, "weather": weather}
         except Exception as e:
             db_log("ERROR", "AGUA_CLOUD", f"Échec test connexion Agua IOT : {str(e)}", "agua_cloud")
             return JSONResponse(status_code=200, content={"status": "error", "details": f"Erreur Cloud Agua IOT : {str(e)}"})
+        finally:
+            (
+                agua_client.token_jwt,
+                agua_client.refresh_token,
+                agua_client.id_device,
+                agua_client.id_product,
+                agua_client.working_write_endpoint,
+            ) = prev_state
     elif mode == "local_gateway":
         gw_url = settings.get("local_gateway_url", "http://192.168.1.150")
+        if not is_safe_gateway_url(gw_url):
+            raise HTTPException(status_code=400, detail="URL de passerelle locale invalide ou rejetée par le filtre de sécurité anti-SSRF.")
         try:
             res = await local_gateway_client.test_connection(gw_url)
             return {"status": "ok", "mode": "local_gateway", "details": res, "weather": weather}

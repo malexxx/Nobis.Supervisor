@@ -4764,7 +4764,7 @@ function confirmResetMatterPairing() {
     onConfirm: async () => {
       try {
         showToast("Réinitialisation du pont Matter en cours...");
-        const res = await fetch("/api/matter/factory-reset", { method: "POST" });
+        const res = await fetch("/api/matter/factory-reset", { method: "POST", headers: getInstallerHeaders() });
         const data = await res.json();
         renderMatterStatus(data);
         showToast("Nouveau QR Code Matter généré !");
