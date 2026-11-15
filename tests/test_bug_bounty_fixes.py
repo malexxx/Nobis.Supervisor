@@ -934,7 +934,7 @@ class TestBugBountyFixes(unittest.TestCase):
 
         with open(os.path.join(BASE_DIR, "static", "sw.js"), "r", encoding="utf-8") as f:
             sw_js = f.read()
-        self.assertIn("nobis-cockpit-v1.0.5", sw_js)
+        self.assertIn("nobis-cockpit-v2.0.0", sw_js)
         self.assertIn("app.js", sw_js)
 
 

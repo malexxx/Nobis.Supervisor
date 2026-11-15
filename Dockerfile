@@ -8,7 +8,7 @@ FROM python:3.11-slim
 
 LABEL org.opencontainers.image.title="Nobis.Supervisor" \
       org.opencontainers.image.description="Supervision haute fidélité et passerelle Matter locale pour poêle Nobis" \
-      org.opencontainers.image.version="1.0.0"
+      org.opencontainers.image.version="2.0.0"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
