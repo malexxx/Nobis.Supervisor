@@ -15,6 +15,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from config import (
+    DOCKER_VERSION,
     DATA_DIR,
     SYSTEM_DB_PATH,
     MODE_DB_PATHS,
@@ -65,6 +66,7 @@ def get_public_settings_dict() -> Dict[str, str]:
     s = get_settings_dict()
     if "agua_password" in s:
         s["agua_password"] = "********" if s["agua_password"] else ""
+    s["docker_version"] = DOCKER_VERSION
     return s
 
 

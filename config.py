@@ -29,6 +29,12 @@ STATIC_DIR = next(
 )
 os.makedirs(STATIC_DIR, exist_ok=True)
 
+APP_VERSION: str = os.environ.get("APP_VERSION", "2.0.1").strip() or "2.0.1"
+DOCKER_VERSION: str = (
+    os.environ.get("DOCKER_VERSION", "").strip()
+    or (f"v{APP_VERSION}" if not APP_VERSION.startswith("v") else APP_VERSION)
+)
+
 SYSTEM_DB_PATH = os.path.join(DATA_DIR, "nobis_a10_system.db")
 MODE_DB_PATHS: Dict[str, str] = {
     "simulation": os.path.join(DATA_DIR, "nobis_a10_simulation.db"),

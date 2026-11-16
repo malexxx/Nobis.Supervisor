@@ -923,6 +923,21 @@ class TestBugBountyFixes(unittest.TestCase):
         self.assertIn("--workers", dockerfile)
         self.assertIn("--proxy-headers", dockerfile)
         self.assertIn("--forwarded-allow-ips", dockerfile)
+        self.assertIn("setuptools>=84.1.0", dockerfile)
+        self.assertIn("bom.cdx.json", dockerfile)
+
+        r_health = self.client.get("/health")
+        self.assertEqual(r_health.status_code, 200)
+        self.assertEqual(r_health.json().get("docker_version"), "v2.0.1")
+
+        r_latest = self.client.get("/api/latest")
+        self.assertEqual(r_latest.status_code, 200)
+        self.assertEqual(r_latest.json().get("docker_version"), "v2.0.1")
+
+        with open(os.path.join(BASE_DIR, "static", "index.html"), "r", encoding="utf-8") as f:
+            index_html = f.read()
+        self.assertIn("cfg-docker-version", index_html)
+        self.assertIn("hdr-docker-version-badge", index_html)
 
         with open(os.path.join(BASE_DIR, ".dockerignore"), "r", encoding="utf-8") as f:
             dockerignore = f.read()
@@ -936,7 +951,7 @@ class TestBugBountyFixes(unittest.TestCase):
 
         with open(os.path.join(BASE_DIR, "static", "sw.js"), "r", encoding="utf-8") as f:
             sw_js = f.read()
-        self.assertIn("nobis-cockpit-v2.0.0", sw_js)
+        self.assertIn("nobis-cockpit-v2.0.1", sw_js)
         self.assertIn("app.js", sw_js)
 
     # ------------------------------------------------------------------

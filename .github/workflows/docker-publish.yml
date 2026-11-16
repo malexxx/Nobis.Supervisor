@@ -80,5 +80,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=2.0.1
+            DOCKER_VERSION=${{ github.ref_type == 'tag' && github.ref_name || 'v2.0.1' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

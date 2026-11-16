@@ -42,7 +42,7 @@
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-  <link rel="stylesheet" href="/static/css/styles.css?v=2.0.0" />
+  <link rel="stylesheet" href="/static/css/styles.css?v=2.0.1" />
 </head>
 
 <body class="min-h-screen flex flex-col pb-28 md:pb-6">
@@ -1378,8 +1378,13 @@
               🔧
             </div>
             <div>
-              <div class="flex items-center gap-2">
+              <div class="flex flex-wrap items-center gap-2">
                 <h2 class="text-sm sm:text-base font-bold text-white tracking-wide">Paramètres & Observabilité</h2>
+                <span id="hdr-docker-version-badge"
+                  class="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-purple-950/80 text-purple-300 border border-purple-700/60"
+                  title="Version de l'image Docker Nobis.Supervisor utilisée">
+                  🐳 Docker v2.0.1
+                </span>
                 <span id="installer-auth-pill"
                   class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700 flex items-center gap-1">
                   <span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span><span id="installer-auth-pill-text">Expert
@@ -1439,7 +1444,7 @@
             </div>
           </div>
 
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+          <div class="grid grid-cols-2 sm:grid-cols-5 gap-2.5 text-xs">
             <div class="bg-gray-950/80 border border-gray-800/90 rounded-xl p-2.5">
               <span class="text-gray-400 block text-[10px] uppercase tracking-wider font-semibold">Base de
                 données</span>
@@ -1458,6 +1463,12 @@
                 class="text-sky-400 font-mono text-xs tabular-nums block mt-0.5">--:--</strong>
             </div>
             <div class="bg-gray-950/80 border border-gray-800/90 rounded-xl p-2.5">
+              <span class="text-gray-400 block text-[10px] uppercase tracking-wider font-semibold">Version
+                Docker</span>
+              <strong id="cfg-docker-version" class="text-purple-400 font-mono text-xs truncate block mt-0.5"
+                title="Version du conteneur Docker Nobis.Supervisor utilisé">v2.0.1</strong>
+            </div>
+            <div class="col-span-2 sm:col-span-1 bg-gray-950/80 border border-gray-800/90 rounded-xl p-2.5">
               <span class="text-gray-400 block text-[10px] uppercase tracking-wider font-semibold">Conteneur &
                 SSE</span>
               <span id="cfg-diag-container"
@@ -2261,9 +2272,9 @@
   </main>
 
   <!-- Scripts modulaires du Cockpit Nobis A10 -->
-  <script src="/static/js/state.js?v=2.0.0"></script>
-  <script src="/static/js/charts.js?v=2.0.0"></script>
-  <script src="/static/js/app.js?v=2.0.0"></script>
+  <script src="/static/js/state.js?v=2.0.1"></script>
+  <script src="/static/js/charts.js?v=2.0.1"></script>
+  <script src="/static/js/app.js?v=2.0.1"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {

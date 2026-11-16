@@ -1369,7 +1369,8 @@ function updateContainerConnectionIndicator(overrideStatus, message) {
     connEl.className = "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border bg-emerald-600/85 border-emerald-400 text-white shadow-[0_0_10px_rgba(16,185,129,0.45)] flex-shrink-0 cursor-pointer hover:bg-emerald-500 transition-all";
     const sseTxt = connectionState.isSSEConnected ? " • Flux SSE actif" : " • HTTP actif";
     const latTxt = connectionState.containerLatencyMs ? ` • Ping ${connectionState.containerLatencyMs}ms` : "";
-    connEl.title = `Configuration & Conteneur Nobis.Supervisor en ligne${sseTxt}${latTxt}`;
+    const dockerVer = (typeof currentSettings !== "undefined" && currentSettings && currentSettings.docker_version) || "v2.0.1";
+    connEl.title = `Configuration & Conteneur Nobis.Supervisor (${dockerVer}) en ligne${sseTxt}${latTxt}`;
   }
   if (connDot) connDot.className = "hidden";
   if (connText) connText.textContent = "Conteneur";
@@ -1661,6 +1662,11 @@ function applyDashboardState(data, updateSeries = true) {
 
   const dbEl = document.getElementById("hdr-db");
   if (dbEl) dbEl.textContent = activeDbFile;
+  const dockerVersion = data.docker_version || (currentSettings && currentSettings.docker_version) || "v2.0.1";
+  const cfgDockerVerEl = document.getElementById("cfg-docker-version");
+  if (cfgDockerVerEl) cfgDockerVerEl.textContent = dockerVersion;
+  const hdrDockerBadgeEl = document.getElementById("hdr-docker-version-badge");
+  if (hdrDockerBadgeEl) hdrDockerBadgeEl.textContent = `🐳 Docker ${dockerVersion}`;
   const modeEl = document.getElementById("hdr-mode");
   const modeBadge = document.getElementById("hdr-mode-badge");
   const modeIconEl = document.getElementById("hdr-mode-icon");
