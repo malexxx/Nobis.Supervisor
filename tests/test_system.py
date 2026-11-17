@@ -227,6 +227,72 @@ class TestSystemEndpoints(unittest.TestCase):
             self.assertIn("raw_buffer", data)
             self.assertEqual(data["raw_buffer_count"], 2)
 
+    def test_container_logs_and_csv_export(self):
+        """Vérifie le buffer mémoire des logs conteneur et son export CSV."""
+        from database import add_container_log
+
+        add_container_log("INFO", "CONTAINER_TEST", "Ligne de test conteneur")
+        resp = self.client.get("/api/logs?severity=CONTAINER")
+        self.assertEqual(resp.status_code, 200)
+        logs = resp.json()
+        self.assertIsInstance(logs, list)
+        self.assertTrue(any(entry.get("message") == "Ligne de test conteneur" for entry in logs))
+
+        resp_csv = self.client.get("/api/export-logs-csv?severity=CONTAINER")
+        self.assertEqual(resp_csv.status_code, 200)
+        self.assertIn("text/csv", resp_csv.headers["content-type"])
+        self.assertIn("Ligne de test conteneur", resp_csv.text)
+
+    def test_system_restart_and_watchtower_update(self):
+        """Vérifie les endpoints /api/system/restart et /api/system/check-update."""
+        from contextlib import asynccontextmanager
+        import httpx
+        from database import get_settings_dict
+
+        pwd = (get_settings_dict().get("agua_password") or "").strip()
+        auth_headers = {}
+        if pwd:
+            r_auth = self.client.post("/api/installer/verify", json={"password": pwd})
+            self.assertEqual(r_auth.status_code, 200)
+            auth_headers = {"X-Installer-Token": r_auth.json().get("token", "")}
+
+        with patch("routers.system._delayed_process_restart", new_callable=AsyncMock) as mock_restart:
+            resp_restart = self.client.post("/api/system/restart", headers=auth_headers)
+            self.assertEqual(resp_restart.status_code, 200)
+            self.assertEqual(resp_restart.json()["status"], "ok")
+            mock_restart.assert_called_once()
+
+        class _FakeResp:
+            def __init__(self, status_code, text=""):
+                self.status_code = status_code
+                self.text = text
+
+        class _FakeClientOk:
+            async def post(self, url, headers=None):
+                return _FakeResp(200, "ok")
+
+        @asynccontextmanager
+        async def _borrow_ok(timeout=15.0):
+            yield _FakeClientOk()
+
+        with patch.dict("os.environ", {"WATCHTOWER_URL": "http://watchtower:8080/v1/update"}):
+            with patch("routers.system.borrow_http_client", _borrow_ok):
+                resp_upd = self.client.post("/api/system/check-update", headers=auth_headers)
+                self.assertEqual(resp_upd.status_code, 200)
+                self.assertEqual(resp_upd.json()["status"], "ok")
+
+            class _FakeClientErr:
+                async def post(self, url, headers=None):
+                    raise httpx.ConnectError("Connection refused")
+
+            @asynccontextmanager
+            async def _borrow_err(timeout=15.0):
+                yield _FakeClientErr()
+
+            with patch("routers.system.borrow_http_client", _borrow_err):
+                resp_err = self.client.post("/api/system/check-update", headers=auth_headers)
+                self.assertEqual(resp_err.status_code, 502)
+
 
 if __name__ == "__main__":
     unittest.main()

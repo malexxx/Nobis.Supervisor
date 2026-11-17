@@ -29,6 +29,7 @@ function openActionModal({
   message,
   htmlContent = null,
   showInput = false,
+  inputType = "text",
   defaultValue = "",
   confirmText = "Confirmer",
   cancelText = "Annuler",
@@ -50,9 +51,11 @@ function openActionModal({
   const inp = document.getElementById("action-modal-input");
   if (showInput) {
     inpWrap.classList.remove("hidden");
+    inp.type = inputType || "text";
     inp.value = defaultValue;
   } else {
     inpWrap.classList.add("hidden");
+    inp.type = "text";
   }
 
   const cancelBtn = document.getElementById("action-modal-cancel-btn");
@@ -90,6 +93,7 @@ const showActionModal = openActionModal;
 
 // Mode de communication actif (Cloud / Passerelle / Simulation)
 let currentCommMode = "agua_cloud";
+let isSettingsFormDirty = false;
 
 function getActiveCommMode() {
   return (typeof connectionState !== "undefined" && connectionState && connectionState.commStatus && connectionState.commStatus.comm_mode) ||
@@ -1266,67 +1270,88 @@ const connectionState = {
   containerLatencyMs: null,
 };
 
-// Met à jour l'indicateur visuel de connexion à ce conteneur Docker Nobis.Supervisor
+// Met à jour la couleur du rectangle global autour des 2 pictos (vert uniquement si les 2 pictos sont verts)
+function updateStatusPillBorder() {
+  const pillEl = document.getElementById("hdr-status-pill");
+  if (!pillEl) return;
+  const dockerVer = (typeof currentSettings !== "undefined" && currentSettings && currentSettings.docker_version) || "v2.1.1";
+  const cState = connectionState.containerStatus;
+  const mState = connectionState.cloudStatus;
+
+  if (cState === "connected" && mState === "connected") {
+    pillEl.className = "flex items-center gap-1.5 px-2.5 py-1 sm:py-1.5 rounded-xl border bg-emerald-950/60 border-emerald-500/70 shadow-[0_0_10px_rgba(16,185,129,0.25)] cursor-pointer transition-all duration-200 hover:brightness-110";
+    pillEl.title = `Conteneur (${dockerVer}) & Liaison actifs • Cliquer pour ouvrir les réglages`;
+  } else if (cState === "disconnected" || mState === "disconnected") {
+    pillEl.className = "flex items-center gap-1.5 px-2.5 py-1 sm:py-1.5 rounded-xl border bg-rose-950/75 border-rose-500/80 shadow-[0_0_12px_rgba(244,63,94,0.35)] animate-pulse cursor-pointer transition-all duration-200 hover:brightness-110";
+    pillEl.title = `Anomalie de connexion (${dockerVer}) • Cliquer pour ouvrir les réglages`;
+  } else {
+    pillEl.className = "flex items-center gap-1.5 px-2.5 py-1 sm:py-1.5 rounded-xl border bg-amber-950/70 border-amber-500/80 shadow-[0_0_12px_rgba(245,158,11,0.35)] cursor-pointer transition-all duration-200 hover:brightness-110";
+    pillEl.title = `Mode dégradé / simulation ou synchronisation (${dockerVer}) • Cliquer pour ouvrir les réglages`;
+  }
+}
+
+// Met à jour l'indicateur visuel de connexion au conteneur Docker Nobis.Supervisor (picto Docker)
 function updateContainerConnectionIndicator(overrideStatus, message) {
-  const connEl = document.getElementById("hdr-conn-container");
-  const connDot = document.getElementById("hdr-conn-container-dot");
-  const connText = document.getElementById("hdr-conn-container-text");
+  const verEl = document.getElementById("hdr-container-version");
   const cfgDiagContainer = document.getElementById("cfg-diag-container");
 
+  const dockerVer = (typeof currentSettings !== "undefined" && currentSettings && currentSettings.docker_version) || "v2.1.1";
   const effectiveStatus = overrideStatus || (connectionState.isServerConnected ? "connected" : "disconnected");
   connectionState.containerStatus = effectiveStatus;
 
-  // Cas 1 : Conteneur ou réseau injoignable -> Bulle Rouge
+  // Cas 1 : Conteneur ou réseau injoignable -> Picto Docker Rouge
   if (effectiveStatus === "disconnected" || !connectionState.isServerConnected) {
-    if (connEl) {
-      connEl.className = "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border bg-rose-600/85 border-rose-400 text-white shadow-[0_0_10px_rgba(244,63,94,0.45)] animate-pulse flex-shrink-0 cursor-pointer hover:bg-rose-500 transition-all";
-      connEl.title = "Conteneur Nobis.Supervisor injoignable • Cliquer pour ouvrir la Configuration";
+    connectionState.containerStatus = "disconnected";
+    if (verEl) {
+      verEl.className = "flex items-center justify-center w-4 h-4 sm:w-[18px] sm:h-[18px] text-rose-400 animate-pulse";
+      verEl.title = `Conteneur Nobis.Supervisor (${dockerVer}) injoignable`;
     }
-    if (connDot) connDot.className = "hidden";
-    if (connText) connText.textContent = message || "Conteneur KO";
     if (cfgDiagContainer) {
       cfgDiagContainer.className = "text-[11px] font-semibold text-rose-400 flex items-center gap-1.5";
       cfgDiagContainer.innerHTML = `<span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>${message || "Injoignable"}`;
     }
+    updateStatusPillBorder();
     return;
   }
 
-  // Cas 2 : Reconnexion / négociation en cours -> Bulle Verte (pulse)
+  // Cas 2 : Reconnexion / négociation en cours -> Picto Docker Orange
   if (effectiveStatus === "connecting") {
-    if (connEl) {
-      connEl.className = "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border bg-emerald-600/75 border-emerald-400 text-white shadow-[0_0_10px_rgba(16,185,129,0.45)] animate-pulse flex-shrink-0 cursor-pointer hover:bg-emerald-500 transition-all";
-      connEl.title = "Connexion au conteneur Nobis.Supervisor en cours... • Cliquer pour ouvrir la Configuration";
+    if (verEl) {
+      verEl.className = "flex items-center justify-center w-4 h-4 sm:w-[18px] sm:h-[18px] text-amber-400 animate-pulse";
+      verEl.title = `Connexion au conteneur Nobis.Supervisor (${dockerVer}) en cours...`;
     }
-    if (connDot) connDot.className = "hidden";
-    if (connText) connText.textContent = message || "Connexion...";
     if (cfgDiagContainer) {
       cfgDiagContainer.className = "text-[11px] font-semibold text-sky-400 flex items-center gap-1.5";
       cfgDiagContainer.innerHTML = `<span class="w-2 h-2 rounded-full bg-sky-400 animate-pulse"></span>Connexion...`;
     }
+    updateStatusPillBorder();
     return;
   }
 
-  // Cas 3 : Conteneur connecté et opérationnel -> Bulle Verte
-  if (connEl) {
-    connEl.className = "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border bg-emerald-600/85 border-emerald-400 text-white shadow-[0_0_10px_rgba(16,185,129,0.45)] flex-shrink-0 cursor-pointer hover:bg-emerald-500 transition-all";
-    const sseTxt = connectionState.isSSEConnected ? " • Flux SSE actif" : " • HTTP actif";
-    const latTxt = connectionState.containerLatencyMs ? ` • Ping ${connectionState.containerLatencyMs}ms` : "";
-    connEl.title = `Configuration & Conteneur Nobis.Supervisor en ligne${sseTxt}${latTxt}`;
+  // Cas 3 : Conteneur connecté et opérationnel -> Picto Docker Vert
+  const sseTxt = connectionState.isSSEConnected ? " • Flux SSE actif" : " • HTTP actif";
+  const latTxt = connectionState.containerLatencyMs ? ` • Ping ${connectionState.containerLatencyMs}ms` : "";
+  if (verEl) {
+    verEl.className = "flex items-center justify-center w-4 h-4 sm:w-[18px] sm:h-[18px] text-emerald-400";
+    verEl.title = `Conteneur Nobis.Supervisor (${dockerVer}) en ligne${sseTxt}${latTxt}`;
   }
-  if (connDot) connDot.className = "hidden";
-  if (connText) connText.textContent = "Conteneur";
   if (cfgDiagContainer) {
     cfgDiagContainer.className = "text-[11px] font-semibold text-emerald-400 flex items-center gap-1.5";
     cfgDiagContainer.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]"></span>En ligne (${connectionState.isSSEConnected ? 'SSE actif' : 'HTTP'})`;
   }
+  updateStatusPillBorder();
 }
 
-// Met à jour l'indicateur visuel de liaison avec le Cloud Nobis (Agua IOT) ou la passerelle
+const MODE_CONN_ICONS = {
+  agua_cloud: `<svg viewBox="0 0 24 24" class="w-4 h-4 sm:w-[18px] sm:h-[18px]" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" /></svg>`,
+  local_gateway: `<svg viewBox="0 0 24 24" class="w-4 h-4 sm:w-[18px] sm:h-[18px]" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" /><rect x="9" y="9" width="6" height="6" /><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4" /></svg>`,
+  simulation: `<svg viewBox="0 0 24 24" class="w-4 h-4 sm:w-[18px] sm:h-[18px]" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v5.5L5.2 17.6A2 2 0 0 0 7 20.5h10a2 2 0 0 0 1.8-2.9L14 8.5V3" /><path d="M7.5 15h9" /></svg>`,
+};
+
+// Met à jour le pictogramme unique de mode (Cloud / ESP / Simulation) colorisé vert/orange/rouge selon la connexion
 function updateCloudConnectionIndicator(overrideStatus, message) {
-  const cloudEl = document.getElementById("hdr-conn-cloud");
-  const cloudDot = document.getElementById("hdr-conn-cloud-dot");
-  const cloudIcon = document.getElementById("hdr-cloud-icon");
-  const cloudText = document.getElementById("hdr-conn-cloud-text");
+  const modeBtn = document.getElementById("hdr-mode-conn-btn");
+  const modeIcon = document.getElementById("hdr-mode-conn-icon");
   const cfgDiagCloud = document.getElementById("cfg-diag-cloud");
 
   const st = Number(latestData.status_code ?? 0);
@@ -1337,75 +1362,43 @@ function updateCloudConnectionIndicator(overrideStatus, message) {
   currentCommMode = activeMode;
 
   let modeName = "Cloud Nobis";
-  let modeIcon = "☁️";
   if (activeMode === "local_gateway") {
-    modeName = "Passerelle UART";
-    modeIcon = "🔌";
+    modeName = "ESP / Passerelle UART";
   } else if (activeMode === "simulation") {
     modeName = "Simulation";
-    modeIcon = "🧪";
   }
 
-  if (cloudIcon) {
-    cloudIcon.textContent = modeIcon;
-    cloudIcon.title = `Protocole : ${activeMode}`;
+  if (modeIcon) {
+    modeIcon.innerHTML = MODE_CONN_ICONS[activeMode] || MODE_CONN_ICONS.agua_cloud;
   }
 
-  const modeEl = document.getElementById("hdr-mode");
-  const modeBadge = document.getElementById("hdr-mode-badge");
-  const modeIconEl = document.getElementById("hdr-mode-icon");
-  if (modeEl) {
-    if (activeMode === "simulation") {
-      modeEl.textContent = "Simulation";
-      if (modeIconEl) modeIconEl.textContent = "🧪";
-      if (modeBadge) {
-        modeBadge.className = "flex items-center gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg text-xs font-bold border cursor-pointer transition shadow-[0_0_12px_rgba(245,158,11,0.35)] bg-amber-950/90 border-amber-500 text-amber-300 animate-pulse";
-        modeBadge.title = "MODE SIMULATION ACTIF (Données virtuelles) • Cliquer pour basculer sur Cloud Nobis";
-      }
-    } else if (activeMode === "local_gateway") {
-      modeEl.textContent = "Passerelle";
-      if (modeIconEl) modeIconEl.textContent = "🔌";
-      if (modeBadge) {
-        modeBadge.className = "flex items-center gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition shadow-inner bg-emerald-950/80 border-emerald-600/70 text-emerald-300 hover:border-emerald-500";
-        modeBadge.title = "Liaison directe Passerelle UART Locale • Cliquer pour configurer";
-      }
-    } else {
-      modeEl.textContent = "Cloud Nobis";
-      if (modeIconEl) modeIconEl.textContent = "☁️";
-      if (modeBadge) {
-        modeBadge.className = "flex items-center gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition shadow-inner bg-gray-950/80 border-gray-800 text-sky-400 hover:border-sky-500/60";
-        modeBadge.title = "Liaison officielle Cloud Nobis (Agua IOT) • Cliquer pour configurer";
-      }
-    }
-  }
-
-  // Cas 1 : Si le conteneur lui-même est inaccessible -> Bulle Rouge
+  // Cas 1 : Si le conteneur lui-même est inaccessible -> Pictogramme Rouge
   if (!connectionState.isServerConnected) {
-    if (cloudEl) {
-      cloudEl.className = "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border bg-rose-600/85 border-rose-400 text-white shadow-[0_0_10px_rgba(244,63,94,0.45)] flex-shrink-0 cursor-pointer transition-all";
-      cloudEl.title = `Liaison ${modeName} indisponible (conteneur local déconnecté)`;
+    connectionState.cloudStatus = "disconnected";
+    if (modeBtn) {
+      modeBtn.className = "flex items-center justify-center text-rose-400 animate-pulse hover:scale-110 transition-transform cursor-pointer";
+      modeBtn.title = `Mode ${modeName} • Liaison indisponible (conteneur déconnecté)`;
     }
-    if (cloudDot) cloudDot.className = "hidden";
-    if (cloudText) cloudText.textContent = `${modeName} : Inconnu`;
     if (cfgDiagCloud) {
       cfgDiagCloud.className = "text-[11px] font-semibold text-gray-400 flex items-center gap-1.5";
       cfgDiagCloud.innerHTML = `<span class="w-2 h-2 rounded-full bg-gray-500"></span>Inaccessible`;
     }
+    updateStatusPillBorder();
     return;
   }
 
-  // Cas 2 : Reconnexion / Actualisation Cloud en cours -> Bulle Verte (pulse)
+  // Cas 2 : Reconnexion / Actualisation en cours -> Pictogramme Orange
   if (overrideStatus === "connecting") {
-    if (cloudEl) {
-      cloudEl.className = "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border bg-emerald-600/75 border-emerald-400 text-white shadow-[0_0_10px_rgba(16,185,129,0.45)] animate-pulse flex-shrink-0 cursor-pointer transition-all";
-      cloudEl.title = `Interrogation du ${modeName} en direct...`;
+    connectionState.cloudStatus = "connecting";
+    if (modeBtn) {
+      modeBtn.className = "flex items-center justify-center text-amber-400 animate-pulse hover:scale-110 transition-transform cursor-pointer";
+      modeBtn.title = `Mode ${modeName} • Synchronisation en cours...`;
     }
-    if (cloudDot) cloudDot.className = "hidden";
-    if (cloudText) cloudText.textContent = message || "Sync...";
     if (cfgDiagCloud) {
       cfgDiagCloud.className = "text-[11px] font-semibold text-sky-400 flex items-center gap-1.5";
       cfgDiagCloud.innerHTML = `<span class="w-2 h-2 rounded-full bg-sky-400 animate-pulse"></span>Synchronisation...`;
     }
+    updateStatusPillBorder();
     return;
   }
 
@@ -1414,36 +1407,51 @@ function updateCloudConnectionIndicator(overrideStatus, message) {
     (commStatus && commStatus.connected === false) ||
     (st === -1);
 
-  // Cas 3 : Conteneur connecté, mais communication avec le Cloud Nobis / poêle perdue -> Bulle Rouge
+  // Cas 3 : Conteneur connecté, mais communication perdue -> Pictogramme Rouge
   if (isCloudOffline) {
+    connectionState.cloudStatus = "disconnected";
     const reason = (commStatus && commStatus.last_error) || "Rupture de communication ou poêle éteint";
-    if (cloudEl) {
-      cloudEl.className = "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border bg-rose-600/85 border-rose-400 text-white shadow-[0_0_10px_rgba(244,63,94,0.45)] animate-pulse flex-shrink-0 cursor-pointer hover:bg-rose-500 transition-all";
-      cloudEl.title = `Perte de communication avec ${modeName} (${reason}) • Cliquer pour forcer l'actualisation`;
+    if (modeBtn) {
+      modeBtn.className = "flex items-center justify-center text-rose-400 animate-pulse hover:scale-110 transition-transform cursor-pointer";
+      modeBtn.title = `Mode ${modeName} • Perte de communication (${reason}) • Cliquer pour actualiser`;
     }
-    if (cloudDot) cloudDot.className = "hidden";
-    if (cloudText) cloudText.textContent = message || `${modeName} HS`;
     if (cfgDiagCloud) {
       cfgDiagCloud.className = "text-[11px] font-semibold text-rose-400 flex items-center gap-1.5";
       cfgDiagCloud.innerHTML = `<span class="w-2 h-2 rounded-full bg-rose-400 animate-pulse"></span>Hors ligne`;
     }
+    updateStatusPillBorder();
     return;
   }
 
-  // Cas 4 : Tout est connecté et synchronisé avec le Cloud Nobis -> Bulle Verte
+  // Cas 4 : Mode Simulation actif (virtuel) -> Pictogramme Orange
+  if (activeMode === "simulation") {
+    connectionState.cloudStatus = "simulation";
+    if (modeBtn) {
+      modeBtn.className = "flex items-center justify-center text-amber-400 hover:scale-110 transition-transform cursor-pointer";
+      modeBtn.title = "Mode Simulation actif (données virtuelles) • Cliquer pour actualiser";
+    }
+    if (cfgDiagCloud) {
+      cfgDiagCloud.className = "text-[11px] font-semibold text-amber-400 flex items-center gap-1.5";
+      cfgDiagCloud.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-400"></span>Simulation (${activeMode})`;
+    }
+    updateStatusPillBorder();
+    return;
+  }
+
+  // Cas 5 : Tout est connecté et synchronisé -> Pictogramme Vert
+  connectionState.cloudStatus = "connected";
   const lastTime = (commStatus && commStatus.last_sync_time) || latestData.timestamp || "";
   const lastSyncStr = lastTime ? ` • Synchro : ${lastTime.slice(11, 19)}` : "";
 
-  if (cloudEl) {
-    cloudEl.className = "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border bg-emerald-600/85 border-emerald-400 text-white shadow-[0_0_10px_rgba(16,185,129,0.45)] flex-shrink-0 cursor-pointer hover:bg-emerald-500 transition-all";
-    cloudEl.title = `Liaison ${modeName} active${lastSyncStr} • Cliquer pour forcer l'actualisation`;
+  if (modeBtn) {
+    modeBtn.className = "flex items-center justify-center text-emerald-400 hover:scale-110 transition-transform cursor-pointer";
+    modeBtn.title = `Mode ${modeName} • Liaison active${lastSyncStr} • Cliquer pour forcer l'actualisation`;
   }
-  if (cloudDot) cloudDot.className = "hidden";
-  if (cloudText) cloudText.textContent = modeName;
   if (cfgDiagCloud) {
     cfgDiagCloud.className = "text-[11px] font-semibold text-emerald-400 flex items-center gap-1.5";
     cfgDiagCloud.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]"></span>Connecté (${activeMode})`;
   }
+  updateStatusPillBorder();
 }
 
 // Met à jour les deux indicateurs dissociés (Conteneur & Cloud Nobis)
@@ -1603,33 +1611,11 @@ function applyDashboardState(data, updateSeries = true) {
 
   const dbEl = document.getElementById("hdr-db");
   if (dbEl) dbEl.textContent = activeDbFile;
-  const modeEl = document.getElementById("hdr-mode");
-  const modeBadge = document.getElementById("hdr-mode-badge");
-  const modeIconEl = document.getElementById("hdr-mode-icon");
-  if (modeEl) {
-    if (activeMode === "simulation") {
-      modeEl.textContent = "Simulation";
-      if (modeIconEl) modeIconEl.textContent = "🧪";
-      if (modeBadge) {
-        modeBadge.className = "flex items-center gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg text-xs font-bold border cursor-pointer transition shadow-[0_0_12px_rgba(245,158,11,0.35)] bg-amber-950/90 border-amber-500 text-amber-300 animate-pulse";
-        modeBadge.title = "MODE SIMULATION ACTIF (Données virtuelles) • Cliquer pour basculer sur Cloud Nobis";
-      }
-    } else if (activeMode === "local_gateway") {
-      modeEl.textContent = "Passerelle";
-      if (modeIconEl) modeIconEl.textContent = "🔌";
-      if (modeBadge) {
-        modeBadge.className = "flex items-center gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition shadow-inner bg-emerald-950/80 border-emerald-600/70 text-emerald-300 hover:border-emerald-500";
-        modeBadge.title = "Liaison directe Passerelle UART Locale • Cliquer pour configurer";
-      }
-    } else {
-      modeEl.textContent = "Cloud Nobis";
-      if (modeIconEl) modeIconEl.textContent = "☁️";
-      if (modeBadge) {
-        modeBadge.className = "flex items-center gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg text-xs font-semibold border cursor-pointer transition shadow-inner bg-gray-950/80 border-gray-800 text-sky-400 hover:border-sky-500/60";
-        modeBadge.title = "Liaison officielle Cloud Nobis (Agua IOT) • Cliquer pour configurer";
-      }
-    }
-  }
+  const dockerVersion = data.docker_version || (currentSettings && currentSettings.docker_version) || "v2.1.1";
+  const cfgDockerVerEl = document.getElementById("cfg-docker-version");
+  if (cfgDockerVerEl) cfgDockerVerEl.textContent = dockerVersion;
+  const hdrDockerBadgeEl = document.getElementById("hdr-docker-version-badge");
+  if (hdrDockerBadgeEl) hdrDockerBadgeEl.textContent = `🐳 Docker ${dockerVersion}`;
   document.getElementById("hdr-state").textContent = latestData.status_label || "--";
   updateStatusIndicatorAndAlerts();
 
@@ -1971,9 +1957,9 @@ function applyDashboardState(data, updateSeries = true) {
 
   renderEepromTable();
 
-  // Synchronisation des réglages système (ne pas écraser si l'utilisateur est en train de taper dans un champ)
+  // Synchronisation des réglages système (ne pas écraser si l'utilisateur est en train d'éditer ou a modifié le formulaire)
   const isEditingSettings = document.activeElement && document.activeElement.id && document.activeElement.id.startsWith("cfg-");
-  if (currentSettings && !isEditingSettings) {
+  if (currentSettings && !isEditingSettings && !isSettingsFormDirty) {
     const modeEl = document.getElementById("cfg-mode");
     if (modeEl) modeEl.value = currentSettings.comm_mode || "agua_cloud";
     const intEl = document.getElementById("cfg-interval");
@@ -4429,7 +4415,56 @@ async function saveSettings() {
     headers: getInstallerHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload)
   });
-  const j = await res.json();
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      openActionModal({
+        title: "🔐 Authentification requise",
+        message: "Saisissez votre mot de passe Agua Cloud (Installateur) pour enregistrer la nouvelle liaison :",
+        showInput: true,
+        inputType: "password",
+        confirmText: "Déverrouiller & Enregistrer",
+        cancelText: "Annuler",
+        onConfirm: async (pwd) => {
+          if (!pwd) {
+            showToast("Mot de passe requis pour modifier ce paramètre.", true);
+            return;
+          }
+          try {
+            const authRes = await fetch("/api/installer/verify", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ password: pwd })
+            });
+            const authData = await authRes.json().catch(() => ({}));
+            if (!authRes.ok || !authData.token) {
+              showToast(authData.detail || "Mot de passe incorrect.", true);
+              return;
+            }
+            installerAuthToken = authData.token;
+            sessionStorage.setItem("nobis_installer_token", installerAuthToken);
+            if (typeof checkInstallerAuthStatus === "function") {
+              checkInstallerAuthStatus();
+            }
+            await saveSettings();
+          } catch (e) {
+            showToast("Erreur réseau lors de l'authentification : " + e.message, true);
+          }
+        }
+      });
+    } else {
+      showToast("Erreur : " + (j.detail || res.statusText || "Échec de l'enregistrement"), true);
+    }
+    return;
+  }
+  isSettingsFormDirty = false;
+  if (j.settings) {
+    currentSettings = j.settings;
+  }
+  if (connectionState && connectionState.commStatus) {
+    connectionState.commStatus.comm_mode = mode;
+  }
+  currentCommMode = mode;
   closeConfigModal();
   await loadDashboard();
   showToast("Configuration enregistrée ! Base active : " + (j.active_db || ""));
@@ -4584,7 +4619,7 @@ async function loadLogs(sev) {
   currentLogSeverity = sev || "ALL";
 
   // Highlight active filter buttons
-  ["all", "info", "command", "warning", "error"].forEach(s => {
+  ["all", "info", "command", "warning", "error", "container"].forEach(s => {
     const btn = document.getElementById("log-btn-" + s);
     if (btn) {
       if (s.toUpperCase() === currentLogSeverity.toUpperCase()) {
@@ -4607,6 +4642,75 @@ async function loadLogs(sev) {
     filterLogsClientSide(searchInp.value);
   } else {
     renderLogsList(lastLoadedLogs);
+  }
+}
+
+async function restartBackend() {
+  if (!confirm("Voulez-vous vraiment redémarrer le serveur backend Nobis.Supervisor ?")) {
+    return;
+  }
+  try {
+    const res = await fetch("/api/system/restart", {
+      method: "POST",
+      headers: getInstallerHeaders()
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403) {
+      showToast("🔒 Authentification installateur requise : déverrouillez l'onglet Expert & Registres.", true);
+      return;
+    }
+    if (!res.ok) {
+      showToast(data.detail || "Échec du redémarrage du backend.", true);
+      return;
+    }
+    showToast(data.message || "🔄 Redémarrage du backend en cours...");
+    const startedAt = Date.now();
+    const waitReboot = async () => {
+      await new Promise(r => setTimeout(r, 1500));
+      while (Date.now() - startedAt < 30000) {
+        try {
+          const hr = await fetch("/health", { cache: "no-store" });
+          if (hr.ok) {
+            showToast("✅ Backend redémarré et opérationnel !");
+            if (typeof loadDashboard === "function") await loadDashboard();
+            return;
+          }
+        } catch (_) {
+          // Serveur en cours de redémarrage
+        }
+        await new Promise(r => setTimeout(r, 1500));
+      }
+      showToast("⚠️ Le backend met du temps à répondre, rechargez la page.", true);
+    };
+    waitReboot();
+  } catch (err) {
+    showToast("Erreur réseau lors de la demande de redémarrage.", true);
+  }
+}
+
+async function checkWatchtowerUpdate() {
+  try {
+    showToast("⬆️ Vérification de mise à jour Watchtower en cours...");
+    const res = await fetch("/api/system/check-update", {
+      method: "POST",
+      headers: getInstallerHeaders()
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403) {
+      showToast("🔒 Authentification installateur requise : déverrouillez l'onglet Expert & Registres.", true);
+      return;
+    }
+    if (!res.ok) {
+      showToast(data.detail || "Watchtower injoignable ou erreur de mise à jour.", true);
+      return;
+    }
+    if (data.status === "unavailable") {
+      showToast(`ℹ️ ${data.message}`);
+      return;
+    }
+    showToast(data.message || "✅ Vérification de mise à jour Watchtower déclenchée !");
+  } catch (err) {
+    showToast("Erreur réseau lors de l'appel à Watchtower.", true);
   }
 }
 
@@ -6050,6 +6154,16 @@ window.addEventListener("DOMContentLoaded", () => {
   try { renderTriArcCockpit(); } catch (e) { console.error("[Init] RenderTriArc:", e); }
   try { switchTab("tab-control"); } catch (e) { console.error("[Init] SwitchTab:", e); }
   try { updateDynamicPowerButton(); } catch (e) { console.error("[Init] DynamicPowerButton:", e); }
+  const settingsPane = document.getElementById("subtab-pane-settings");
+  if (settingsPane) {
+    const markSettingsDirty = (ev) => {
+      if (ev.target && ev.target.id && ev.target.id.startsWith("cfg-")) {
+        isSettingsFormDirty = true;
+      }
+    };
+    settingsPane.addEventListener("input", markSettingsDirty);
+    settingsPane.addEventListener("change", markSettingsDirty);
+  }
   loadDashboard();
   initSSEStream();
   try { refreshMatterStatus(false); } catch (e) { console.error("[Init] MatterStatus:", e); }

@@ -8,14 +8,19 @@ FROM python:3.12-slim-trixie
 
 LABEL org.opencontainers.image.title="Nobis.Supervisor" \
     org.opencontainers.image.description="Supervision haute fidélité et passerelle Matter locale pour poêle Nobis" \
-    org.opencontainers.image.version="2.1.0" \
+    org.opencontainers.image.version="2.1.1" \
     org.opencontainers.image.licenses="MIT" \
     org.opencontainers.image.source="https://github.com/malexxx/Nobis.Supervisor" \
     org.opencontainers.image.vendor="Nobis.Supervisor"
 
+ARG APP_VERSION=2.1.1
+ARG DOCKER_VERSION=""
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    TZ=Europe/Paris
+    TZ=Europe/Paris \
+    APP_VERSION=${APP_VERSION} \
+    DOCKER_VERSION=${DOCKER_VERSION}
 
 RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
@@ -52,4 +57,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)" || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips", "*"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips", "*", "--timeout-graceful-shutdown", "5"]

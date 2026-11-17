@@ -4,16 +4,22 @@ Regroupe les snapshots de registres, exports CSV, consultation des journaux appl
 enregistrement de configuration, test de connexion Agua IOT/Passerelle et notifications Webhook.
 """
 from datetime import datetime
+import asyncio
 import json
 import os
+import signal
+import subprocess
+import sys
 import time
 from typing import Any, Dict, List
 
+import httpx
 from fastapi import APIRouter, Body, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from clients import (
     agua_client,
+    borrow_http_client,
     is_safe_gateway_url,
     is_safe_webhook_url,
     local_gateway_client,
@@ -22,8 +28,10 @@ from clients import (
 )
 from config import MODE_DB_PATHS, TELEMETRY_COLUMNS
 from database import (
+    add_container_log,
     db_log,
     get_active_mode,
+    get_container_logs,
     get_db,
     get_public_settings_dict,
     get_registers_dict,
@@ -40,7 +48,7 @@ from schemas import (
     TestConnectionPayload,
     TestWebhookPayload,
 )
-from telemetry import collect_telemetry_cycle, execute_registers_batch_write
+from telemetry import collect_telemetry_cycle, execute_registers_batch_write, sse_subscribers
 
 router = APIRouter(prefix="/api", tags=["System & Settings"])
 
@@ -215,10 +223,13 @@ async def api_get_audit():
 
 @router.get("/logs")
 async def api_get_logs(severity: str = Query("ALL")):
-    """Retourne les journaux applicatifs filtrés par sévérité."""
+    """Retourne les journaux applicatifs filtrés par sévérité (ou les logs conteneur en mémoire)."""
+    sev = (severity or "ALL").strip().upper()
+    if sev in ("CONTAINER", "CONTENEUR", "DOCKER"):
+        return get_container_logs(limit=250)
+
     conn = get_db(get_active_mode())
     try:
-        sev = (severity or "ALL").strip().upper()
         if sev == "ALL":
             rows = conn.execute("SELECT * FROM app_logs ORDER BY id DESC LIMIT 250").fetchall()
         elif sev in ("WARNING", "WARN"):
@@ -245,20 +256,32 @@ async def api_log_client_error(payload: ClientErrorPayload):
 async def api_export_logs_csv(severity: str = Query("ALL")):
     """Exporte les logs au format CSV."""
     active_mode = get_active_mode()
-    conn = get_db(active_mode)
-    try:
-        sev = (severity or "ALL").strip().upper()
-        if sev == "ALL":
-            rows = conn.execute("SELECT id, timestamp, severity, source, message FROM app_logs ORDER BY id DESC").fetchall()
-        elif sev in ("WARNING", "WARN"):
-            rows = conn.execute("SELECT id, timestamp, severity, source, message FROM app_logs WHERE severity IN ('WARNING', 'WARN') ORDER BY id DESC").fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT id, timestamp, severity, source, message FROM app_logs WHERE severity = ? ORDER BY id DESC",
-                (sev,),
-            ).fetchall()
-    finally:
-        conn.close()
+    sev = (severity or "ALL").strip().upper()
+    if sev in ("CONTAINER", "CONTENEUR", "DOCKER"):
+        rows = [
+            {
+                "id": idx + 1,
+                "timestamp": r.get("timestamp", ""),
+                "severity": r.get("severity", "INFO"),
+                "source": r.get("source", "CONTAINER"),
+                "message": r.get("message", ""),
+            }
+            for idx, r in enumerate(get_container_logs(limit=500))
+        ]
+    else:
+        conn = get_db(active_mode)
+        try:
+            if sev == "ALL":
+                rows = conn.execute("SELECT id, timestamp, severity, source, message FROM app_logs ORDER BY id DESC").fetchall()
+            elif sev in ("WARNING", "WARN"):
+                rows = conn.execute("SELECT id, timestamp, severity, source, message FROM app_logs WHERE severity IN ('WARNING', 'WARN') ORDER BY id DESC").fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, timestamp, severity, source, message FROM app_logs WHERE severity = ? ORDER BY id DESC",
+                    (sev,),
+                ).fetchall()
+        finally:
+            conn.close()
 
     def generate():
         yield "\ufeffid;timestamp;severity;source;message\r\n"
@@ -541,3 +564,138 @@ async def api_export_csv(range_key: str = Query("24h")):
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+async def _delayed_process_restart(delay_s: float = 0.5) -> None:
+    """Ferme les flux SSE et redémarre le processus (SIGTERM en Docker, respawning en local)."""
+    await asyncio.sleep(delay_s)
+    for q in list(sse_subscribers):
+        try:
+            q.put_nowait(None)
+        except Exception:
+            pass
+    try:
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+    except Exception:
+        pass
+    try:
+        await matter_manager.stop()
+    except Exception:
+        pass
+
+    if os.path.exists("/.dockerenv"):
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.sleep(3.0)
+        os._exit(0)
+    elif "--reload" in sys.argv:
+        main_py = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "main.py")
+        if os.path.isfile(main_py):
+            os.utime(main_py, None)
+            return
+    else:
+        argv0 = sys.argv[0] if sys.argv else ""
+        if sys.platform == "win32" and argv0 and not argv0.lower().endswith(".py"):
+            exe_candidate = argv0 if argv0.lower().endswith(".exe") else f"{argv0}.exe"
+            if os.path.isfile(exe_candidate):
+                cmd = [exe_candidate] + sys.argv[1:]
+            elif os.path.basename(argv0).lower().startswith("uvicorn"):
+                cmd = [sys.executable, "-m", "uvicorn"] + sys.argv[1:]
+            else:
+                cmd = [sys.executable] + sys.argv
+        else:
+            cmd = [sys.executable] + sys.argv
+        subprocess.Popen(cmd, close_fds=(sys.platform != "win32"))
+        os._exit(0)
+
+
+@router.post("/system/restart", responses={403: {"description": "Authentification installateur requise"}})
+async def api_system_restart(request: Request):
+    """Déclenche un redémarrage propre du backend (relancé automatiquement par Docker)."""
+    require_installer_auth_if_configured(request)
+    active_mode = get_active_mode()
+    db_log("COMMAND", "SYSTEM", "Redémarrage du backend demandé depuis l'interface.", active_mode)
+    add_container_log("WARNING", "SYSTEM", "Redémarrage du backend demandé depuis l'interface.")
+    asyncio.create_task(_delayed_process_restart(0.5))
+    return {"status": "ok", "message": "Redémarrage du backend déclenché. Reconnexion en cours..."}
+
+
+@router.post(
+    "/system/check-update",
+    responses={
+        403: {"description": "Authentification installateur requise"},
+        502: {"description": "Watchtower injoignable ou en erreur"},
+    },
+)
+async def api_system_check_update(request: Request):
+    """Déclenche une vérification/mise à jour via l'API HTTP de Watchtower."""
+    require_installer_auth_if_configured(request)
+    active_mode = get_active_mode()
+    env_watchtower_url = os.environ.get("WATCHTOWER_URL", "").strip()
+    if not env_watchtower_url and not os.path.exists("/.dockerenv"):
+        # Hors Docker : vérification directe de la version Git locale vs dépôt distant
+        try:
+            repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            res_local = await asyncio.to_thread(
+                subprocess.run,
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo_dir,
+                capture_output=True,
+                text=True,
+                timeout=5.0,
+            )
+            local_sha = (res_local.stdout or "").strip()
+
+            res_remote = await asyncio.to_thread(
+                subprocess.run,
+                ["git", "ls-remote", "origin", "HEAD"],
+                cwd=repo_dir,
+                capture_output=True,
+                text=True,
+                timeout=10.0,
+            )
+            remote_line = (res_remote.stdout or "").strip()
+            remote_sha = remote_line.split()[0] if remote_line else ""
+
+            if res_local.returncode == 0 and res_remote.returncode == 0 and local_sha and remote_sha:
+                if local_sha == remote_sha:
+                    msg = f"Application à jour ({local_sha[:7]})."
+                    up_to_date = True
+                else:
+                    msg = f"Mise à jour disponible sur GitHub ({local_sha[:7]} → {remote_sha[:7]}). Lancez 'git pull'."
+                    up_to_date = False
+                db_log("INFO", "UPDATE", msg, active_mode)
+                add_container_log("INFO", "UPDATE", msg)
+                return {"status": "ok", "update_available": not up_to_date, "message": msg}
+            err_txt = (res_remote.stderr or res_local.stderr or "").strip() or "Dépôt distant inaccessible"
+            msg = f"Vérification Git impossible : {err_txt[:150]}"
+        except Exception as exc:
+            msg = f"Vérification Git impossible : {exc or type(exc).__name__}"
+        db_log("WARNING", "UPDATE", msg, active_mode)
+        add_container_log("WARNING", "UPDATE", msg)
+        return {"status": "unavailable", "message": msg}
+
+    watchtower_url = env_watchtower_url or "http://watchtower:8080/v1/update"
+    watchtower_token = os.environ.get("WATCHTOWER_HTTP_API_TOKEN", "nobis-watchtower").strip()
+    headers = {"Authorization": f"Bearer {watchtower_token}"} if watchtower_token else {}
+
+    add_container_log("INFO", "WATCHTOWER", f"Vérification de mise à jour demandée ({watchtower_url}).")
+    try:
+        async with borrow_http_client(timeout=15.0) as client:
+            resp = await client.post(watchtower_url, headers=headers)
+        if 200 <= resp.status_code < 300:
+            db_log("INFO", "WATCHTOWER", "Vérification de mise à jour Watchtower déclenchée avec succès.", active_mode)
+            add_container_log("INFO", "WATCHTOWER", "Vérification de mise à jour Watchtower déclenchée avec succès.")
+            return {
+                "status": "ok",
+                "message": "Vérification de mise à jour Watchtower déclenchée avec succès.",
+            }
+        err_detail = f"Watchtower a répondu HTTP {resp.status_code} : {resp.text[:200]}"
+        db_log("WARNING", "WATCHTOWER", err_detail, active_mode)
+        add_container_log("WARNING", "WATCHTOWER", err_detail)
+        raise HTTPException(status_code=502, detail=err_detail)
+    except httpx.RequestError as exc:
+        err_detail = f"Impossible de joindre Watchtower ({watchtower_url}) : {exc}"
+        db_log("WARNING", "WATCHTOWER", err_detail, active_mode)
+        add_container_log("WARNING", "WATCHTOWER", err_detail)
+        raise HTTPException(status_code=502, detail=err_detail)

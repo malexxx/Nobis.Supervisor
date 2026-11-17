@@ -6,6 +6,8 @@ import math
 import uuid
 import random
 import sqlite3
+import threading
+from collections import deque
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Iterator
 from contextlib import contextmanager
@@ -16,6 +18,7 @@ if BASE_DIR not in sys.path:
 
 from config import (
     DATA_DIR,
+    DOCKER_VERSION,
     SYSTEM_DB_PATH,
     MODE_DB_PATHS,
     HOPPER_CAPACITY_KG,
@@ -65,6 +68,7 @@ def get_public_settings_dict() -> Dict[str, str]:
     s = get_settings_dict()
     if "agua_password" in s:
         s["agua_password"] = "********" if s["agua_password"] else ""
+    s["docker_version"] = DOCKER_VERSION
     return s
 
 
@@ -284,6 +288,34 @@ def db_log(severity: str, source: str, message: str, mode: Optional[str] = None)
             "INSERT INTO app_logs (timestamp, severity, source, message) VALUES (?, ?, ?, ?)",
             (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), s, source, str(message))
         )
+
+
+_container_logs_lock = threading.Lock()
+_container_logs: deque = deque(maxlen=500)
+
+
+def add_container_log(severity: str, source: str, message: str) -> None:
+    """Ajoute une ligne de log conteneur/backend dans le buffer circulaire en mémoire."""
+    s = (severity or "INFO").strip().upper()
+    if s == "WARN":
+        s = "WARNING"
+    entry = {
+        "id": None,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "severity": s,
+        "source": str(source or "CONTAINER")[:25],
+        "message": str(message or "")[:1000],
+    }
+    with _container_logs_lock:
+        _container_logs.append(entry)
+
+
+def get_container_logs(limit: int = 250) -> List[Dict[str, Any]]:
+    """Retourne les journaux du conteneur stockés en mémoire (du plus récent au plus ancien)."""
+    with _container_logs_lock:
+        items = list(_container_logs)
+    items.reverse()
+    return items[:max(1, limit)]
 
 
 def get_registers_dict(mode: Optional[str] = None) -> Dict[str, Dict[str, Any]]:

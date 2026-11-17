@@ -4,9 +4,13 @@ import schemathesis
 from main import app
 from database import get_sys_db
 
-# S'assurer que le mode simulation est actif pour l'introspection OpenAPI ASGI
+# S'assurer que le mode simulation est actif pour l'introspection OpenAPI ASGI, puis restaurer
 _sconn = get_sys_db()
+_orig_import_mode = "agua_cloud"
 try:
+    _row = _sconn.execute("SELECT value FROM settings WHERE key = 'comm_mode'").fetchone()
+    if _row and _row["value"]:
+        _orig_import_mode = _row["value"]
     _sconn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('comm_mode', 'simulation')")
     _sconn.commit()
 finally:
@@ -14,6 +18,13 @@ finally:
 
 # Chargement in-process de la spécification OpenAPI depuis l'application FastAPI
 schema = schemathesis.openapi.from_asgi("/openapi.json", app)
+
+_sconn_restore = get_sys_db()
+try:
+    _sconn_restore.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('comm_mode', ?)", (_orig_import_mode,))
+    _sconn_restore.commit()
+finally:
+    _sconn_restore.close()
 
 
 class TestSchemathesisContracts(unittest.TestCase):

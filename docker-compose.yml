@@ -12,6 +12,7 @@ services:
     environment:
       - TZ=Europe/Paris
       - DB_PATH=/app/data/nobis_a10.db
+      - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_TOKEN:-nobis-watchtower}
 
   caddy:
     image: caddy:alpine
@@ -32,7 +33,7 @@ services:
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    command: --interval 3600 --cleanup nobis.supervisor
+    command: --interval 3600 --cleanup --http-api-update --http-api-token ${WATCHTOWER_TOKEN:-nobis-watchtower} nobis.supervisor
 
 volumes:
   nobis_data:

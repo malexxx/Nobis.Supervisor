@@ -24,8 +24,9 @@ if BASE_DIR not in sys.path:
 
 from analytics import enrich_telemetry_record
 from clients import close_http_client, init_http_client
-from config import MODE_DB_PATHS, STATIC_DIR
+from config import APP_VERSION, DOCKER_VERSION, MODE_DB_PATHS, STATIC_DIR
 from database import (
+    add_container_log,
     db_log,
     get_active_mode,
     get_db,
@@ -107,6 +108,11 @@ async def lifespan(app: FastAPI):
         interval_s = 120
 
     active_mode = get_active_mode()
+    add_container_log(
+        "INFO",
+        "CONTAINER",
+        f"Démarrage Nobis.Supervisor v{APP_VERSION} (mode={active_mode}, docker={DOCKER_VERSION})",
+    )
 
     # Démarrage de la boucle de télémétrie périodique et rétention
     scheduler.add_job(collect_telemetry_cycle, "interval", seconds=interval_s, id="telemetry_job", replace_existing=True)
@@ -159,7 +165,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Nobis.Supervisor - Supervision Micronova & Pont Matter",
-    version="2.1.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 
@@ -180,6 +186,26 @@ class DbLogHandler(logging.Handler):
 _db_log_handler = DbLogHandler()
 _db_log_handler.setLevel(logging.ERROR)
 logging.getLogger().addHandler(_db_log_handler)
+
+
+class ContainerLogHandler(logging.Handler):
+    """Capture les journaux Python/Uvicorn/APScheduler (INFO+) dans le buffer mémoire conteneur."""
+    def emit(self, record: logging.LogRecord):
+        try:
+            msg = self.format(record)
+            if msg:
+                add_container_log(record.levelname, record.name or "CONTAINER", msg)
+        except Exception:
+            pass
+
+
+_container_log_handler = ContainerLogHandler()
+_container_log_handler.setLevel(logging.INFO)
+_container_log_handler.setFormatter(logging.Formatter("%(message)s"))
+for _logger_name in ("", "uvicorn", "uvicorn.error", "uvicorn.access", "apscheduler"):
+    _lg = logging.getLogger(_logger_name)
+    if _container_log_handler not in _lg.handlers:
+        _lg.addHandler(_container_log_handler)
 
 
 _routes_cache = []
@@ -339,6 +365,8 @@ async def healthcheck():
     mode = get_active_mode()
     return {
         "status": "healthy",
+        "version": APP_VERSION,
+        "docker_version": DOCKER_VERSION,
         "timestamp": datetime.now().isoformat(),
         "active_mode": mode,
         "active_db": os.path.basename(MODE_DB_PATHS.get(mode, MODE_DB_PATHS["simulation"])),
@@ -360,7 +388,7 @@ async def api_sse_events(request: Request):
     async def event_generator():
         idle_ticks = 0
         try:
-            yield f"data: {json.dumps({'event': 'connected', 'active_mode': get_active_mode()})}\n\n"
+            yield f"data: {json.dumps({'event': 'connected', 'active_mode': get_active_mode(), 'docker_version': DOCKER_VERSION})}\n\n"
             while not _is_shutting_down:
                 if await request.is_disconnected():
                     break
@@ -409,6 +437,8 @@ async def api_latest():
         "conso_month_kg": latest_dict.get("conso_month_kg", 0.0),
     }
     return {
+        "version": APP_VERSION,
+        "docker_version": DOCKER_VERSION,
         "active_mode": active_mode,
         "active_db_file": os.path.basename(MODE_DB_PATHS.get(active_mode, MODE_DB_PATHS["simulation"])),
         "latest": latest_dict,
@@ -479,6 +509,8 @@ async def api_dashboard(range_key: str = Query("24h")):
     }
 
     return {
+        "version": APP_VERSION,
+        "docker_version": DOCKER_VERSION,
         "active_mode": active_mode,
         "active_db_file": os.path.basename(MODE_DB_PATHS.get(active_mode, MODE_DB_PATHS["simulation"])),
         "latest": latest_dict,

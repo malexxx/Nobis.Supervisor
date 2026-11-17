@@ -964,6 +964,21 @@ class TestBugBountyFixes(unittest.TestCase):
         self.assertIn("nobis-cockpit-v2.1.0", sw_js)
         self.assertIn("app.js", sw_js)
 
+        with open(os.path.join(BASE_DIR, "static", "index.html"), "r", encoding="utf-8") as f:
+            index_html = f.read()
+        self.assertIn('id="hdr-status-pill"', index_html)
+        self.assertIn('id="hdr-mode-conn-icon"', index_html)
+        self.assertIn('id="hdr-container-version"', index_html)
+        self.assertIn('id="hdr-docker-version-badge"', index_html)
+        self.assertIn('id="cfg-docker-version"', index_html)
+        self.assertNotIn('id="hdr-mode-badge"', index_html)
+        self.assertNotIn('id="hdr-conn-cloud"', index_html)
+        self.assertNotIn('id="hdr-conn-container"', index_html)
+
+        r_health = self.client.get("/health")
+        self.assertEqual(r_health.status_code, 200)
+        self.assertTrue(r_health.json().get("docker_version", "").startswith("v"))
+
     def test_docker_persistence_and_env_settings_fallback(self):
         """Vérifie le fallback DATA_DIR si DB_PATH est relatif et l'initialisation par variables d'env."""
         import database
