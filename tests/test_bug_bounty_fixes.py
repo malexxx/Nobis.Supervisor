@@ -5,10 +5,12 @@ Exécution : .venv/Scripts/pytest.exe -v tests/test_bug_bounty_fixes.py
 """
 
 import asyncio
+import importlib.util
 import json
 import os
 import socket
 import sqlite3
+import tempfile
 import time
 import unittest
 from contextlib import contextmanager
@@ -921,6 +923,29 @@ class TestBugBountyFixes(unittest.TestCase):
         self.assertIn("--workers", dockerfile)
         self.assertIn("--proxy-headers", dockerfile)
         self.assertIn("--forwarded-allow-ips", dockerfile)
+        self.assertIn('VOLUME ["/app/data"]', dockerfile)
+        self.assertIn("FROM node:22-trixie-slim AS node-builder", dockerfile)
+        self.assertIn("FROM python:3.12-slim-trixie", dockerfile)
+        self.assertIn('org.opencontainers.image.licenses="MIT"', dockerfile)
+        self.assertIn('org.opencontainers.image.source="https://github.com/malexxx/Nobis.Supervisor"', dockerfile)
+        self.assertIn("tini", dockerfile)
+        self.assertIn("gosu", dockerfile)
+        self.assertIn("urllib.request", dockerfile)
+        self.assertNotIn("curl", dockerfile)
+        self.assertIn('ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]', dockerfile)
+
+        entrypoint_path = os.path.join(BASE_DIR, "docker-entrypoint.sh")
+        self.assertTrue(os.path.isfile(entrypoint_path))
+        with open(entrypoint_path, "r", encoding="utf-8") as f:
+            entrypoint = f.read()
+        self.assertIn('exec gosu nobis:nobis "$@"', entrypoint)
+
+        with open(os.path.join(BASE_DIR, ".github", "workflows", "docker-publish.yml"), "r", encoding="utf-8") as f:
+            publish_yml = f.read()
+        self.assertIn("sbom: true", publish_yml)
+        self.assertIn("provenance: true", publish_yml)
+
+        self.assertFalse(os.path.exists(os.path.join(BASE_DIR, "Dockerfile.txt")))
 
         with open(os.path.join(BASE_DIR, ".dockerignore"), "r", encoding="utf-8") as f:
             dockerignore = f.read()
@@ -931,11 +956,71 @@ class TestBugBountyFixes(unittest.TestCase):
         with open(os.path.join(BASE_DIR, "docker-compose.yml"), "r", encoding="utf-8") as f:
             compose = f.read()
         self.assertIn("127.0.0.1:1220:8080", compose)
+        self.assertIn("nobis_data:/app/data", compose)
+        self.assertIn("volumes:\n  nobis_data:", compose)
 
         with open(os.path.join(BASE_DIR, "static", "sw.js"), "r", encoding="utf-8") as f:
             sw_js = f.read()
-        self.assertIn("nobis-cockpit-v2.0.0", sw_js)
+        self.assertIn("nobis-cockpit-v2.1.0", sw_js)
         self.assertIn("app.js", sw_js)
+
+    def test_docker_persistence_and_env_settings_fallback(self):
+        """Vérifie le fallback DATA_DIR si DB_PATH est relatif et l'initialisation par variables d'env."""
+        import database
+
+        with patch.dict(os.environ, {"DB_PATH": "nobis_a10.db"}):
+            spec = importlib.util.spec_from_file_location("config_isolated", os.path.join(BASE_DIR, "config.py"))
+            cfg_mod = importlib.util.module_from_spec(spec)
+            assert spec and spec.loader
+            spec.loader.exec_module(cfg_mod)
+            self.assertTrue(os.path.isabs(cfg_mod.DATA_DIR))
+            self.assertEqual(cfg_mod.DATA_DIR, cfg_mod._DEFAULT_DATA_DIR)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sys_db = os.path.join(tmpdir, "nobis_a10_system.db")
+            mode_dbs = {
+                "simulation": os.path.join(tmpdir, "nobis_a10_simulation.db"),
+                "agua_cloud": os.path.join(tmpdir, "nobis_a10_agua_cloud.db"),
+                "local_gateway": os.path.join(tmpdir, "nobis_a10_local_gateway.db"),
+            }
+            with patch.object(database, "DATA_DIR", tmpdir), \
+                 patch.object(database, "SYSTEM_DB_PATH", sys_db), \
+                 patch.object(database, "MODE_DB_PATHS", mode_dbs):
+                # 1. Premier démarrage sans variables d'env : email/mdp vides
+                with patch.dict(os.environ, {}, clear=False):
+                    for k in ("COMM_MODE", "AGUA_EMAIL", "AGUA_PASSWORD", "AGUA_UUID", "AGUA_ID_DEVICE", "AGUA_ID_PRODUCT", "LOCAL_GATEWAY_URL"):
+                        os.environ.pop(k, None)
+                    database.init_all_databases()
+
+                conn = sqlite3.connect(sys_db)
+                conn.row_factory = sqlite3.Row
+                rows = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM settings").fetchall()}
+                conn.close()
+                self.assertEqual(rows["agua_email"], "")
+                self.assertEqual(rows["agua_password"], "")
+
+                # 2. Redémarrage avec variables d'env : remplit les champs vides sans écraser les valeurs déjà définies
+                conn = sqlite3.connect(sys_db)
+                conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('comm_mode', 'simulation')")
+                conn.commit()
+                conn.close()
+
+                with patch.dict(os.environ, {
+                    "COMM_MODE": "agua_cloud",
+                    "AGUA_EMAIL": "user@nobis.test",
+                    "AGUA_PASSWORD": "secret-pass",
+                    "LOCAL_GATEWAY_URL": "http://192.168.1.200",
+                }):
+                    database.init_all_databases()
+
+                conn = sqlite3.connect(sys_db)
+                conn.row_factory = sqlite3.Row
+                rows2 = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM settings").fetchall()}
+                conn.close()
+                self.assertEqual(rows2["agua_email"], "user@nobis.test")
+                self.assertEqual(rows2["agua_password"], "secret-pass")
+                # comm_mode déjà non-vide en base reste préservé
+                self.assertEqual(rows2["comm_mode"], "simulation")
 
 
 if __name__ == "__main__":

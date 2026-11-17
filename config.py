@@ -15,7 +15,9 @@ _DEFAULT_DATA_DIR = (
         else os.path.join(os.path.dirname(BASE_DIR), "data")
     )
 )
-DATA_DIR = os.path.dirname(os.environ["DB_PATH"]) if "DB_PATH" in os.environ else _DEFAULT_DATA_DIR
+_db_path_env = os.environ.get("DB_PATH", "").strip()
+_db_dir_env = os.path.dirname(_db_path_env) if _db_path_env else ""
+DATA_DIR = _db_dir_env or _DEFAULT_DATA_DIR
 os.makedirs(DATA_DIR, exist_ok=True)
 
 STATIC_DIR = next(

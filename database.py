@@ -218,8 +218,32 @@ def init_all_databases():
             except Exception:
                 pass
 
+        env_settings_map = {
+            "COMM_MODE": "comm_mode",
+            "AGUA_EMAIL": "agua_email",
+            "AGUA_PASSWORD": "agua_password",
+            "AGUA_UUID": "agua_uuid",
+            "AGUA_ID_DEVICE": "agua_id_device",
+            "AGUA_ID_PRODUCT": "agua_id_product",
+            "LOCAL_GATEWAY_URL": "local_gateway_url",
+        }
+        env_overrides: Dict[str, str] = {}
+        for env_name, setting_key in env_settings_map.items():
+            raw_val = os.environ.get(env_name)
+            if raw_val is not None and raw_val.strip():
+                val = raw_val if setting_key == "agua_password" else raw_val.strip()
+                if setting_key == "comm_mode" and val not in MODE_DB_PATHS:
+                    continue
+                env_overrides[setting_key] = val
+                default_settings[setting_key] = val
+
         for k, v in default_settings.items():
             scur.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
+        for setting_key, val in env_overrides.items():
+            scur.execute(
+                "UPDATE settings SET value = ? WHERE key = ? AND TRIM(value) = ''",
+                (val, setting_key),
+            )
         sconn.commit()
     finally:
         sconn.close()

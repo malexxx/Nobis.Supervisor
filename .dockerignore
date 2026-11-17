@@ -20,4 +20,3 @@ __pycache__
 *.db-shm
 data/
 matter_bridge/node_modules
-Dockerfile.txt
