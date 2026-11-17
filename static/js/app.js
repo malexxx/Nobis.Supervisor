@@ -1274,7 +1274,7 @@ const connectionState = {
 function updateStatusPillBorder() {
   const pillEl = document.getElementById("hdr-status-pill");
   if (!pillEl) return;
-  const dockerVer = (typeof currentSettings !== "undefined" && currentSettings && currentSettings.docker_version) || "v2.1.1";
+  const dockerVer = (typeof currentSettings !== "undefined" && currentSettings && currentSettings.docker_version) || "v2.1.2";
   const cState = connectionState.containerStatus;
   const mState = connectionState.cloudStatus;
 
@@ -1295,7 +1295,7 @@ function updateContainerConnectionIndicator(overrideStatus, message) {
   const verEl = document.getElementById("hdr-container-version");
   const cfgDiagContainer = document.getElementById("cfg-diag-container");
 
-  const dockerVer = (typeof currentSettings !== "undefined" && currentSettings && currentSettings.docker_version) || "v2.1.1";
+  const dockerVer = (typeof currentSettings !== "undefined" && currentSettings && currentSettings.docker_version) || "v2.1.2";
   const effectiveStatus = overrideStatus || (connectionState.isServerConnected ? "connected" : "disconnected");
   connectionState.containerStatus = effectiveStatus;
 
@@ -1611,7 +1611,7 @@ function applyDashboardState(data, updateSeries = true) {
 
   const dbEl = document.getElementById("hdr-db");
   if (dbEl) dbEl.textContent = activeDbFile;
-  const dockerVersion = data.docker_version || (currentSettings && currentSettings.docker_version) || "v2.1.1";
+  const dockerVersion = data.docker_version || (currentSettings && currentSettings.docker_version) || "v2.1.2";
   const cfgDockerVerEl = document.getElementById("cfg-docker-version");
   if (cfgDockerVerEl) cfgDockerVerEl.textContent = dockerVersion;
   const hdrDockerBadgeEl = document.getElementById("hdr-docker-version-badge");
@@ -4313,10 +4313,15 @@ async function sendRawOffset() {
 }
 
 async function loadAudit() {
-  const res = await fetch("/api/audit");
+  const res = await fetch("/api/audit", { cache: "no-store" });
   if (!res.ok) return;
   const rows = await res.json();
   const tbody = document.getElementById("audit-table-body");
+  if (!tbody) return;
+  if (!rows || rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-gray-500 text-xs">🛡️ Aucune écriture de registre enregistrée pour le mode actif.</td></tr>`;
+    return;
+  }
   tbody.innerHTML = rows.map(r => `
     <tr>
       <td class="py-2 text-gray-400">${escapeHtml(r.timestamp)}</td>
@@ -4632,7 +4637,7 @@ async function loadLogs(sev) {
     }
   });
 
-  const res = await fetch(`/api/logs?severity=${currentLogSeverity}`);
+  const res = await fetch(`/api/logs?severity=${encodeURIComponent(currentLogSeverity)}`, { cache: "no-store" });
   if (!res.ok) return;
   const logs = await res.json();
   lastLoadedLogs = Array.isArray(logs) ? logs : [];

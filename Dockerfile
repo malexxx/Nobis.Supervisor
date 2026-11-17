@@ -8,12 +8,12 @@ FROM python:3.12-slim-trixie
 
 LABEL org.opencontainers.image.title="Nobis.Supervisor" \
     org.opencontainers.image.description="Supervision haute fidélité et passerelle Matter locale pour poêle Nobis" \
-    org.opencontainers.image.version="2.1.1" \
+    org.opencontainers.image.version="2.1.2" \
     org.opencontainers.image.licenses="MIT" \
     org.opencontainers.image.source="https://github.com/malexxx/Nobis.Supervisor" \
     org.opencontainers.image.vendor="Nobis.Supervisor"
 
-ARG APP_VERSION=2.1.1
+ARG APP_VERSION=2.1.2
 ARG DOCKER_VERSION=""
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

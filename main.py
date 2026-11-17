@@ -108,6 +108,7 @@ async def lifespan(app: FastAPI):
         interval_s = 120
 
     active_mode = get_active_mode()
+    _attach_container_log_handler()
     add_container_log(
         "INFO",
         "CONTAINER",
@@ -191,6 +192,9 @@ logging.getLogger().addHandler(_db_log_handler)
 class ContainerLogHandler(logging.Handler):
     """Capture les journaux Python/Uvicorn/APScheduler (INFO+) dans le buffer mémoire conteneur."""
     def emit(self, record: logging.LogRecord):
+        if getattr(record, "_container_logged", False):
+            return
+        record._container_logged = True
         try:
             msg = self.format(record)
             if msg:
@@ -202,10 +206,22 @@ class ContainerLogHandler(logging.Handler):
 _container_log_handler = ContainerLogHandler()
 _container_log_handler.setLevel(logging.INFO)
 _container_log_handler.setFormatter(logging.Formatter("%(message)s"))
-for _logger_name in ("", "uvicorn", "uvicorn.error", "uvicorn.access", "apscheduler"):
-    _lg = logging.getLogger(_logger_name)
-    if _container_log_handler not in _lg.handlers:
-        _lg.addHandler(_container_log_handler)
+
+
+def _attach_container_log_handler():
+    """Attache le handler mémoire conteneur au logger racine et aux loggers Uvicorn/APScheduler."""
+    root_logger = logging.getLogger()
+    if root_logger.level == logging.NOTSET or root_logger.level > logging.INFO:
+        root_logger.setLevel(logging.INFO)
+    for logger_name in ("", "uvicorn", "uvicorn.error", "uvicorn.access", "apscheduler"):
+        lg = logging.getLogger(logger_name)
+        if logger_name and lg.level > logging.INFO:
+            lg.setLevel(logging.INFO)
+        if _container_log_handler not in lg.handlers:
+            lg.addHandler(_container_log_handler)
+
+
+_attach_container_log_handler()
 
 
 _routes_cache = []
