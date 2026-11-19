@@ -288,3 +288,30 @@ function getRegVal(key, fallback) {
   }
   return fallback;
 }
+
+/**
+ * Retourne le nom personnalisé d'une canalisation ("SX" ou "DX"), avec repli par défaut.
+ * @param {"SX"|"DX"} side
+ * @returns {string}
+ */
+function getDuctName(side) {
+  const key = side === "SX" ? "duct_left_name" : "duct_right_name";
+  const raw = currentSettings && currentSettings[key] ? String(currentSettings[key]).trim() : "";
+  return raw || side;
+}
+
+/**
+ * Met à jour dynamiquement les libellés SX / DX dans SERIES_CONFIG (graphiques Supervision).
+ */
+function syncSeriesDuctLabels() {
+  const sx = getDuctName("SX");
+  const dx = getDuctName("DX");
+  SERIES_CONFIG.forEach((s) => {
+    if (s.key === "duct_left_temp") s.label = `T° ${sx}`;
+    else if (s.key === "duct_left_setpoint") s.label = `Cons. ${sx}`;
+    else if (s.key === "duct_left_speed") s.label = `Vit. ${sx}`;
+    else if (s.key === "duct_right_temp") s.label = `T° ${dx}`;
+    else if (s.key === "duct_right_setpoint") s.label = `Cons. ${dx}`;
+    else if (s.key === "duct_right_speed") s.label = `Vit. ${dx}`;
+  });
+}

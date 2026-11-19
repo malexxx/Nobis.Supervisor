@@ -328,6 +328,11 @@ async def api_save_settings(payload: SettingsPayload, request: Request):
             raise HTTPException(status_code=400, detail="URL de passerelle locale invalide ou rejetée par le filtre de sécurité anti-SSRF.")
         raw_dict["local_gateway_url"] = gw_url_in
 
+    if "duct_left_name" in raw_dict:
+        raw_dict["duct_left_name"] = (str(raw_dict["duct_left_name"] or "").strip()[:20]) or "SX"
+    if "duct_right_name" in raw_dict:
+        raw_dict["duct_right_name"] = (str(raw_dict["duct_right_name"] or "").strip()[:20]) or "DX"
+
     conn = get_sys_db()
     try:
         for k, v in raw_dict.items():
@@ -699,3 +704,62 @@ async def api_system_check_update(request: Request):
         db_log("WARNING", "WATCHTOWER", err_detail, active_mode)
         add_container_log("WARNING", "WATCHTOWER", err_detail)
         raise HTTPException(status_code=502, detail=err_detail)
+
+
+@router.get("/reverse-geocode")
+async def api_reverse_geocode(lat: float, lon: float):
+    """Résout le nom de la commune à partir de coordonnées GPS (BAN France puis Nominatim)."""
+    if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
+        raise HTTPException(status_code=400, detail="Coordonnées GPS invalides.")
+
+    city_label = ""
+    try:
+        async with borrow_http_client(timeout=6.0) as client:
+            # 1. API Adresse officielle France (BAN - rapide et précise)
+            try:
+                r_ban = await client.get(
+                    "https://api-adresse.data.gouv.fr/reverse/",
+                    params={"lon": f"{lon:.5f}", "lat": f"{lat:.5f}", "limit": 1},
+                )
+                if r_ban.status_code == 200:
+                    feats = (r_ban.json() or {}).get("features") or []
+                    if feats:
+                        props = feats[0].get("properties") or {}
+                        city = (props.get("city") or props.get("municipality") or "").strip()
+                        postcode = (props.get("postcode") or "").strip()
+                        if city:
+                            city_label = f"{city} ({postcode})" if postcode else city
+            except Exception:
+                pass
+
+            # 2. Repli mondial Nominatim OpenStreetMap si hors France ou échec BAN
+            if not city_label:
+                try:
+                    r_nom = await client.get(
+                        "https://nominatim.openstreetmap.org/reverse",
+                        params={"format": "json", "lat": f"{lat:.5f}", "lon": f"{lon:.5f}", "zoom": 10, "addressdetails": 1},
+                        headers={"User-Agent": "Nobis.Supervisor/2.1"},
+                    )
+                    if r_nom.status_code == 200:
+                        addr = (r_nom.json() or {}).get("address") or {}
+                        city = (
+                            addr.get("city")
+                            or addr.get("town")
+                            or addr.get("village")
+                            or addr.get("municipality")
+                            or ""
+                        ).strip()
+                        postcode = (addr.get("postcode") or "").strip()
+                        if city:
+                            city_label = f"{city} ({postcode})" if postcode else city
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    return {
+        "status": "ok",
+        "city": city_label,
+        "lat": f"{lat:.4f}",
+        "lon": f"{lon:.4f}",
+    }

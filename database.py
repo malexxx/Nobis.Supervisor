@@ -64,10 +64,12 @@ def get_settings_dict() -> Dict[str, str]:
 
 
 def get_public_settings_dict() -> Dict[str, str]:
-    """Retourne les paramètres système en masquant les données sensibles (mot de passe Agua Cloud)."""
+    """Retourne les paramètres système en masquant les données sensibles (mot de passe Agua Cloud, token DNS)."""
     s = get_settings_dict()
     if "agua_password" in s:
         s["agua_password"] = "********" if s["agua_password"] else ""
+    if "https_dns_token" in s:
+        s["https_dns_token"] = "********" if s["https_dns_token"] else ""
     s["docker_version"] = DOCKER_VERSION
     return s
 
@@ -206,7 +208,16 @@ def init_all_databases():
             "webhook_url": "",
             "matter_enabled": "1",
             "matter_device_name": "Poêle Nobis A10",
-            "matter_port": "5540"
+            "matter_port": "5540",
+            "duct_left_name": "SX",
+            "duct_right_name": "DX",
+            "https_mode": "",
+            "https_domain": "",
+            "https_dns_provider": "duckdns",
+            "https_email": "",
+            "https_dns_token": "",
+            "https_san_ips": "",
+            "https_san_dns": ""
         }
         old_db = os.path.join(DATA_DIR, "nobis_a10.db")
         if os.path.exists(old_db):

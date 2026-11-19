@@ -12,6 +12,7 @@ services:
     environment:
       - TZ=Europe/Paris
       - DB_PATH=/app/data/nobis_a10.db
+      - HTTPS_DEFAULT_MODE=http
       - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_TOKEN:-nobis-watchtower}
 
   caddy:

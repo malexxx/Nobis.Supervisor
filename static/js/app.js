@@ -104,40 +104,43 @@ function getActiveCommMode() {
 }
 
 // =============================================================================
-// GESTION DU RE-DESIGN DE L'ONGLET PARAMÈTRES, TARAGES & OBSERVABILITÉ
+// GESTION DE L'ONGLET PARAMÈTRES (ACCORDÉONS EXCLUSIFS + RECHERCHE + CHEVRONS)
 // =============================================================================
-let currentInstallerSubTab = "settings";
+let currentInstallerSubTab = null;
+let openSettingsAccId = null;
 
-function switchInstallerSubTab(subTabId) {
-  currentInstallerSubTab = subTabId || "settings";
-  const validTabs = ["settings", "tuning", "expert", "logs"];
-  validTabs.forEach(t => {
-    const pane = document.getElementById("subtab-pane-" + t);
-    const btn = document.getElementById("subtab-btn-" + t);
-    const isTarget = (t === currentInstallerSubTab);
-    if (pane) {
-      pane.classList.toggle("hidden", !isTarget);
-    }
-    if (btn) {
-      if (isTarget) {
-        btn.classList.add("subtab-active", "bg-orange-600", "text-white", "shadow-md");
-        btn.classList.remove("text-gray-400", "hover:bg-gray-900");
-      } else {
-        btn.classList.remove("subtab-active", "bg-orange-600", "text-white", "shadow-md");
-        btn.classList.add("text-gray-400", "hover:bg-gray-900");
-      }
-    }
-  });
+function toggleSettingsAccordion(accId, forceOpen = false) {
+  const targetBody = document.getElementById("acc-body-" + accId);
+  if (!targetBody) return;
 
-  if (currentInstallerSubTab === "expert") {
+  const isAlreadyOpen = !targetBody.classList.contains("hidden");
+  if (isAlreadyOpen && !forceOpen) {
+    targetBody.classList.add("hidden");
+    const arrow = document.getElementById("acc-arrow-" + accId);
+    if (arrow) arrow.classList.remove("rotate-180");
+    openSettingsAccId = null;
+    return;
+  }
+
+  // Réduit tous les autres blocs (un seul bloc déplié à la fois)
+  document.querySelectorAll(".settings-acc-body").forEach((el) => el.classList.add("hidden"));
+  document.querySelectorAll(".settings-acc-arrow").forEach((el) => el.classList.remove("rotate-180"));
+
+  targetBody.classList.remove("hidden");
+  const arrow = document.getElementById("acc-arrow-" + accId);
+  if (arrow) arrow.classList.add("rotate-180");
+  openSettingsAccId = accId;
+  currentInstallerSubTab = accId;
+
+  if (accId === "expert") {
     checkInstallerAuthStatus();
     renderEepromTable();
     loadSnapshots();
     renderHardwareMasks();
-  } else if (currentInstallerSubTab === "logs") {
+  } else if (accId === "logs") {
     loadLogs(currentLogSeverity);
     loadAudit();
-  } else if (currentInstallerSubTab === "tuning") {
+  } else if (accId === "tuning") {
     const trimPelletInp = document.getElementById("inst-trim-pellet");
     if (trimPelletInp && document.activeElement !== trimPelletInp) {
       trimPelletInp.value = getRegVal("trim_pellet_pct", 0);
@@ -146,9 +149,246 @@ function switchInstallerSubTab(subTabId) {
     if (trimExhaustInp && document.activeElement !== trimExhaustInp) {
       trimExhaustInp.value = getRegVal("trim_exhaust_pct", 0);
     }
-  } else if (currentInstallerSubTab === "settings") {
+  } else if (accId === "conn") {
     updateConfigModalFields();
+  } else if (accId === "zones") {
+    updateDuctChevronPreview();
   }
+}
+
+function filterSettingsAccordions(query) {
+  const q = String(query || "").trim().toLowerCase();
+  const clearBtn = document.getElementById("settings-acc-search-clear");
+  if (clearBtn) clearBtn.classList.toggle("hidden", !q);
+
+  const items = Array.from(document.querySelectorAll(".settings-acc-item"));
+  let visibleCount = 0;
+  let firstVisibleId = null;
+
+  items.forEach((item) => {
+    const kw = (item.dataset.keywords || "").toLowerCase();
+    const txt = (item.textContent || "").toLowerCase();
+    const match = !q || kw.includes(q) || txt.includes(q);
+    item.classList.toggle("hidden", !match);
+    if (match) {
+      visibleCount++;
+      if (!firstVisibleId) firstVisibleId = item.dataset.accId;
+    }
+  });
+
+  const emptyEl = document.getElementById("settings-acc-empty");
+  if (emptyEl) emptyEl.classList.toggle("hidden", visibleCount > 0);
+
+  if (q && firstVisibleId) {
+    toggleSettingsAccordion(firstVisibleId, true);
+  } else if (!q) {
+    if (openSettingsAccId) {
+      toggleSettingsAccordion(openSettingsAccId, true);
+    } else {
+      document.querySelectorAll(".settings-acc-body").forEach((el) => el.classList.add("hidden"));
+      document.querySelectorAll(".settings-acc-arrow").forEach((el) => el.classList.remove("rotate-180"));
+    }
+  }
+}
+
+function updateDuctChevronPreview() {
+  const leftInp = document.getElementById("cfg-duct-left-name");
+  const rightInp = document.getElementById("cfg-duct-right-name");
+  const sx = (leftInp && leftInp.value.trim()) ? leftInp.value.trim() : getDuctName("SX");
+  const dx = (rightInp && rightInp.value.trim()) ? rightInp.value.trim() : getDuctName("DX");
+
+  const prevSx = document.getElementById("preview-chevron-sx-name");
+  const prevDx = document.getElementById("preview-chevron-dx-name");
+  if (prevSx) prevSx.textContent = sx;
+  if (prevDx) prevDx.textContent = dx;
+
+  const sumZones = document.getElementById("acc-sum-zones");
+  if (sumZones) sumZones.textContent = `${sx} • ${dx}`;
+
+  // Hydrate les valeurs télémétriques des chevrons simulés avec les données réelles du poêle
+  const realSx = latestData && latestData.duct_left_temp != null ? Number(latestData.duct_left_temp).toFixed(1) : "17.0";
+  const spSx = getRegVal("duct_left_setpoint", 20);
+  const fanSx = getRegVal("duct_left_speed", 8);
+  const realDx = latestData && latestData.duct_right_temp != null ? Number(latestData.duct_right_temp).toFixed(1) : "17.0";
+  const spDx = getRegVal("duct_right_setpoint", 20);
+  const fanDx = getRegVal("duct_right_speed", 8);
+
+  const fmtFan = (v) => (Number(v) === 0 ? "OFF" : Number(v) >= 8 ? "AUTO" : `V${v}`);
+  const fmtSp = (v) => (Number(v) >= 41 ? "MAX" : `${v}°`);
+
+  const sxFanEl = document.getElementById("preview-chevron-sx-fan");
+  const sxTempEl = document.getElementById("preview-chevron-sx-temp");
+  const dxFanEl = document.getElementById("preview-chevron-dx-fan");
+  const dxTempEl = document.getElementById("preview-chevron-dx-temp");
+
+  if (sxFanEl) sxFanEl.textContent = fmtFan(fanSx);
+  if (sxTempEl) sxTempEl.innerHTML = `${escapeHtml(realSx)}° <span class="text-cyan-400">→</span> <span class="text-cyan-200">${escapeHtml(fmtSp(spSx))}</span>`;
+  if (dxFanEl) dxFanEl.textContent = fmtFan(fanDx);
+  if (dxTempEl) dxTempEl.innerHTML = `${escapeHtml(realDx)}° <span class="text-sky-400">→</span> <span class="text-sky-200">${escapeHtml(fmtSp(spDx))}</span>`;
+}
+
+function resetDuctNamesDefault() {
+  const leftInp = document.getElementById("cfg-duct-left-name");
+  const rightInp = document.getElementById("cfg-duct-right-name");
+  if (leftInp) leftInp.value = "SX";
+  if (rightInp) rightInp.value = "DX";
+  isSettingsFormDirty = true;
+  updateDuctChevronPreview();
+}
+
+function locateWeatherFromBrowser() {
+  if (!navigator.geolocation) {
+    showToast("La géolocalisation n'est pas supportée par ce navigateur.", true);
+    return;
+  }
+  const btn = document.getElementById("btn-geolocate-weather");
+  const origHtml = btn ? btn.innerHTML : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = "<span>⏳</span><span>Localisation...</span>";
+  }
+
+  const restoreBtn = () => {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origHtml || "<span>📍</span><span>Me localiser</span>";
+    }
+  };
+
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      const lat = pos.coords.latitude;
+      const lon = pos.coords.longitude;
+      const latEl = document.getElementById("cfg-lat");
+      const lonEl = document.getElementById("cfg-lon");
+      const cityEl = document.getElementById("cfg-city");
+
+      if (latEl) latEl.value = lat.toFixed(4);
+      if (lonEl) lonEl.value = lon.toFixed(4);
+      isSettingsFormDirty = true;
+
+      let resolvedCity = "";
+      try {
+        const res = await fetch(`/api/reverse-geocode?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.city) {
+            resolvedCity = data.city;
+            if (cityEl) cityEl.value = resolvedCity;
+          }
+        }
+      } catch (e) {
+        // Repli silencieux : coordonnées GPS déjà renseignées
+      }
+
+      updateSettingsAccordionSummaries();
+      restoreBtn();
+      if (resolvedCity) {
+        showToast(`📍 Position détectée : ${resolvedCity} — cliquez sur Enregistrer.`);
+      } else {
+        showToast(`📍 Coordonnées détectées (${lat.toFixed(4)}, ${lon.toFixed(4)}) — cliquez sur Enregistrer.`);
+      }
+    },
+    (err) => {
+      restoreBtn();
+      let msg = "Impossible d'obtenir votre position.";
+      if (err && err.code === 1) {
+        msg = "Permission de géolocalisation refusée dans le navigateur (HTTPS ou localhost requis).";
+      } else if (err && err.code === 2) {
+        msg = "Position GPS indisponible pour le moment.";
+      } else if (err && err.code === 3) {
+        msg = "Délai d'attente dépassé pour la géolocalisation.";
+      }
+      showToast(msg, true);
+    },
+    { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
+  );
+}
+
+function updateSettingsAccordionSummaries() {
+  // 1. Zones SX / DX
+  updateDuctChevronPreview();
+
+  // 2. Liaison Poêle
+  const modeEl = document.getElementById("cfg-mode");
+  const intEl = document.getElementById("cfg-interval");
+  const modeVal = modeEl ? modeEl.value : (currentSettings.comm_mode || "agua_cloud");
+  const modeTxt = modeVal === "local_gateway" ? "🔌 UART ESP32" : (modeVal === "simulation" ? "🧪 Simulation" : "☁️ Agua Cloud");
+  const intVal = intEl && intEl.value ? intEl.value : (currentSettings.poll_interval_s || "120");
+  const sumConn = document.getElementById("acc-sum-conn");
+  if (sumConn) sumConn.textContent = `${modeTxt} • ${intVal}s`;
+
+  // 3. Matter & Webhook
+  const mEnEl = document.getElementById("cfg-matter-enabled");
+  const mPortEl = document.getElementById("cfg-matter-port");
+  const whEl = document.getElementById("cfg-webhook");
+  const mEn = mEnEl ? mEnEl.value === "1" : String(currentSettings.matter_enabled ?? "1") === "1";
+  const mPort = (mPortEl && mPortEl.value) || currentSettings.matter_port || "5540";
+  const hasWh = Boolean((whEl ? whEl.value : currentSettings.webhook_url || "").trim());
+  const sumDom = document.getElementById("acc-sum-domotic");
+  if (sumDom) sumDom.textContent = `${mEn ? `✅ Matter Actif (${mPort})` : "❌ Matter OFF"} • ${hasWh ? "🔔 Webhook actif" : "🔕 Sans webhook"}`;
+
+  // 4. Granulés & Météo
+  const bagsEl = document.getElementById("cfg-bags-stock");
+  const priceEl = document.getElementById("cfg-bag-price");
+  const cityEl = document.getElementById("cfg-city");
+  const bags = (bagsEl && bagsEl.value !== "") ? bagsEl.value : (currentSettings.pellet_bags_stock ?? "40");
+  const price = (priceEl && priceEl.value !== "") ? priceEl.value : (currentSettings.pellet_bag_price_eur || "4.80");
+  const city = ((cityEl && cityEl.value) || currentSettings.weather_city || "--").split("(")[0].trim();
+  const sumHome = document.getElementById("acc-sum-home");
+  if (sumHome) sumHome.textContent = `${bags} sacs (${price} €) • ${city}`;
+
+  // 5. Tarages IA
+  const tPel = getRegVal("trim_pellet_pct", 0);
+  const tExh = getRegVal("trim_exhaust_pct", 0);
+  const sumTuning = document.getElementById("acc-sum-tuning");
+  if (sumTuning) sumTuning.textContent = `Vis ${tPel}% • Fumées ${tExh}%`;
+
+  // 6. Système
+  const rtcEl = document.getElementById("inst-clock-val");
+  const verEl = document.getElementById("cfg-docker-version");
+  const rtc = rtcEl ? rtcEl.textContent.trim() : "--:--";
+  const ver = verEl ? verEl.textContent.trim() : "v2.1.2";
+  const sumSys = document.getElementById("acc-sum-system");
+  if (sumSys) sumSys.textContent = `RTC ${rtc} • Docker ${ver}`;
+
+  // 7. Expert
+  const sumExp = document.getElementById("acc-sum-expert");
+  if (sumExp) {
+    sumExp.textContent = installerUnlocked
+      ? "Session Expert active • Snapshots, RAM/EEPROM, Injecteur"
+      : "Verrouillé • Snapshots, RAM/EEPROM, Injecteur";
+  }
+}
+
+function applyDuctNamesAcrossUI() {
+  syncSeriesDuctLabels();
+  const sx = getDuctName("SX");
+  const dx = getDuctName("DX");
+
+  const dotSx = document.getElementById("triarc-dot-sx");
+  const dotDx = document.getElementById("triarc-dot-dx");
+  if (dotSx) dotSx.title = `Canalisation Gauche (${sx})`;
+  if (dotDx) dotDx.title = `Canalisation Droite (${dx})`;
+
+  const silDucts = document.getElementById("silence-modal-ducts-label");
+  if (silDucts) silDucts.textContent = `Canalisations ${sx} & ${dx}`;
+}
+
+function switchInstallerSubTab(subTabId) {
+  const map = {
+    settings: "zones",
+    zones: "zones",
+    conn: "conn",
+    domotic: "domotic",
+    home: "home",
+    tuning: "tuning",
+    system: "system",
+    expert: "expert",
+    logs: "logs"
+  };
+  const targetAcc = map[subTabId] || "zones";
+  toggleSettingsAccordion(targetAcc, true);
 }
 
 function switchLogView(viewName) {
@@ -180,10 +420,24 @@ function switchLogView(viewName) {
   }
 }
 
-// Gestion de la Configuration avec champs dynamiques selon le protocole choisi
+// Gestion de la Configuration avec ouverture automatique du bon accordéon si un champ précis est ciblé
 function openConfigModal(highlightFieldId = null) {
   switchTab("tab-installer");
-  switchInstallerSubTab("settings");
+
+  if (highlightFieldId) {
+    let targetAcc = "zones";
+    if (["cfg-city", "cfg-lat", "cfg-lon", "cfg-bags-stock", "cfg-bag-price"].includes(highlightFieldId)) {
+      targetAcc = "home";
+    } else if (["cfg-pass", "cfg-email", "cfg-mode", "cfg-gw", "cfg-interval"].includes(highlightFieldId)) {
+      targetAcc = "conn";
+    } else if (["cfg-matter-enabled", "cfg-matter-name", "cfg-matter-port", "cfg-webhook"].includes(highlightFieldId)) {
+      targetAcc = "domotic";
+    } else if (["cfg-duct-left-name", "cfg-duct-right-name"].includes(highlightFieldId)) {
+      targetAcc = "zones";
+    }
+    toggleSettingsAccordion(targetAcc, true);
+  }
+
   updateConfigModalFields();
   const modal = document.getElementById("config-modal");
   if (modal) modal.classList.add("hidden");
@@ -289,7 +543,11 @@ function switchTab(tabId) {
   }
   if (tabId === "tab-installer") {
     checkInstallerAuthStatus();
-    switchInstallerSubTab(currentInstallerSubTab || "settings");
+    updateSettingsAccordionSummaries();
+    loadTlsStatus();
+    if (openSettingsAccId) {
+      toggleSettingsAccordion(openSettingsAccId, true);
+    }
   }
 }
 
@@ -847,7 +1105,7 @@ function renderProgramModalContent(p) {
           <!-- Canalisation Gauche -->
           <div class="bg-gray-900/90 p-2.5 rounded-lg border border-gray-800 space-y-2">
             <div class="text-[11px] text-cyan-400 font-semibold flex items-center justify-between">
-              <span>⬅️ Gauche</span>
+              <span class="truncate">⬅️ ${escapeHtml(getDuctName("SX"))}</span>
             </div>
             <div class="space-y-1.5">
               <div>
@@ -870,7 +1128,7 @@ function renderProgramModalContent(p) {
           <!-- Canalisation Droite -->
           <div class="bg-gray-900/90 p-2.5 rounded-lg border border-gray-800 space-y-2">
             <div class="text-[11px] text-sky-400 font-semibold flex items-center justify-between">
-              <span>➡️ Droite</span>
+              <span class="truncate">➡️ ${escapeHtml(getDuctName("DX"))}</span>
             </div>
             <div class="space-y-1.5">
               <div>
@@ -1092,13 +1350,15 @@ function renderChronoPrograms() {
             </div>
 
             <div class="grid grid-cols-2 gap-1 text-[10px] sm:text-[11px] pt-0.5 border-t border-gray-800/60">
-              <span class="text-cyan-400 truncate flex items-center gap-1" title="Canalisation Gauche : ${tCanL}°C, Vitesse ${fanLDisplay}">
+              <span class="text-cyan-400 truncate flex items-center gap-1" title="${escapeHtml(getDuctName("SX"))} : ${tCanL}°C, Vitesse ${fanLDisplay}">
                 <span>⬅️</span>
+                <span class="truncate max-w-[48px] text-[10px] text-cyan-300/90">${escapeHtml(getDuctName("SX"))}</span>
                 <span>${tCanL}°C</span>
                 <span class="text-cyan-300 font-mono">💨${fanLDisplay}</span>
               </span>
-              <span class="text-sky-400 truncate flex items-center gap-1" title="Canalisation Droite : ${tCanR}°C, Vitesse ${fanRDisplay}">
+              <span class="text-sky-400 truncate flex items-center gap-1" title="${escapeHtml(getDuctName("DX"))} : ${tCanR}°C, Vitesse ${fanRDisplay}">
                 <span>➡️</span>
+                <span class="truncate max-w-[48px] text-[10px] text-sky-300/90">${escapeHtml(getDuctName("DX"))}</span>
                 <span>${tCanR}°C</span>
                 <span class="text-sky-300 font-mono">💨${fanRDisplay}</span>
               </span>
@@ -1469,6 +1729,7 @@ function updateStatusIndicatorAndAlerts() {
   const stateEl = document.getElementById("hdr-state");
   const codeEl = document.getElementById("kpi-status-code");
   const banner = document.getElementById("critical-alert-banner");
+  const bannerBtn = document.getElementById("critical-alert-btn");
   const bannerText = document.getElementById("critical-alert-text");
   const bannerBtnText = document.getElementById("critical-alert-btn-text");
 
@@ -1476,8 +1737,16 @@ function updateStatusIndicatorAndAlerts() {
   const alarm = Number(latestData.alarm_code ?? 0);
   const popups = Number(latestData.popup_flags ?? 0);
   const blackout = Number(latestData.blackout_popup ?? 0);
-  const isAlarm = (alarm > 0 || st === 10 || st === 11 || popups > 0 || blackout > 0);
-  const effectivePhase = isAlarm ? (st === 11 ? 11 : 10) : st;
+  const isPelletEmpty = Boolean(latestData.popup_pellet_empty);
+  const hasOtherCritical = (
+    alarm > 0 || st === 10 || st === 11 || blackout > 0 ||
+    Boolean(latestData.popup_pellet_open) || Boolean(latestData.popup_door_open) ||
+    Boolean(latestData.popup_pa_fault) || Boolean(latestData.popup_tck_fault) ||
+    Boolean(latestData.popup_tcj_fault) || ((popups & ~64) !== 0)
+  );
+  const isOnlyPelletEmpty = isPelletEmpty && !hasOtherCritical;
+  const isCriticalAlarm = hasOtherCritical;
+  const effectivePhase = isCriticalAlarm ? (st === 11 ? 11 : 10) : st;
   const meta = getPhaseMeta(effectivePhase);
 
   // Mise à jour du pictogramme du chevron correspondant à la phase active
@@ -1492,11 +1761,16 @@ function updateStatusIndicatorAndAlerts() {
 
   if (codeEl) codeEl.textContent = st === -1 ? "HORS LIGNE" : st;
 
-  if (isAlarm) {
+  if (isCriticalAlarm) {
     if (dot) dot.className = "w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-sm sm:text-base bg-rose-600 text-white shadow-[0_0_12px_#f43f5e] animate-pulse flex-shrink-0 cursor-help border border-rose-300";
     if (kpiDot) kpiDot.className = "w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping shrink-0";
     stateEl.className = "text-sm sm:text-base font-bold text-rose-400 leading-tight truncate";
-    banner.classList.remove("hidden");
+    if (banner) {
+      banner.className = "bg-rose-950/95 border-b border-rose-600 px-4 py-2.5 text-xs text-rose-100 flex flex-wrap items-center justify-between gap-2 animate-pulse";
+    }
+    if (bannerBtn) {
+      bannerBtn.className = "px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold border border-rose-400 transition flex items-center gap-1.5 shadow";
+    }
     const reasons = [];
     let customBtn = "Guide Réarmement (P3)";
     const tf = Number(latestData.temp_fumes ?? 0);
@@ -1516,7 +1790,7 @@ function updateStatusIndicatorAndAlerts() {
       reasons.push(latestData.alarm_label || `Alarme AL${alarm}`);
       customBtn = `Guide Alarme AL${alarm < 10 ? '0' + alarm : alarm}`;
     }
-    if (latestData.popup_pellet_empty) reasons.push("Trémie granulés vide");
+    if (isPelletEmpty) reasons.push("Trémie granulés vide");
     if (latestData.popup_pa_fault) reasons.push("Défaut Pressostat Pa");
     if (latestData.popup_tck_fault) reasons.push("Défaut Sonde Flamme K");
     if (latestData.popup_tcj_fault) reasons.push("Défaut Sonde Fumées");
@@ -1532,7 +1806,22 @@ function updateStatusIndicatorAndAlerts() {
     }
     if (bannerBtnText) bannerBtnText.textContent = customBtn;
   } else {
-    banner.classList.add("hidden");
+    if (isOnlyPelletEmpty) {
+      if (banner) {
+        banner.className = "bg-amber-950/95 border-b border-amber-500 px-4 py-2.5 text-xs text-amber-100 flex flex-wrap items-center justify-between gap-2";
+      }
+      if (bannerBtn) {
+        bannerBtn.className = "px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold border border-amber-400 transition flex items-center gap-1.5 shadow";
+      }
+      if (bannerText) {
+        bannerText.textContent = "TRÉMIE GRANULÉS VIDE • Pas besoin d'acquitter l'alarme, il suffit de remettre du pellet";
+      }
+      if (bannerBtnText) {
+        bannerBtnText.textContent = "Remettre du pellet";
+      }
+    } else if (banner) {
+      banner.classList.add("hidden");
+    }
     if (st === -1) {
       if (dot) dot.className = "w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-sm sm:text-base bg-amber-600/90 text-white shadow-[0_0_10px_#f59e0b] animate-pulse flex-shrink-0 cursor-help border border-amber-400";
       if (kpiDot) kpiDot.className = "w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse shrink-0";
@@ -1986,8 +2275,15 @@ function applyDashboardState(data, updateSeries = true) {
     if (matterNameInp) matterNameInp.value = currentSettings.matter_device_name || "Poêle Nobis A10";
     const matterPortInp = document.getElementById("cfg-matter-port");
     if (matterPortInp) matterPortInp.value = currentSettings.matter_port || "5540";
+    const ductLeftInp = document.getElementById("cfg-duct-left-name");
+    if (ductLeftInp) ductLeftInp.value = currentSettings.duct_left_name || "SX";
+    const ductRightInp = document.getElementById("cfg-duct-right-name");
+    if (ductRightInp) ductRightInp.value = currentSettings.duct_right_name || "DX";
     updateConfigModalFields();
   }
+
+  applyDuctNamesAcrossUI();
+  updateSettingsAccordionSummaries();
 
   renderSeriesToggles();
   if (updateSeries) {
@@ -3325,6 +3621,7 @@ function resetStoveAlarm() {
   const alarm = Number(latestData.alarm_code ?? 0);
   const isPelletOpen = Boolean(latestData.popup_pellet_open || alarm === 16);
   const isDoorOpen = Boolean(latestData.popup_door_open || alarm === 15);
+  const isPelletEmpty = Boolean(latestData.popup_pellet_empty);
 
   // CAS 1 : Sécurité mécanique - Trappe granulés ouverte
   if (isPelletOpen) {
@@ -3373,7 +3670,30 @@ function resetStoveAlarm() {
     return;
   }
 
-  // CAS 3 : Alarme AL03 - PELLET FINI (Réservoir vide / Vis désamorcée)
+  // CAS 3 : Alerte Réserve - Trémie granulés vide (aucun acquittement requis)
+  if (isPelletEmpty && alarm === 0 && st !== 10 && st !== 11) {
+    openActionModal({
+      title: "🌾 Alerte Réserve : Trémie Granulés Vide",
+      htmlContent: `
+        <div class="space-y-3 text-xs leading-relaxed">
+          <div class="p-2.5 rounded-lg bg-amber-950/50 border border-amber-600/60 text-amber-200">
+            <strong>⚠️ Niveau bas dans la trémie :</strong> La sonde de réserve indique que le réservoir à granulés est presque vide.
+          </div>
+          <div class="text-gray-300 space-y-1.5 text-[11px]">
+            <p>• <span class="text-emerald-400 font-bold">Pas besoin d'acquitter l'alarme</span> (ni à distance, ni via la télécommande P3).</p>
+            <p>• <strong>Action requise :</strong> Il suffit simplement de remettre des granulés dans la trémie et de refermer la trappe.</p>
+            <p class="text-emerald-400">Dès que les granulés recouvrent la sonde de réserve, l'alerte s'efface automatiquement.</p>
+          </div>
+        </div>
+      `,
+      confirmText: "Compris, je remets du pellet",
+      showCancel: false,
+      onConfirm: () => { }
+    });
+    return;
+  }
+
+  // CAS 4 : Alarme AL03 - PELLET FINI (Réservoir vide / Vis désamorcée)
   if (alarm === 3) {
     const isCooling = (st === 10 && tf > 65);
     openActionModal({
@@ -4407,7 +4727,9 @@ async function saveSettings() {
     webhook_url: document.getElementById("cfg-webhook") ? document.getElementById("cfg-webhook").value : "",
     matter_enabled: document.getElementById("cfg-matter-enabled") ? document.getElementById("cfg-matter-enabled").value : "1",
     matter_device_name: document.getElementById("cfg-matter-name") ? document.getElementById("cfg-matter-name").value : "Poêle Nobis A10",
-    matter_port: document.getElementById("cfg-matter-port") ? document.getElementById("cfg-matter-port").value : "5540"
+    matter_port: document.getElementById("cfg-matter-port") ? document.getElementById("cfg-matter-port").value : "5540",
+    duct_left_name: document.getElementById("cfg-duct-left-name") ? (document.getElementById("cfg-duct-left-name").value.trim() || "SX") : "SX",
+    duct_right_name: document.getElementById("cfg-duct-right-name") ? (document.getElementById("cfg-duct-right-name").value.trim() || "DX") : "DX"
   };
   if (mode === "agua_cloud") {
     payload.agua_email = document.getElementById("cfg-email").value;
@@ -4466,12 +4788,16 @@ async function saveSettings() {
   if (j.settings) {
     currentSettings = j.settings;
   }
+  applyDuctNamesAcrossUI();
+  updateSettingsAccordionSummaries();
   if (connectionState && connectionState.commStatus) {
     connectionState.commStatus.comm_mode = mode;
   }
   currentCommMode = mode;
   closeConfigModal();
   await loadDashboard();
+  if (typeof renderTriArcCockpit === "function") renderTriArcCockpit();
+  if (typeof renderChronoCards === "function") renderChronoCards();
   showToast("Configuration enregistrée ! Base active : " + (j.active_db || ""));
 }
 
@@ -4716,6 +5042,313 @@ async function checkWatchtowerUpdate() {
     showToast(data.message || "✅ Vérification de mise à jour Watchtower déclenchée !");
   } catch (err) {
     showToast("Erreur réseau lors de l'appel à Watchtower.", true);
+  }
+}
+
+// =============================================================================
+// GESTION HTTPS & CERTIFICAT TLS AUTONOME (AUTO-SIGNÉ & LET'S ENCRYPT DNS-01)
+// =============================================================================
+let _tlsProvidersCatalog = [];
+let _tlsLastStatus = null;
+
+function _setTlsFeedback(kind, message, targetUrl = "") {
+  const box = document.getElementById("tls-feedback");
+  if (!box) return;
+  if (!message) {
+    box.classList.add("hidden");
+    box.textContent = "";
+    return;
+  }
+  box.className = "rounded-xl p-3 text-xs border space-y-1.5";
+  if (kind === "error") {
+    box.classList.add("bg-rose-950/60", "border-rose-700/70", "text-rose-200");
+  } else if (kind === "success") {
+    box.classList.add("bg-emerald-950/60", "border-emerald-700/70", "text-emerald-200");
+  } else {
+    box.classList.add("bg-sky-950/60", "border-sky-700/70", "text-sky-200");
+  }
+  box.textContent = "";
+  const p = document.createElement("div");
+  p.textContent = message;
+  box.appendChild(p);
+  if (targetUrl) {
+    const link = document.createElement("a");
+    link.href = targetUrl;
+    link.textContent = `Ouvrir ${targetUrl} →`;
+    link.className = "inline-block font-mono font-bold underline text-white hover:text-emerald-300";
+    box.appendChild(link);
+  }
+  box.classList.remove("hidden");
+}
+
+function onTlsProviderChange() {
+  const sel = document.getElementById("tls-dns-provider");
+  const tokInput = document.getElementById("tls-dns-token");
+  const helpEl = document.getElementById("tls-provider-help");
+  if (!sel) return;
+  const prov = _tlsProvidersCatalog.find(p => p.id === sel.value);
+  if (prov) {
+    if (tokInput && (!tokInput.value || tokInput.value === "********")) {
+      tokInput.placeholder = prov.token_placeholder || "Token API DNS...";
+    }
+    if (helpEl) {
+      helpEl.textContent = prov.help || "";
+    }
+  }
+}
+
+function renderTlsStatus(data) {
+  if (!data) return;
+  _tlsLastStatus = data;
+  if (Array.isArray(data.providers) && data.providers.length > 0) {
+    _tlsProvidersCatalog = data.providers;
+    const sel = document.getElementById("tls-dns-provider");
+    if (sel) {
+      const currentVal = data.https_dns_provider || sel.value || "duckdns";
+      sel.innerHTML = "";
+      data.providers.forEach(p => {
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = p.label;
+        sel.appendChild(opt);
+      });
+      sel.value = currentVal;
+    }
+  }
+
+  const modeLabels = {
+    selfsigned: "🛡️ HTTPS Auto-signé (Local)",
+    letsencrypt: "🔐 HTTPS Let's Encrypt (Officiel)",
+    http: "🔓 HTTP (Sans TLS)"
+  };
+  const activeMode = data.active_mode || "http";
+  const badge = document.getElementById("tls-active-mode-badge");
+  if (badge) {
+    badge.textContent = modeLabels[activeMode] || activeMode;
+    badge.className = "font-semibold text-xs block mt-0.5 " + (
+      activeMode === "letsencrypt" ? "text-emerald-400" :
+      activeMode === "selfsigned" ? "text-teal-400" : "text-amber-400"
+    );
+  }
+
+  const cert = data.active_cert;
+  const subjEl = document.getElementById("tls-cert-subject");
+  const expEl = document.getElementById("tls-cert-expiry");
+  if (cert && cert.exists) {
+    if (subjEl) {
+      const cnMatch = (cert.subject || "").match(/CN\s*=\s*([^,/]+)/i);
+      subjEl.textContent = cnMatch ? cnMatch[1].trim() : (data.https_domain || cert.subject || "Certificat actif");
+      subjEl.title = (cert.sans && cert.sans.length) ? cert.sans.join(", ") : (cert.subject || "");
+    }
+    if (expEl) {
+      const days = cert.days_remaining;
+      if (days !== null && days !== undefined) {
+        expEl.textContent = days > 0 ? `Valide (${days} j restants)` : "Expiré";
+        expEl.className = "font-mono text-xs block mt-0.5 " + (days <= 15 ? "text-rose-400" : days <= 30 ? "text-amber-400" : "text-sky-400");
+      } else {
+        expEl.textContent = cert.not_after || "Actif";
+      }
+    }
+  } else {
+    if (subjEl) subjEl.textContent = "Aucun certificat actif";
+    if (expEl) expEl.textContent = "--";
+  }
+
+  const sumEl = document.getElementById("acc-sum-tls");
+  if (sumEl) {
+    const shortMode = activeMode === "letsencrypt" ? `Let's Encrypt (${data.https_domain || "actif"})` :
+      activeMode === "selfsigned" ? "HTTPS Auto-signé" : "HTTP (sans TLS)";
+    const daysTxt = (cert && cert.days_remaining != null) ? ` • ${cert.days_remaining}j` : "";
+    sumEl.textContent = `${shortMode}${daysTxt}`;
+  }
+
+  const sanIpsEl = document.getElementById("tls-san-ips");
+  if (sanIpsEl && !sanIpsEl.matches(":focus")) sanIpsEl.value = data.https_san_ips || "";
+  const sanDnsEl = document.getElementById("tls-san-dns");
+  if (sanDnsEl && !sanDnsEl.matches(":focus")) sanDnsEl.value = data.https_san_dns || "";
+  const domEl = document.getElementById("tls-domain");
+  if (domEl && !domEl.matches(":focus")) domEl.value = data.https_domain || "";
+  const emailEl = document.getElementById("tls-email");
+  if (emailEl && !emailEl.matches(":focus")) emailEl.value = data.https_email || "";
+  const tokEl = document.getElementById("tls-dns-token");
+  if (tokEl && !tokEl.matches(":focus")) {
+    tokEl.value = data.has_dns_token ? "********" : "";
+  }
+
+  const renewBtn = document.getElementById("btn-tls-renew");
+  if (renewBtn) {
+    renewBtn.classList.toggle("hidden", !(data.https_domain && data.has_dns_token));
+  }
+  const dlBtn = document.getElementById("btn-tls-download-crt");
+  if (dlBtn) {
+    const hasAnyCert = Boolean((data.active_cert && data.active_cert.exists) || (data.selfsigned_cert && data.selfsigned_cert.exists));
+    dlBtn.classList.toggle("opacity-50", !hasAnyCert);
+    dlBtn.classList.toggle("pointer-events-none", !hasAnyCert);
+  }
+
+  onTlsProviderChange();
+}
+
+async function loadTlsStatus() {
+  try {
+    const res = await fetch("/api/tls/status", { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    renderTlsStatus(data);
+  } catch (_) {
+    // Ignore transient network errors
+  }
+}
+
+function _buildTargetProtocolUrl(protocol, customHost = "") {
+  const host = customHost || window.location.hostname;
+  const port = window.location.port ? `:${window.location.port}` : "";
+  return `${protocol}//${host}${port}/`;
+}
+
+async function applySelfSignedTls() {
+  const sanIps = (document.getElementById("tls-san-ips")?.value || "").trim();
+  const sanDns = (document.getElementById("tls-san-dns")?.value || "").trim();
+  const btn = document.getElementById("btn-tls-selfsigned");
+  if (btn) btn.disabled = true;
+  _setTlsFeedback("info", "Génération du certificat auto-signé et redémarrage en HTTPS...");
+  try {
+    const res = await fetch("/api/tls/mode", {
+      method: "POST",
+      headers: getInstallerHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        mode: "selfsigned",
+        san_ips: sanIps,
+        san_dns: sanDns,
+        regenerate: true,
+        restart: true
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403) {
+      _setTlsFeedback("error", "🔒 Authentification installateur requise : déverrouillez l'onglet Expert & Registres.");
+      showToast("🔒 Authentification installateur requise.", true);
+      return;
+    }
+    if (!res.ok) {
+      _setTlsFeedback("error", data.detail || "Échec d'activation du mode HTTPS auto-signé.");
+      showToast(data.detail || "Échec HTTPS auto-signé.", true);
+      return;
+    }
+    const targetUrl = _buildTargetProtocolUrl("https:");
+    _setTlsFeedback("success", `✅ ${data.message || "Mode HTTPS auto-signé activé."} Le conteneur redémarre (3-5 s).`, targetUrl);
+    showToast("✅ HTTPS auto-signé activé, redémarrage en cours...");
+  } catch (_) {
+    _setTlsFeedback("error", "Erreur réseau lors de la demande HTTPS auto-signé.");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function issueLetsEncryptTls() {
+  const provider = (document.getElementById("tls-dns-provider")?.value || "duckdns").trim();
+  const domain = (document.getElementById("tls-domain")?.value || "").trim();
+  const token = (document.getElementById("tls-dns-token")?.value || "").trim();
+  const email = (document.getElementById("tls-email")?.value || "").trim();
+
+  if (!domain) {
+    _setTlsFeedback("error", "Veuillez saisir un nom de domaine valide (ex: mon-poele.duckdns.org).");
+    return;
+  }
+  const btn = document.getElementById("btn-tls-letsencrypt");
+  if (btn) btn.disabled = true;
+  _setTlsFeedback("info", `⏳ Validation DNS-01 Let's Encrypt en cours pour ${domain} (${provider})... Cela peut prendre 30 à 90 secondes.`);
+  try {
+    const res = await fetch("/api/tls/letsencrypt/issue", {
+      method: "POST",
+      headers: getInstallerHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        domain,
+        dns_provider: provider,
+        dns_token: token,
+        email,
+        force: false,
+        restart: true
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403) {
+      _setTlsFeedback("error", "🔒 Authentification installateur requise : déverrouillez l'onglet Expert & Registres.");
+      showToast("🔒 Authentification installateur requise.", true);
+      return;
+    }
+    if (!res.ok) {
+      _setTlsFeedback("error", data.detail || "Échec de la validation Let's Encrypt. Le mode précédent reste actif.");
+      showToast("Échec validation Let's Encrypt.", true);
+      return;
+    }
+    const targetUrl = _buildTargetProtocolUrl("https:", data.domain || domain);
+    _setTlsFeedback("success", `✅ ${data.message || "Certificat Let's Encrypt activé !"} Le conteneur redémarre (3-5 s).`, targetUrl);
+    showToast("✅ Certificat Let's Encrypt activé !");
+  } catch (_) {
+    _setTlsFeedback("error", "Erreur réseau pendant la validation Let's Encrypt.");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function renewLetsEncryptTls() {
+  const btn = document.getElementById("btn-tls-renew");
+  if (btn) btn.disabled = true;
+  _setTlsFeedback("info", "♻️ Renouvellement Let's Encrypt en cours...");
+  try {
+    const res = await fetch("/api/tls/letsencrypt/renew", {
+      method: "POST",
+      headers: getInstallerHeaders()
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403) {
+      _setTlsFeedback("error", "🔒 Authentification installateur requise.");
+      return;
+    }
+    if (!res.ok) {
+      _setTlsFeedback("error", data.detail || "Échec du renouvellement Let's Encrypt.");
+      return;
+    }
+    const targetUrl = _buildTargetProtocolUrl("https:", data.domain || "");
+    _setTlsFeedback("success", `✅ ${data.message || "Certificat renouvelé !"} Redémarrage en cours...`, targetUrl);
+    showToast("✅ Certificat Let's Encrypt renouvelé !");
+  } catch (_) {
+    _setTlsFeedback("error", "Erreur réseau lors du renouvellement.");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function switchTlsToHttp() {
+  if (!confirm("Repasser le conteneur en HTTP simple (sans TLS) ? Utile uniquement derrière un reverse proxy externe.")) {
+    return;
+  }
+  const btn = document.getElementById("btn-tls-http");
+  if (btn) btn.disabled = true;
+  _setTlsFeedback("info", "Bascule en mode HTTP et redémarrage du backend...");
+  try {
+    const res = await fetch("/api/tls/mode", {
+      method: "POST",
+      headers: getInstallerHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ mode: "http", restart: true })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403) {
+      _setTlsFeedback("error", "🔒 Authentification installateur requise : déverrouillez l'onglet Expert & Registres.");
+      return;
+    }
+    if (!res.ok) {
+      _setTlsFeedback("error", data.detail || "Échec du passage en HTTP.");
+      return;
+    }
+    const targetUrl = _buildTargetProtocolUrl("http:");
+    _setTlsFeedback("success", "✅ Mode HTTP enregistré. Le conteneur redémarre (3-5 s).", targetUrl);
+    showToast("🔓 Retour en HTTP déclenché...");
+  } catch (_) {
+    _setTlsFeedback("error", "Erreur réseau lors du passage en HTTP.");
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -5247,15 +5880,18 @@ function renderTriArcTopHeader(zone, T) {
     </svg>
   `;
 
+  const sxName = escapeHtml(getDuctName("SX"));
+  const dxName = escapeHtml(getDuctName("DX"));
+
   // Écran AMB : Bouton SX (Chevron gauche ◄, hauteur fixe h-14)
   const chevronSX = `
-    <button type="button" onclick="goToTriArcZone('SX')"
-      class="flex-1 h-14 relative py-1 pl-3.5 pr-2 flex items-center justify-between text-left transition hover:brightness-125 shadow cursor-pointer group">
+    <button type="button" onclick="goToTriArcZone('SX')" title="Canalisation Gauche (${sxName})"
+      class="flex-1 min-w-0 h-14 relative py-1 pl-3.5 pr-2 flex items-center justify-between text-left transition hover:brightness-125 shadow cursor-pointer group">
       ${svgChevronLeftBg("#06b6d4")}
-      <div class="relative z-10 flex items-center font-black text-cyan-300 text-xs my-auto pl-1">
-        <span>SX</span>
+      <div class="relative z-10 flex items-center font-black text-cyan-300 text-xs my-auto pl-1 min-w-0 pr-1">
+        <span class="truncate">${sxName}</span>
       </div>
-      <div class="relative z-10 flex flex-col items-end gap-0.5 tabular-nums">
+      <div class="relative z-10 flex flex-col items-end gap-0.5 tabular-nums shrink-0">
         <span class="flex items-center gap-1 text-cyan-300 font-black text-[11px]">
           ${svgPropellerFanIcon("w-3.5 h-3.5", "#22d3ee")}
           <span>${fmtTriArcFan(T.fanSx)}</span>
@@ -5269,10 +5905,10 @@ function renderTriArcTopHeader(zone, T) {
 
   // Écran AMB : Bouton DX (Chevron droite ►, hauteur fixe h-14)
   const chevronDX = `
-    <button type="button" onclick="goToTriArcZone('DX')"
-      class="flex-1 h-14 relative py-1 pl-2 pr-3.5 flex items-center justify-between text-right transition hover:brightness-125 shadow cursor-pointer group">
+    <button type="button" onclick="goToTriArcZone('DX')" title="Canalisation Droite (${dxName})"
+      class="flex-1 min-w-0 h-14 relative py-1 pl-2 pr-3.5 flex items-center justify-between text-right transition hover:brightness-125 shadow cursor-pointer group">
       ${svgChevronRightBg("#0284c7")}
-      <div class="relative z-10 flex flex-col items-start gap-0.5 tabular-nums">
+      <div class="relative z-10 flex flex-col items-start gap-0.5 tabular-nums shrink-0">
         <span class="flex items-center gap-1 text-sky-300 font-black text-[11px]">
           ${svgPropellerFanIcon("w-3.5 h-3.5", "#38bdf8")}
           <span>${fmtTriArcFan(T.fanDx)}</span>
@@ -5281,8 +5917,8 @@ function renderTriArcTopHeader(zone, T) {
           ${T.realDx}° <span class="text-sky-400">→</span> <span class="text-sky-200">${fmtTriArcTempSp(T.spDx)}</span>
         </span>
       </div>
-      <div class="relative z-10 flex items-center font-black text-sky-300 text-xs my-auto pr-1">
-        <span>DX</span>
+      <div class="relative z-10 flex items-center font-black text-sky-300 text-xs my-auto pr-1 min-w-0 pl-1">
+        <span class="truncate">${dxName}</span>
       </div>
     </button>
   `;
@@ -5290,8 +5926,8 @@ function renderTriArcTopHeader(zone, T) {
   // Écran SX : Le bouton SX devient un rectangle élargi (hauteur fixe h-14)
   const expandedRectSX = `
     <div class="flex-1 min-w-0 h-14 py-1.5 px-3 sm:px-3.5 rounded-2xl bg-cyan-950/70 border-2 border-cyan-400 flex items-center justify-between text-left transition shadow box-border">
-      <div class="flex items-center gap-1 font-bold text-cyan-300 text-xs my-auto truncate">
-        <span>Canal. SX</span>
+      <div class="flex items-center gap-1 font-bold text-cyan-300 text-xs my-auto truncate pr-1">
+        <span class="truncate">${sxName === "SX" ? "Canal. SX" : sxName}</span>
       </div>
       <div class="flex flex-col items-end gap-0.5 tabular-nums shrink-0">
         <span class="flex items-center gap-1 text-cyan-300 font-black text-xs">
@@ -5317,8 +5953,8 @@ function renderTriArcTopHeader(zone, T) {
           ${T.realDx}° <span class="text-sky-400">→</span> <span class="text-sky-200">${fmtTriArcTempSp(T.spDx)}</span>
         </span>
       </div>
-      <div class="flex items-center gap-1 font-bold text-sky-300 text-xs my-auto truncate">
-        <span>Canal. DX</span>
+      <div class="flex items-center gap-1 font-bold text-sky-300 text-xs my-auto truncate pl-1">
+        <span class="truncate">${dxName === "DX" ? "Canal. DX" : dxName}</span>
       </div>
     </div>
   `;
@@ -5448,7 +6084,7 @@ function renderTriArcSvgForZone(zone, T) {
   const phaseLines = formatPhaseTwoLines(T.phaseLabel, typeof getPhaseMeta === "function" ? getPhaseMeta(T.st) : null);
 
   return `
-    <svg id="tri-arc-svg-${zone}" data-zone="${zone}" viewBox="14 20 292 198" class="tri-arc-svg w-full mx-auto overflow-visible">
+    <svg id="tri-arc-svg-${zone}" data-zone="${zone}" viewBox="14 20 292 198" class="tri-arc-svg w-full max-h-full mx-auto overflow-visible">
       <defs>
         <linearGradient id="gradTemp-${zone}" x1="0%" y1="100%" x2="100%" y2="0%">
           <stop offset="0%" stop-color="#38bdf8" />
@@ -5515,7 +6151,7 @@ function renderTriArcSvgForZone(zone, T) {
       </g>
 
       <!-- LIBELLÉ DISCRET DU VOLET / ZONE (CANALISATION SX / DX, SANS SALON) -->
-      <text x="${CX}" y="79" text-anchor="middle" font-size="8.5" font-weight="800" fill="${zone === "SX" ? "#22d3ee" : (zone === "DX" ? "#38bdf8" : "#94a3b8")}" letter-spacing="0.5">${zone === "AMB" ? "" : (zone === "SX" ? "CANAL. SX" : "CANAL. DX")}</text>
+      <text x="${CX}" y="79" text-anchor="middle" font-size="8.5" font-weight="800" fill="${zone === "SX" ? "#22d3ee" : (zone === "DX" ? "#38bdf8" : "#94a3b8")}" letter-spacing="0.5">${zone === "AMB" ? "" : escapeHtml((zone === "SX" ? (getDuctName("SX") === "SX" ? "CANAL. SX" : getDuctName("SX")) : (getDuctName("DX") === "DX" ? "CANAL. DX" : getDuctName("DX"))).toUpperCase().slice(0, 18))}</text>
 
       <!-- T° RÉELLE REDESCENDUE DANS LE CADRAN CENTRAL + FLÈCHE → CONSIGNE -->
       <text x="${CX - 13}" y="134" text-anchor="middle" font-size="34" font-weight="900" fill="#ffffff">${realT}°</text>
@@ -5532,7 +6168,7 @@ function renderTriArcSvgForZone(zone, T) {
 
       <!-- 2. ARC GAUCHE : VENTILATION (OFF ➔ 1..7 ➔ AUTO) -->
       ${(() => {
-      const isFanAuto = (T.autoIdx === 1 || T.autoIdx === 2 || fanSp === 8);
+      const isFanAuto = !isDuct && (T.autoIdx === 1 || T.autoIdx === 2 || fanSp === 8);
       return `
           <g class="${isFanAuto ? 'pointer-events-none opacity-60' : ''}">
             <path d="${trackFan}" fill="none" stroke="#1e293b" stroke-width="9" stroke-linecap="round" />
@@ -5726,18 +6362,26 @@ function renderTriArcDailyChronoFrise(zone = "AMB") {
   `;
 }
 
-function renderTriArcBottomModes(T) {
+function getTriArcZoneAutoIdx(zone, T) {
+  if (T.autoIdx === 2) return 2;
+  const fanSp = zone === "AMB" ? T.fanAmb : (zone === "SX" ? T.fanSx : T.fanDx);
+  if (T.autoIdx === 1 || fanSp === 8) return 1;
+  return 0;
+}
+
+function renderTriArcBottomModes(T, zone = triArcZone) {
   const silActive = T.isSilActive && T.remSec > 0;
   const silTimerTxt = silActive
     ? `${Math.floor(T.remSec / 3600)}h${String(Math.floor((T.remSec % 3600) / 60)).padStart(2, "0")}`
     : "";
 
+  const zoneAutoIdx = getTriArcZoneAutoIdx(zone, T);
   let autoBtnCls = "bg-slate-900/90 border-slate-700 text-slate-400 hover:border-cyan-400";
   let autoBadge = "";
-  if (T.autoIdx === 1) {
+  if (zoneAutoIdx === 1) {
     autoBtnCls = "bg-cyan-950/80 border-cyan-400 text-cyan-200 shadow-[0_0_12px_rgba(6,182,212,0.35)]";
     autoBadge = `<span class="text-[9.5px] font-black uppercase text-cyan-300 mt-0.5">Ventil</span>`;
-  } else if (T.autoIdx === 2) {
+  } else if (zoneAutoIdx === 2) {
     autoBtnCls = "bg-orange-950/80 border-orange-400 text-orange-200 shadow-[0_0_12px_rgba(249,115,22,0.35)]";
     autoBadge = `<span class="text-[9.5px] font-black uppercase text-orange-300 mt-0.5">Auto</span>`;
   }
@@ -5752,7 +6396,7 @@ function renderTriArcBottomModes(T) {
         ${silActive ? `<span class="text-[10px] font-black mt-0.5 tabular-nums text-purple-200">${silTimerTxt}</span>` : ""}
       </button>
 
-      <!-- 2. Auto (Cliquable avec modal/popup 3 positions : OFF, Ventil seule, Auto complet) -->
+      <!-- 2. Auto (Uniquement sur le TriArc principal AMB : OFF, Ventil seule, Auto complet) -->
       <button type="button" onclick="toggleTriArcOptionBubble('auto')"
         title="Mode Auto (OFF / Ventilation / Auto complet)"
         class="h-14 sm:h-15 min-h-[54px] rounded-2xl border-2 flex flex-col items-center justify-center transition cursor-pointer ${autoBtnCls}">
@@ -5860,6 +6504,7 @@ function renderTriArcFloatingOptionBubble(T) {
   if (!triArcExpandedMode) return "";
 
   if (triArcExpandedMode === "auto") {
+    const zoneAutoIdx = getTriArcZoneAutoIdx(triArcZone, T);
     return `
       <div class="bg-slate-900 border-2 border-cyan-400 rounded-3xl p-3.5 space-y-2.5 shadow-[0_10px_40px_rgba(0,0,0,0.9)]">
         <div class="flex items-center justify-between text-xs border-b border-slate-800 pb-2">
@@ -5867,9 +6512,9 @@ function renderTriArcFloatingOptionBubble(T) {
           <button type="button" onclick="closeTriArcOptionBubble()" class="w-6 h-6 rounded-full bg-slate-800 text-slate-300 font-bold cursor-pointer">✕</button>
         </div>
         <div class="grid grid-cols-3 gap-2 text-xs font-bold">
-          <button type="button" onclick="setTriArcAutoOption(0)" class="py-2.5 rounded-2xl border cursor-pointer ${T.autoIdx === 0 ? 'bg-slate-700 border-white text-white' : 'bg-slate-950 border-slate-800 text-slate-400'}">OFF</button>
-          <button type="button" onclick="setTriArcAutoOption(1)" class="py-2.5 rounded-2xl border flex items-center justify-center gap-1 cursor-pointer ${T.autoIdx === 1 ? 'bg-cyan-600 border-cyan-300 text-white' : 'bg-slate-950 border-slate-800 text-slate-300'}">${svgPropellerFanIcon("w-4 h-4")}<span>Ventil</span></button>
-          <button type="button" onclick="setTriArcAutoOption(2)" class="py-2.5 rounded-2xl border flex items-center justify-center gap-1 cursor-pointer ${T.autoIdx === 2 ? 'bg-orange-600 border-orange-300 text-white' : 'bg-slate-950 border-slate-800 text-slate-300'}"><span>🔥+</span>${svgPropellerFanIcon("w-4 h-4")}</button>
+          <button type="button" onclick="setTriArcAutoOption(0)" class="py-2.5 rounded-2xl border cursor-pointer ${zoneAutoIdx === 0 ? 'bg-slate-700 border-white text-white' : 'bg-slate-950 border-slate-800 text-slate-400'}">OFF</button>
+          <button type="button" onclick="setTriArcAutoOption(1)" class="py-2.5 rounded-2xl border flex items-center justify-center gap-1 cursor-pointer ${zoneAutoIdx === 1 ? 'bg-cyan-600 border-cyan-300 text-white' : 'bg-slate-950 border-slate-800 text-slate-300'}">${svgPropellerFanIcon("w-4 h-4")}<span>Ventil</span></button>
+          <button type="button" onclick="setTriArcAutoOption(2)" class="py-2.5 rounded-2xl border flex items-center justify-center gap-1 cursor-pointer ${zoneAutoIdx === 2 ? 'bg-orange-600 border-orange-300 text-white' : 'bg-slate-950 border-slate-800 text-slate-300'}"><span>🔥+</span>${svgPropellerFanIcon("w-4 h-4")}</button>
         </div>
         <div class="space-y-1.5 text-[11px] leading-tight text-slate-300 bg-slate-950/70 border border-slate-800 rounded-xl p-2.5">
           <p class="font-semibold text-cyan-300">Fonctionnement du mode Auto</p>
@@ -6007,17 +6652,19 @@ function renderTriArcCockpit() {
         <div class="shrink-0 w-full">
           ${renderTriArcTopHeader(z, T)}
         </div>
-        <div class="flex-1 min-h-0 flex flex-col justify-center items-center gap-1 sm:gap-2 my-auto w-full">
-          <div class="w-full flex-1 min-h-0 max-h-[300px] sm:max-h-[350px] flex items-center justify-center">
+        <div class="flex-1 min-h-0 flex flex-col justify-start items-center gap-1 sm:gap-2 w-full">
+          <div class="w-full flex-1 min-h-0 max-h-[300px] sm:max-h-[350px] flex items-start justify-center">
             ${renderTriArcSvgForZone(z, T)}
           </div>
           <div class="w-full shrink-0">
             ${renderTriArcDailyChronoFrise(z)}
           </div>
         </div>
+        ${z === "AMB" ? `
         <div class="shrink-0 w-full pb-0.5">
-          ${renderTriArcBottomModes(T)}
+          ${renderTriArcBottomModes(T, z)}
         </div>
+        ` : ""}
       `;
     }
   });
@@ -6065,8 +6712,9 @@ function updateTriArcValueFromPoint(svgEl, arcType, clientX, clientY) {
     a = Math.max(135, Math.min(405, a));
     return triArcAngleToTemp(a);
   } else if (arcType === "fan") {
-    // Si la ventilation est en mode Auto, l'arc n'est pas cliquable/modifiable
-    const isFanAuto = (T.autoIdx === 1 || T.autoIdx === 2 || fanSp === 8);
+    // Sur le TriArc principal (AMB), si la ventilation est en mode Auto, l'arc est verrouillé (géré par le bouton Auto)
+    // Sur SX/DX, le passage Auto/Manuel se fait directement sur l'arc ventilation
+    const isFanAuto = (zone === "AMB") && (T.autoIdx === 1 || T.autoIdx === 2 || fanSp === 8);
     if (isFanAuto) return null;
 
     let a = deg < 0 ? deg + 360 : deg;

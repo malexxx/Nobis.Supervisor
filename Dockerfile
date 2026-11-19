@@ -28,8 +28,13 @@ RUN apt-get update \
     tzdata \
     tini \
     gosu \
+    openssl \
+    wget \
+    ca-certificates \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && echo $TZ > /etc/timezone \
+    && python -c "import io, os, tarfile, urllib.request; data = urllib.request.urlopen('https://github.com/acmesh-official/acme.sh/archive/refs/tags/3.1.0.tar.gz', timeout=30).read(); os.makedirs('/usr/local/share/acme.sh', exist_ok=True); tf = tarfile.open(fileobj=io.BytesIO(data), mode='r:gz'); members = [m for m in tf.getmembers() if '/' in m.name]; [setattr(m, 'name', m.name.split('/', 1)[1]) for m in members]; tf.extractall('/usr/local/share/acme.sh', members=members)" \
+    && chmod +x /usr/local/share/acme.sh/acme.sh \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=node-builder /usr/local/bin/node /usr/local/bin/node
@@ -54,7 +59,7 @@ VOLUME ["/app/data"]
 EXPOSE 8080 5540/udp 5540/tcp
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)" || exit 1
+    CMD python -c "import ssl, urllib.request; urllib.request.urlopen('https://127.0.0.1:8080/health', timeout=3, context=ssl._create_unverified_context())" 2>/dev/null || python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)" || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips", "*", "--timeout-graceful-shutdown", "5"]
+CMD ["python", "server.py", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips", "*", "--timeout-graceful-shutdown", "5"]

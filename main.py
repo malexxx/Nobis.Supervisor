@@ -56,6 +56,7 @@ from routers.silence import (
 )
 from routers.stove import router as stove_router
 from routers.system import router as system_router
+from routers.tls import router as tls_router
 from scheduler import scheduler
 from telemetry import (
     collect_telemetry_cycle,
@@ -63,6 +64,7 @@ from telemetry import (
     prune_database_retention,
     sse_subscribers,
 )
+from tls_service import check_tls_renewal_job, get_active_runtime_tls_mode
 
 # Export explicite pour rétro-compatibilité
 __all__ = [
@@ -115,9 +117,10 @@ async def lifespan(app: FastAPI):
         f"Démarrage Nobis.Supervisor v{APP_VERSION} (mode={active_mode}, docker={DOCKER_VERSION})",
     )
 
-    # Démarrage de la boucle de télémétrie périodique et rétention
+    # Démarrage de la boucle de télémétrie périodique, rétention et renouvellement TLS
     scheduler.add_job(collect_telemetry_cycle, "interval", seconds=interval_s, id="telemetry_job", replace_existing=True)
     scheduler.add_job(prune_database_retention, "interval", hours=12, id="retention_prune_job", replace_existing=True)
+    scheduler.add_job(check_tls_renewal_job, "interval", hours=24, id="tls_renewal_job", replace_existing=True)
     scheduler.start()
 
     # Initialisation de la passerelle Matter
@@ -307,6 +310,8 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if get_active_runtime_tls_mode() == "letsencrypt":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; "
@@ -327,6 +332,7 @@ app.include_router(calibration_router)
 app.include_router(installer_router)
 app.include_router(stove_router)
 app.include_router(system_router)
+app.include_router(tls_router)
 
 # Fichiers statiques et SPA
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

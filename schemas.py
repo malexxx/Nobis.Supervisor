@@ -81,6 +81,8 @@ class SettingsPayload(BaseModel):
     matter_enabled: Optional[Union[bool, StrictInt, StrictStr]] = None
     matter_device_name: Optional[StrictStr] = None
     matter_port: Optional[Union[StrictInt, StrictStr]] = None
+    duct_left_name: Optional[StrictStr] = None
+    duct_right_name: Optional[StrictStr] = None
 
     @field_validator("poll_interval_s", "pellet_bag_price_eur", "pellet_bags_stock", "pellet_bags_used_season", "matter_port", mode="before")
     @classmethod
@@ -164,3 +166,22 @@ class StoveSetPayload(BaseModel):
         if isinstance(v, bool):
             raise ValueError("Boolean values are not allowed for numeric fields")
         return v
+
+
+class TlsModePayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    mode: Literal["http", "selfsigned"] = Field(..., description="Mode TLS cible : 'http' ou 'selfsigned'")
+    san_ips: Optional[StrictStr] = Field(default=None, description="IPs supplémentaires pour le certificat auto-signé (séparées par des virgules)")
+    san_dns: Optional[StrictStr] = Field(default=None, description="Noms d'hôte supplémentaires pour le certificat auto-signé (séparés par des virgules)")
+    regenerate: StrictBool = Field(default=False, description="Forcer la régénération du certificat auto-signé")
+    restart: StrictBool = Field(default=True, description="Redémarrer automatiquement le backend pour appliquer le changement")
+
+
+class TlsLetsEncryptPayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    domain: StrictStr = Field(..., min_length=3, max_length=253, description="Nom de domaine complet (ex: mon-poele.duckdns.org)")
+    dns_provider: StrictStr = Field(..., min_length=2, max_length=40, description="Identifiant du fournisseur DNS-01 (duckdns, cloudflare, ovh, ...)")
+    dns_token: Optional[StrictStr] = Field(default=None, description="Token API DNS (laisser vide ou '********' pour conserver le token existant)")
+    email: Optional[StrictStr] = Field(default="", description="Email optionnel pour les notifications Let's Encrypt")
+    force: StrictBool = Field(default=False, description="Forcer le renouvellement même si le certificat est encore valide")
+    restart: StrictBool = Field(default=True, description="Redémarrer automatiquement le backend après obtention du certificat")

@@ -146,20 +146,43 @@ class TestSystemEndpoints(unittest.TestCase):
         self.assertEqual(resp_3h.status_code, 200)
 
     def test_settings_save_flow(self):
-        """Vérifie la mise à jour des paramètres de configuration."""
-        payload = {
-            "poll_interval_s": "60",
-            "pellet_bag_price_eur": 5.10,
-            "weather_city": "Test City",
-            "pellet_bags_stock": 25,
-        }
-        resp = self.client.post("/api/settings", json=payload)
-        self.assertEqual(resp.status_code, 200)
-        data = resp.json()
-        self.assertEqual(data["status"], "ok")
-        self.assertIn("settings", data)
-        self.assertEqual(data["settings"]["poll_interval_s"], "60")
-        self.assertEqual(data["settings"]["weather_city"], "Test City")
+        """Vérifie la mise à jour des paramètres de configuration (avec restauration complète)."""
+        from database import get_settings_dict, get_sys_db
+
+        tracked_keys = (
+            "poll_interval_s",
+            "pellet_bag_price_eur",
+            "weather_city",
+            "weather_lat",
+            "weather_lon",
+            "pellet_bags_stock",
+        )
+        orig_settings = get_settings_dict()
+        backup = {k: orig_settings.get(k) for k in tracked_keys}
+
+        try:
+            payload = {
+                "poll_interval_s": "60",
+                "pellet_bag_price_eur": 5.10,
+                "weather_city": "Test City",
+                "pellet_bags_stock": 25,
+            }
+            resp = self.client.post("/api/settings", json=payload)
+            self.assertEqual(resp.status_code, 200)
+            data = resp.json()
+            self.assertEqual(data["status"], "ok")
+            self.assertIn("settings", data)
+            self.assertEqual(data["settings"]["poll_interval_s"], "60")
+            self.assertEqual(data["settings"]["weather_city"], "Test City")
+        finally:
+            sconn = get_sys_db()
+            try:
+                for k, v in backup.items():
+                    if v is not None:
+                        sconn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (k, str(v)))
+                sconn.commit()
+            finally:
+                sconn.close()
 
     def test_test_connection_simulation(self):
         """Vérifie le endpoint /api/test-connection en mode simulation."""
