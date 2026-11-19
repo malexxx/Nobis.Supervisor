@@ -49,7 +49,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--proxy-headers", action="store_true", default=True)
     parser.add_argument("--forwarded-allow-ips", default="*")
     parser.add_argument("--timeout-graceful-shutdown", type=int, default=5)
-    return parser.parse_args(argv)
+    args, _ = parser.parse_known_args(argv)
+    return args
 
 
 def main() -> None:

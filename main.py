@@ -83,6 +83,31 @@ __all__ = [
 _is_shutting_down = False
 
 
+def _install_windows_proactor_guard() -> None:
+    """Ignore le bruit bénin WinError 10054 lors de la fermeture de sockets TLS sous Windows (ProactorEventLoop)."""
+    if sys.platform != "win32":
+        return
+    try:
+        from asyncio.proactor_events import _ProactorBasePipeTransport
+
+        if not getattr(_ProactorBasePipeTransport._call_connection_lost, "_nobis_patched", False):
+            orig = _ProactorBasePipeTransport._call_connection_lost
+
+            def _safe_call_connection_lost(self, exc):
+                try:
+                    orig(self, exc)
+                except ConnectionResetError:
+                    pass
+
+            _safe_call_connection_lost._nobis_patched = True
+            _ProactorBasePipeTransport._call_connection_lost = _safe_call_connection_lost
+    except Exception:
+        pass
+
+
+_install_windows_proactor_guard()
+
+
 def _notify_sse_shutdown():
     """Notifie l'ensemble des clients SSE de l'arrêt imminent du serveur."""
     global _is_shutting_down
@@ -99,6 +124,20 @@ def _notify_sse_shutdown():
 async def lifespan(app: FastAPI):
     global _is_shutting_down
     _is_shutting_down = False
+    if sys.platform == "win32":
+        loop = asyncio.get_running_loop()
+        orig_handler = loop.get_exception_handler()
+
+        def _win_loop_exc_handler(lp, context):
+            exc = context.get("exception")
+            if isinstance(exc, ConnectionResetError) and getattr(exc, "winerror", None) == 10054:
+                return
+            if orig_handler:
+                orig_handler(lp, context)
+            else:
+                lp.default_exception_handler(context)
+
+        loop.set_exception_handler(_win_loop_exc_handler)
     init_all_databases()
     seed_simulation_db_if_empty()
     await init_http_client()
