@@ -1,204 +1,6 @@
 // =============================================================================
-// NOBIS A10 C LIGHT STYLE COAX — COCKPIT GRAPHIQUE 3 VOLETS SYNCHRONISÉS (60 FPS)
+// CHARTS — COCKPIT GRAPHIQUE VOLETS 1, 2 & 3 SYNCHRONISÉS (60 FPS)
 // =============================================================================
-
-// Formate un epoch (secondes) en "YYYY-MM-DD HH:MM:SS"
-function formatEpochToLocalStr(epochSec) {
-  const d = new Date(Number(epochSec) * 1000);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-
-// Détecte si une ligne de télémétrie correspond à une perte de connexion
-function isConnectionLostRow(r) {
-  if (!r) return true;
-  if (r._isGap) return true;
-  if (Number(r.status_code) === -1) return true;
-  if (r.temp_ambient === null && r.temp_fumes === null) return true;
-  if (r.comm_mode && r.comm_mode !== "simulation" && (!r.raw_buffer_json || r.raw_buffer_json === "{}")) {
-    return true;
-  }
-  return false;
-}
-
-// Insère des espaces (points de rupture _isGap=true) lors des pertes de connexion ou coupures temporelles
-function normalizeSeriesWithGaps(rawRows) {
-  if (!Array.isArray(rawRows) || !rawRows.length) return [];
-
-  const pollSec = Math.max(30, Number((currentSettings && currentSettings.poll_interval_s) || 120));
-  const rangeDurations = {
-    "3h": 3 * 3600,
-    "6h": 6 * 3600,
-    "24h": 24 * 3600,
-    "7j": 7 * 86400,
-    "30j": 30 * 86400,
-    "3M": 90 * 86400
-  };
-  const bucketSec = Math.max(1, Math.floor((rangeDurations[currentRange] || 86400) / 360));
-  const expectedStepSec = Math.max(pollSec, bucketSec);
-  const gapThresholdSec = Math.max(expectedStepSec * 2.5, 300);
-
-  const out = [];
-  for (let i = 0; i < rawRows.length; i++) {
-    const curr = { ...rawRows[i] };
-    if (isConnectionLostRow(curr)) {
-      curr._isGap = true;
-    }
-
-    if (out.length > 0) {
-      const prev = out[out.length - 1];
-      const prevEpoch = Number(prev.epoch || 0);
-      const currEpoch = Number(curr.epoch || 0);
-      const dt = currEpoch - prevEpoch;
-
-      if (prevEpoch > 0 && currEpoch > 0 && dt > gapThresholdSec) {
-        const gapMin = Math.round(dt / 60);
-        // Nombre de crans vides proportionnel à la durée de coupure (borné entre 2 et 10 pour garder une échelle lisible)
-        const numSlots = Math.min(10, Math.max(2, Math.round(dt / expectedStepSec) - 1));
-        for (let k = 1; k <= numSlots; k++) {
-          const interpEpoch = Math.round(prevEpoch + (dt * k) / (numSlots + 1));
-          out.push({
-            _isGap: true,
-            _gapDurationMin: gapMin,
-            epoch: interpEpoch,
-            timestamp: formatEpochToLocalStr(interpEpoch),
-            status_code: -1,
-            status_label: `Perte de connexion (${gapMin} min)`
-          });
-        }
-      }
-    }
-    out.push(curr);
-  }
-
-  // Lissage de l'écart thermique sur les points de combustion active (moyenne glissante)
-  const windowSize = 8;
-  for (let i = 0; i < out.length; i++) {
-    const r = out[i];
-    if (r._isGap || Number(r.status_code) !== 5) {
-      if (r.flame_delta_avg === undefined) r.flame_delta_avg = null;
-      continue;
-    }
-    if (r.flame_delta_avg === undefined || r.flame_delta_avg === null || r.flame_delta_avg === 0) {
-      const pwr = Number(r.power_actual ?? r.power_level ?? 4);
-      const cmd = Number(r.power_level ?? pwr);
-      const targetFlame = 430.0 + (pwr * 40.0);
-      const instantDelta = Number(r.temp_probe_k ?? targetFlame) - targetFlame;
-      let sum = instantDelta;
-      let count = 1;
-      let powerChanged = false;
-      for (let j = i - 1; j >= Math.max(0, i - windowSize); j--) {
-        const pj = out[j];
-        if (pj._isGap || Number(pj.status_code) !== 5) {
-          powerChanged = true;
-          break;
-        }
-        const pwrJ = Number(pj.power_actual ?? pj.power_level ?? 4);
-        const cmdJ = Number(pj.power_level ?? pwrJ);
-        if (pwrJ !== pwr || cmdJ !== cmd) {
-          powerChanged = true;
-          break;
-        }
-        if (pj.temp_probe_k) {
-          sum += (Number(pj.temp_probe_k) - targetFlame);
-          count++;
-        }
-      }
-      if (!powerChanged && count >= windowSize) {
-        r.flame_delta_avg = Math.round((sum / count) * 10) / 10;
-      } else {
-        r.flame_delta_avg = null;
-      }
-    }
-  }
-
-  return out;
-}
-
-// Formate une durée en minutes en "Xh YYm" ou "X min"
-function formatDurationMin(totalMin) {
-  const m = Math.max(0, Math.round(totalMin));
-  if (m < 60) return `${m} min`;
-  const h = Math.floor(m / 60);
-  const rem = m % 60;
-  return rem > 0 ? `${h}h${String(rem).padStart(2, "0")}` : `${h}h`;
-}
-
-// Calcule le pas moyen en secondes entre deux points de la série courante
-function getAverageStepSeconds() {
-  if (!cachedSeriesRows || cachedSeriesRows.length < 2) return 120;
-  const firstEpoch = Number(cachedSeriesRows[0].epoch || 0);
-  const lastEpoch = Number(cachedSeriesRows[cachedSeriesRows.length - 1].epoch || 0);
-  if (lastEpoch > firstEpoch) {
-    return Math.max(10, (lastEpoch - firstEpoch) / (cachedSeriesRows.length - 1));
-  }
-  return 120;
-}
-
-// Active / désactive indépendamment chacune des 4 vues de phases (1, 2, 3, 4) avec superposition libre
-function togglePhaseView(propKey) {
-  if (!activePhaseViews || typeof activePhaseViews !== "object") {
-    activePhaseViews = { prop1: true, prop2: true, prop3: true, prop4: true };
-  }
-  activePhaseViews[propKey] = !activePhaseViews[propKey];
-  try {
-    localStorage.setItem("nobis_active_phase_views", JSON.stringify(activePhaseViews));
-  } catch (e) {}
-  applyPhaseViewsVisibility();
-}
-
-function applyPhaseViewsVisibility() {
-  const show1 = !!activePhaseViews.prop1;
-  const show2 = !!activePhaseViews.prop2;
-  const show3 = !!activePhaseViews.prop3;
-  const show4 = !!activePhaseViews.prop4;
-
-  document.querySelectorAll("#phase-prop-tabs button").forEach(btn => {
-    const k = btn.getAttribute("data-prop");
-    const isAct = !!activePhaseViews[k];
-    const checkEl = btn.querySelector(".prop-check");
-    if (checkEl) checkEl.textContent = isAct ? "●" : "○";
-    btn.className = isAct
-      ? "px-3 py-1.5 rounded-lg text-xs font-bold border transition flex items-center gap-1.5 bg-orange-600 border-orange-400 text-white shadow"
-      : "px-3 py-1.5 rounded-lg text-xs font-semibold border transition flex items-center gap-1.5 bg-gray-950 border-gray-800 text-gray-400 hover:text-white";
-  });
-
-  const rowPhase = document.getElementById("ribbon-row-phase");
-  const foot1 = document.getElementById("prop1-summary-footer");
-  if (rowPhase) rowPhase.classList.toggle("hidden", !show1);
-  if (foot1) foot1.classList.toggle("hidden", !show1);
-
-  const tb2 = document.getElementById("phase-prop2-toolbar");
-  if (tb2) tb2.classList.toggle("hidden", !show2);
-
-  const badge3 = document.getElementById("hover-phase-badge");
-  const insp3 = document.getElementById("phase-prop3-inspector");
-  if (badge3) badge3.classList.toggle("hidden", !show3);
-  if (insp3) insp3.classList.toggle("hidden", !show3);
-
-  const box4 = document.getElementById("phase-prop4-container");
-  if (box4) box4.classList.toggle("hidden", !show4);
-
-  if (activeHoverIdx >= 0 && activeHoverIdx < cachedSeriesRows.length) {
-    updatePhaseHoverViews(activeHoverIdx, true);
-  } else if (cachedSeriesRows.length) {
-    updatePhaseHoverViews(cachedSeriesRows.length - 1, false);
-  }
-  if (chartPane1) chartPane1.draw();
-  if (chartPane2) chartPane2.draw();
-}
-
-function setPhaseBgOpacity(val) {
-  phaseBgOpacity = Number(val) || 0.12;
-  document.querySelectorAll(".prop2-op-btn").forEach(btn => {
-    const isAct = Math.abs(Number(btn.getAttribute("data-op")) - phaseBgOpacity) < 0.005;
-    btn.className = isAct
-      ? "prop2-op-btn px-2 py-0.5 rounded bg-amber-600 text-white font-bold border border-amber-400"
-      : "prop2-op-btn px-2 py-0.5 rounded bg-gray-800 text-gray-300 border border-gray-700";
-  });
-  if (chartPane1) chartPane1.draw();
-  if (chartPane2) chartPane2.draw();
-}
 
 // Plugin Chart.js dessinant les zones de perte de connexion + le fond coloré par phase (Prop. 2) + la ligne verticale synchronisée
 const syncCrosshairPlugin = {
@@ -370,14 +172,19 @@ function initThreePaneCockpit() {
     }
   });
 
-  // Écouteurs souris & tactiles unifiés sur les 4 volets pour le réticule synchronisé 60 FPS
+  // Écouteurs souris & tactiles unifiés sur les 4 volets (coalescés via rAF pour un vrai 60 FPS sans reflow inutile)
   const container = document.getElementById("three-panes-container");
-  const handlePointerMove = (clientX, targetEl) => {
+  let _hoverRafId = null;
+  let _pendingHoverX = 0;
+  let _pendingHoverTarget = null;
+
+  const flushPointerMove = () => {
+    _hoverRafId = null;
     if (!cachedSeriesRows.length) return;
     const secPlot = document.getElementById("security-ribbons-plot-area");
     const ribPlot = document.getElementById("ribbons-plot-area");
     let plotEl = ribPlot;
-    if (targetEl && targetEl.closest && targetEl.closest("#security-ribbons-plot-area")) {
+    if (_pendingHoverTarget && _pendingHoverTarget.closest && _pendingHoverTarget.closest("#security-ribbons-plot-area")) {
       plotEl = secPlot || ribPlot;
     } else if (!plotEl) {
       plotEl = secPlot;
@@ -385,10 +192,19 @@ function initThreePaneCockpit() {
     if (!plotEl) return;
     const rect = plotEl.getBoundingClientRect();
     if (rect.width <= 0) return;
-    const relX = Math.max(0, Math.min(rect.width, clientX - rect.left));
+    const relX = Math.max(0, Math.min(rect.width, _pendingHoverX - rect.left));
     const ratio = relX / rect.width;
     const idx = Math.min(cachedSeriesRows.length - 1, Math.max(0, Math.round(ratio * (cachedSeriesRows.length - 1))));
     setSynchronizedHoverIndex(idx, (idx / Math.max(1, cachedSeriesRows.length - 1)) * 100);
+  };
+
+  const handlePointerMove = (clientX, targetEl) => {
+    if (!cachedSeriesRows.length) return;
+    _pendingHoverX = clientX;
+    _pendingHoverTarget = targetEl;
+    if (_hoverRafId === null) {
+      _hoverRafId = window.requestAnimationFrame(flushPointerMove);
+    }
   };
 
   const attachPointerListeners = (el) => {
@@ -436,7 +252,14 @@ function getPhaseSegmentBounds(idx) {
   return { startIdx: s, endIdx: e, durationMin: durMin, tStart, tEnd, meta: targetMeta };
 }
 
-// Met à jour les éléments visuels des Propositions 1, 3 et 4 pour un index donné (survol ou temps réel)
+let _lastProp4PhaseCode = null;
+
+/**
+ * Met à jour les éléments visuels des Propositions 1, 3 et 4 pour un index donné (survol ou temps réel).
+ * Évite la reconstruction du stepper 6 étapes (`stepGrid.innerHTML`) lorsque le code de phase reste inchangé.
+ * @param {number} idx Index dans `cachedSeriesRows`.
+ * @param {boolean} isHovering True si déclenché par le pointeur utilisateur.
+ */
 function updatePhaseHoverViews(idx, isHovering) {
   const row = cachedSeriesRows[idx];
   if (!row) return;
@@ -508,7 +331,8 @@ function updatePhaseHoverViews(idx, isHovering) {
       ? `Pointeur : ${(row.timestamp || "").slice(11, 16)}`
       : "Temps réel (Dernier point)";
   }
-  if (stepGrid) {
+  if (stepGrid && (_lastProp4PhaseCode !== meta.code || !stepGrid.childElementCount)) {
+    _lastProp4PhaseCode = meta.code;
     const stages = [
       { id: "OFF", title: "0. Éteint", icon: "⚫", codes: [0], color: "#64748b", sub: "Arrêt complet" },
       {
@@ -564,7 +388,14 @@ function updatePhaseHoverViews(idx, isHovering) {
   }
 }
 
+/**
+ * Synchronise la ligne de curseur et les volets d'inspection sur l'index télémétrique ciblé.
+ * Court-circuite immédiatement si l'index n'a pas changé pour préserver le 60 FPS.
+ * @param {number} idx Index cible dans `cachedSeriesRows`.
+ * @param {number} pctLeft Position horizontale en pourcentage [0..100].
+ */
 function setSynchronizedHoverIndex(idx, pctLeft) {
+  if (idx === activeHoverIdx) return;
   activeHoverIdx = idx;
   const cursorLine = document.getElementById("ribbons-cursor-line");
   if (cursorLine) {
@@ -894,334 +725,4 @@ function updateChartDatasets() {
 
   renderBooleanRibbons();
   renderSecurityRibbons();
-}
-
-// =============================================================================
-// VOLET 4 : SÉCURITÉS, SONDES (TCK/TCJ) & CONTACTS HISTORISÉS
-// =============================================================================
-
-function renderSecurityBadges(data, isHovering, timestamp) {
-  const secBox = document.getElementById("security-badges");
-  if (!secBox) return;
-  const d = data || latestData || {};
-  const isGap = d._isGap;
-
-  const itemsSec = [
-    {
-      label: "Porte foyer",
-      icon: "🚪",
-      fault: Number(d.popup_door_open ?? 0),
-      okTxt: "Fermée",
-      errTxt: "OUVERTE !"
-    },
-    {
-      label: "Pressostat Pa",
-      icon: "💨",
-      fault: Number(d.popup_pa_fault ?? 0),
-      okTxt: "OK",
-      errTxt: "DÉFAUT Pa !"
-    },
-    {
-      label: "Sonde K (TCK)",
-      icon: "🔥",
-      fault: Number(d.popup_tck_fault ?? 0),
-      okTxt: "OK",
-      errTxt: "DÉFAUT TCK !"
-    },
-    {
-      label: "Sonde Fumées (TCJ)",
-      icon: "🌡️",
-      fault: Number(d.popup_tcj_fault ?? 0),
-      okTxt: "OK",
-      errTxt: "DÉFAUT TCJ !"
-    },
-    {
-      label: "Secteur Blackout",
-      icon: "⚡",
-      fault: Number(d.blackout_popup ?? 0),
-      okTxt: "Stable",
-      errTxt: "COUPURE AL01 !"
-    },
-    {
-      label: "Thermostats Ext.",
-      icon: "🎛️",
-      fault: 0,
-      okTxt: `M:${Number(d.thermostat_main) ? "1" : "0"} G:${Number(d.thermostat_sx) ? "1" : "0"} D:${Number(d.thermostat_dx) ? "1" : "0"}`,
-      isInfo: true
-    },
-    {
-      label: "Trappe pellet",
-      icon: "🌾",
-      fault: Number(d.popup_pellet_open ?? 0),
-      okTxt: "Fermée",
-      errTxt: "OUVERTE !"
-    },
-    {
-      label: "Trémie",
-      icon: "🪣",
-      fault: Number(d.popup_pellet_empty ?? 0),
-      okTxt: "Niveau OK",
-      errTxt: "VIDE !"
-    }
-  ];
-
-  if (isGap) {
-    secBox.innerHTML = itemsSec.map(i => `
-      <div class="px-2 py-1 rounded border bg-rose-950/30 border-rose-800/50 text-rose-300 flex justify-between items-center text-[11px]">
-        <span class="flex items-center gap-1 truncate"><span class="text-xs">${i.icon}</span> <span class="truncate">${i.label}</span></span>
-        <span class="font-mono text-[10px] text-rose-400 shrink-0 ml-1">HORS LIGNE</span>
-      </div>
-    `).join("");
-    return;
-  }
-
-  secBox.innerHTML = itemsSec.map(i => {
-    let cls = "bg-gray-950 border-gray-800 text-gray-300";
-    let valCls = "text-emerald-400 font-semibold";
-    if (i.fault) {
-      cls = "bg-rose-950/80 border-rose-600 text-rose-200 font-bold shadow-[0_0_8px_rgba(244,63,94,0.4)] animate-pulse";
-      valCls = "text-rose-300 font-black";
-    } else if (i.isInfo) {
-      cls = "bg-gray-950 border-gray-800 text-gray-300";
-      valCls = "text-sky-300 font-mono font-bold";
-    }
-    return `
-      <div class="px-2 py-1 rounded border flex justify-between items-center text-[11px] ${cls}">
-        <span class="flex items-center gap-1 truncate">
-          <span class="shrink-0 text-xs">${i.icon}</span>
-          <span class="truncate">${i.label} :</span>
-        </span>
-        <span class="tabular-nums shrink-0 ml-1 ${valCls}">${i.fault ? i.errTxt : i.okTxt}</span>
-      </div>
-    `;
-  }).join("");
-
-  const hoverLbl = document.getElementById("sec-hover-state");
-  if (hoverLbl) {
-    if (isHovering && timestamp) {
-      hoverLbl.textContent = `Pointeur : ${timestamp.slice(11, 19) || timestamp}`;
-      hoverLbl.className = "text-sky-400 text-[10px] font-mono font-bold";
-    } else {
-      hoverLbl.textContent = "Temps réel";
-      hoverLbl.className = "text-emerald-400 text-[10px] font-mono font-bold";
-    }
-  }
-}
-
-function updateSecurityHoverViews(idx, isHovering) {
-  const row = (isHovering && idx >= 0 && idx < cachedSeriesRows.length)
-    ? cachedSeriesRows[idx]
-    : (cachedSeriesRows[cachedSeriesRows.length - 1] || latestData || {});
-
-  const isGap = row._isGap;
-
-  const setRibbonVal = (id, fault, okTxt, errTxt, isInfo = false) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (isGap) {
-      el.textContent = "HORS LIGNE";
-      el.className = "ml-1 text-gray-500 font-mono";
-      return;
-    }
-    if (isInfo) {
-      el.textContent = okTxt;
-      el.className = "ml-1 text-sky-300 font-mono font-bold";
-      return;
-    }
-    if (fault) {
-      el.textContent = errTxt;
-      el.className = "ml-1 text-rose-300 font-extrabold";
-    } else {
-      el.textContent = okTxt;
-      el.className = "ml-1 text-emerald-300";
-    }
-  };
-
-  setRibbonVal("ribbon-val-door", Number(row.popup_door_open ?? 0) > 0, "Fermée (OK)", "OUVERTE !");
-  setRibbonVal("ribbon-val-pa", Number(row.popup_pa_fault ?? 0) > 0, "OK (Pression nominale)", "DÉFAUT Pa !");
-  setRibbonVal("ribbon-val-tck", Number(row.popup_tck_fault ?? 0) > 0, "OK (Thermocouple actif)", "DÉFAUT TCK !");
-  setRibbonVal("ribbon-val-tcj", Number(row.popup_tcj_fault ?? 0) > 0, "OK (Sonde fumées active)", "DÉFAUT TCJ !");
-  setRibbonVal("ribbon-val-blackout", Number(row.blackout_popup ?? 0) > 0, "Stable (Secteur 230V)", "COUPURE AL01 !");
-
-  const mTh = Number(row.thermostat_main ?? 0) ? "1" : "0";
-  const gTh = Number(row.thermostat_sx ?? 0) ? "1" : "0";
-  const dTh = Number(row.thermostat_dx ?? 0) ? "1" : "0";
-  setRibbonVal("ribbon-val-thermostats", false, `M:${mTh} | G:${gTh} | D:${dTh}`, "", true);
-
-  const trapOpen = Number(row.popup_pellet_open ?? 0) > 0;
-  setRibbonVal("ribbon-val-trap", trapOpen, "Fermée (OK)", "OUVERTE !");
-
-  const hopperEmpty = Number(row.popup_pellet_empty ?? 0) > 0;
-  setRibbonVal("ribbon-val-hoppersec", hopperEmpty, "Niveau OK", "VIDE !");
-
-  renderSecurityBadges(row, isHovering, row.timestamp);
-}
-
-function renderSecurityRibbons() {
-  const plotArea = document.getElementById("security-ribbons-plot-area");
-  if (!plotArea) return;
-
-  const trackDoor = document.getElementById("ribbon-track-door");
-  const trackPa = document.getElementById("ribbon-track-pa");
-  const trackTck = document.getElementById("ribbon-track-tck");
-  const trackTcj = document.getElementById("ribbon-track-tcj");
-  const trackBlackout = document.getElementById("ribbon-track-blackout");
-  const trackThermostats = document.getElementById("ribbon-track-thermostats");
-  const trackTrap = document.getElementById("ribbon-track-trap");
-  const trackHopperSec = document.getElementById("ribbon-track-hoppersec");
-
-  if (!cachedSeriesRows.length) {
-    if (trackDoor) trackDoor.innerHTML = "";
-    if (trackPa) trackPa.innerHTML = "";
-    if (trackTck) trackTck.innerHTML = "";
-    if (trackTcj) trackTcj.innerHTML = "";
-    if (trackBlackout) trackBlackout.innerHTML = "";
-    if (trackThermostats) trackThermostats.innerHTML = "";
-    if (trackTrap) trackTrap.innerHTML = "";
-    if (trackHopperSec) trackHopperSec.innerHTML = "";
-    return;
-  }
-
-  const buildRuns = (extractor) => {
-    const runs = [];
-    for (let i = 0; i < cachedSeriesRows.length; i++) {
-      const v = extractor(cachedSeriesRows[i]);
-      if (!runs.length || runs[runs.length - 1].val !== v) {
-        runs.push({ val: v, count: 1, startIdx: i, endIdx: i });
-      } else {
-        runs[runs.length - 1].count++;
-        runs[runs.length - 1].endIdx = i;
-      }
-    }
-    return runs;
-  };
-
-  const total = cachedSeriesRows.length;
-  const gapStyle = "bg-rose-950/30 border-x border-dashed border-rose-800/50";
-
-  const renderBinaryTrack = (trackEl, extractor, okBg, errBg, okBorder = "border-emerald-900/30", errBorder = "border-rose-500/80") => {
-    if (!trackEl) return;
-    const runs = buildRuns(extractor);
-    trackEl.innerHTML = runs.map(seg => {
-      const w = ((seg.count / total) * 100).toFixed(3);
-      let cls = gapStyle;
-      if (seg.val === 0) {
-        cls = `${okBg} border-r ${okBorder}`;
-      } else if (seg.val > 0) {
-        cls = `${errBg} border-r ${errBorder} font-bold shadow-[0_0_8px_rgba(244,63,94,0.6)]`;
-      }
-      return `<div style="width:${w}%" class="h-full ${cls}"></div>`;
-    }).join("");
-  };
-
-  // 1. Porte Foyer (0 = Fermée, 1 = OUVERTE)
-  renderBinaryTrack(
-    trackDoor,
-    r => r._isGap ? -1 : (Number(r.popup_door_open ?? 0) ? 1 : 0),
-    "bg-emerald-950/70",
-    "bg-rose-600 animate-pulse"
-  );
-
-  // 2. Pressostat Pa (0 = OK, 1 = DÉFAUT Pa)
-  renderBinaryTrack(
-    trackPa,
-    r => r._isGap ? -1 : (Number(r.popup_pa_fault ?? 0) ? 1 : 0),
-    "bg-emerald-950/70",
-    "bg-rose-600"
-  );
-
-  // 3. Sonde K TCK (0 = OK, 1 = DÉFAUT TCK)
-  renderBinaryTrack(
-    trackTck,
-    r => r._isGap ? -1 : (Number(r.popup_tck_fault ?? 0) ? 1 : 0),
-    "bg-emerald-950/70",
-    "bg-rose-600"
-  );
-
-  // 4. Sonde Fumées TCJ (0 = OK, 1 = DÉFAUT TCJ)
-  renderBinaryTrack(
-    trackTcj,
-    r => r._isGap ? -1 : (Number(r.popup_tcj_fault ?? 0) ? 1 : 0),
-    "bg-emerald-950/70",
-    "bg-rose-600"
-  );
-
-  // 5. Secteur Blackout (0 = Stable, 1 = COUPURE AL01)
-  renderBinaryTrack(
-    trackBlackout,
-    r => r._isGap ? -1 : (Number(r.blackout_popup ?? 0) ? 1 : 0),
-    "bg-emerald-950/70",
-    "bg-rose-600"
-  );
-
-  // 6. Thermostats Externes (M, SX, DX)
-  if (trackThermostats) {
-    const runsTh = buildRuns(r => {
-      if (r._isGap) return -1;
-      const m = Number(r.thermostat_main ?? 0) ? 1 : 0;
-      const sx = Number(r.thermostat_sx ?? 0) ? 2 : 0;
-      const dx = Number(r.thermostat_dx ?? 0) ? 4 : 0;
-      return m + sx + dx;
-    });
-    trackThermostats.innerHTML = runsTh.map(seg => {
-      const w = ((seg.count / total) * 100).toFixed(3);
-      let cls = gapStyle;
-      if (seg.val === 0) {
-        cls = "bg-gray-900 border-r border-gray-800";
-      } else if (seg.val > 0) {
-        cls = "bg-sky-600/80 border-r border-sky-400/50";
-      }
-      return `<div style="width:${w}%" class="h-full ${cls}"></div>`;
-    }).join("");
-  }
-
-  // 7. Trappe pellet (0 = Fermée, 1 = OUVERTE)
-  renderBinaryTrack(
-    trackTrap,
-    r => r._isGap ? -1 : (Number(r.popup_pellet_open ?? 0) ? 1 : 0),
-    "bg-emerald-950/70",
-    "bg-rose-600 animate-pulse font-bold"
-  );
-
-  // 8. Trémie (0 = Niveau OK, 1 = VIDE)
-  renderBinaryTrack(
-    trackHopperSec,
-    r => r._isGap ? -1 : (Number(r.popup_pellet_empty ?? 0) ? 1 : 0),
-    "bg-[#382013]/80",
-    "bg-rose-600 animate-pulse font-bold"
-  );
-
-  // Bilan Sécurités sur la période
-  let anomaliesCount = 0;
-  for (let i = 0; i < cachedSeriesRows.length; i++) {
-    const r = cachedSeriesRows[i];
-    if (r._isGap) continue;
-    if (Number(r.popup_door_open ?? 0) || Number(r.popup_pa_fault ?? 0) ||
-        Number(r.popup_tck_fault ?? 0) || Number(r.popup_tcj_fault ?? 0) ||
-        Number(r.blackout_popup ?? 0) || Number(r.popup_pellet_open ?? 0) ||
-        Number(r.popup_pellet_empty ?? 0)) {
-      anomaliesCount++;
-    }
-  }
-
-  const statEl = document.getElementById("sec-summary-status");
-  const countEl = document.getElementById("sec-anomalies-count");
-  if (statEl) {
-    if (anomaliesCount === 0) {
-      statEl.textContent = "100% Sécurisé (0 alerte)";
-      statEl.className = "px-2.5 py-0.5 rounded font-bold bg-emerald-950 text-emerald-300 border border-emerald-800 text-xs";
-    } else {
-      statEl.textContent = `⚠️ ${anomaliesCount} point(s) en alerte détecté(s)`;
-      statEl.className = "px-2.5 py-0.5 rounded font-bold bg-rose-950 text-rose-300 border border-rose-800 text-xs animate-pulse";
-    }
-  }
-  if (countEl) {
-    countEl.textContent = `${cachedSeriesRows.length} points analysés • ${anomaliesCount} anomalie(s)`;
-  }
-
-  if (activeHoverIdx >= 0 && activeHoverIdx < cachedSeriesRows.length) {
-    updateSecurityHoverViews(activeHoverIdx, true);
-  } else {
-    updateSecurityHoverViews(cachedSeriesRows.length - 1, false);
-  }
 }

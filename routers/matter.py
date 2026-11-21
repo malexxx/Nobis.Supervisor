@@ -2,12 +2,14 @@
 Sous-routeur pour le pont Matter local (Google Home, Nest Hub Max, Apple Home).
 Gère le statut du pont, le redémarrage, le reset d'appairage et le webhook local.
 """
+import hmac
+
 from fastapi import APIRouter, HTTPException, Request
 
 from database import db_log, get_active_mode
 from matter_service import matter_manager
-from routers.installer import require_installer_auth_if_configured
 from schemas import MatterWebhookPayload
+from services.installer_auth import require_installer_auth_if_configured
 from telemetry import execute_register_write
 
 router = APIRouter(prefix="/api/matter", tags=["Matter"])
@@ -19,9 +21,10 @@ async def api_matter_status():
     return await matter_manager.get_status()
 
 
-@router.post("/restart")
-async def api_matter_restart():
+@router.post("/restart", responses={403: {"description": "Authentification installateur requise"}})
+async def api_matter_restart(request: Request):
     """Redémarre le pont Thermostat Matter."""
+    require_installer_auth_if_configured(request)
     await matter_manager.stop()
     return await matter_manager.ensure_started()
 
@@ -39,6 +42,10 @@ async def api_matter_webhook(payload: MatterWebhookPayload, request: Request):
     client_ip = request.client.host if request.client else ""
     if client_ip not in ("127.0.0.1", "::1", "localhost", "testclient"):
         raise HTTPException(status_code=403, detail="Accès réservé au pont local Matter (127.0.0.1)")
+
+    provided_secret = (request.headers.get("X-Matter-Secret") or "").strip()
+    if not provided_secret or not hmac.compare_digest(provided_secret, matter_manager.webhook_secret):
+        raise HTTPException(status_code=403, detail="Jeton interne X-Matter-Secret manquant ou invalide.")
 
     action = payload.action.strip()
     active_mode = get_active_mode()

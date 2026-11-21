@@ -1,4 +1,6 @@
 import http from "node:http";
+import https from "node:https";
+import { X509Certificate } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { ServerNode, Environment } from "@matter/main";
@@ -11,12 +13,25 @@ import QRCode from "qrcode";
 // CONFIGURATION DU PONT MATTER LOCAL (GOOGLE HOME / NEST HUB MAX / APPLE HOME)
 // =============================================================================
 const NOBIS_API_URL = (process.env.NOBIS_API_URL || "http://127.0.0.1:8080").replace(/\/+$/, "");
+const NOBIS_TLS_CERT_PATH = (process.env.NOBIS_TLS_CERT_PATH || "").trim();
+const WEBHOOK_SECRET = (process.env.MATTER_WEBHOOK_SECRET || "").trim();
 const MATTER_PORT = parseInt(process.env.MATTER_PORT || "5540", 10);
 const CONTROL_PORT = parseInt(process.env.MATTER_CONTROL_PORT || "5549", 10);
 const STORAGE_DIR = process.env.MATTER_STORAGE_DIR || path.resolve(process.cwd(), "../../data/matter_storage");
 const DEVICE_NAME = process.env.MATTER_DEVICE_NAME || "Poêle Nobis A10";
 const PASSCODE = parseInt(process.env.MATTER_PASSCODE || "20202021", 10);
 const DISCRIMINATOR = parseInt(process.env.MATTER_DISCRIMINATOR || "3840", 10);
+const MAX_SYNC_BODY_BYTES = 64 * 1024;
+
+let pinnedCertFingerprint = null;
+if (NOBIS_TLS_CERT_PATH && fs.existsSync(NOBIS_TLS_CERT_PATH)) {
+  try {
+    const pem = fs.readFileSync(NOBIS_TLS_CERT_PATH, "utf8");
+    pinnedCertFingerprint = new X509Certificate(pem).fingerprint256;
+  } catch (err) {
+    console.error("[MatterBridge] Impossible de charger le certificat TLS local:", err?.message || err);
+  }
+}
 
 fs.mkdirSync(STORAGE_DIR, { recursive: true });
 
@@ -95,15 +110,100 @@ class QuietIdentifyServer extends IdentifyServer {
 const HeatingThermostatDevice = ThermostatDevice.with(NobisThermostatServer, QuietIdentifyServer);
 
 // =============================================================================
-// COMMUNICATION AVEC LE BACKEND PYTHON FASTAPI (NOBIS_APP)
+// COMMUNICATION AVEC LE BACKEND PYTHON FASTAPI (NOBIS_APP — HTTP OU HTTPS PINNÉ)
 // =============================================================================
+/**
+ * Exécute une requête HTTP ou HTTPS vers le backend FastAPI Nobis_App avec support
+ * du certificate pinning SHA-256 lorsque le serveur tourne en TLS auto-signé local.
+ * @param {string} apiPath Chemin API relatif (ex: "/api/matter/webhook").
+ * @param {{method?: string, headers?: Record<string, string>, body?: any, timeoutMs?: number}} [opts]
+ * @returns {Promise<{status: number, ok: boolean, text: string}>}
+ */
+function nobisApiRequest(apiPath, { method = "GET", headers = {}, body = null, timeoutMs = 5000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const targetUrl = new URL(`${NOBIS_API_URL}${apiPath}`);
+    const isHttps = targetUrl.protocol === "https:";
+    const transport = isHttps ? https : http;
+    const bodyStr = body !== null && body !== undefined ? JSON.stringify(body) : null;
+    const reqHeaders = { ...headers };
+    if (bodyStr !== null) {
+      reqHeaders["Content-Type"] = "application/json";
+      reqHeaders["Content-Length"] = Buffer.byteLength(bodyStr, "utf8");
+    }
+
+    const reqOpts = {
+      protocol: targetUrl.protocol,
+      hostname: targetUrl.hostname,
+      port: targetUrl.port || (isHttps ? 443 : 80),
+      path: `${targetUrl.pathname}${targetUrl.search}`,
+      method,
+      headers: reqHeaders,
+      timeout: timeoutMs,
+    };
+
+    const usePinning = isHttps && Boolean(pinnedCertFingerprint);
+    if (usePinning) {
+      // Vérification cryptographique stricte par empreinte SHA-256 avant transmission des données
+      reqOpts.rejectUnauthorized = false;
+    }
+
+    let settled = false;
+    const finish = (err, val) => {
+      if (settled) return;
+      settled = true;
+      if (err) reject(err);
+      else resolve(val);
+    };
+
+    const req = transport.request(reqOpts, (res) => {
+      let raw = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        raw += chunk;
+      });
+      res.on("end", () => {
+        finish(null, { status: res.statusCode || 0, ok: (res.statusCode || 0) >= 200 && (res.statusCode || 0) < 300, text: raw });
+      });
+    });
+
+    req.on("timeout", () => {
+      req.destroy(new Error(`Timeout API Nobis (${timeoutMs}ms)`));
+    });
+    req.on("error", (err) => finish(err));
+
+    if (usePinning) {
+      req.on("socket", (socket) => {
+        const verifyAndSend = () => {
+          try {
+            const peer = socket.getPeerCertificate(false);
+            if (!peer || peer.fingerprint256 !== pinnedCertFingerprint) {
+              req.destroy(new Error("Empreinte TLS locale invalide (certificate pinning)"));
+              return;
+            }
+            if (bodyStr !== null) req.write(bodyStr);
+            req.end();
+          } catch (err) {
+            req.destroy(err);
+          }
+        };
+        if (socket.authorized !== undefined && socket.getPeerCertificate && socket.getPeerCertificate(false)?.fingerprint256) {
+          verifyAndSend();
+        } else {
+          socket.once("secureConnect", verifyAndSend);
+        }
+      });
+    } else {
+      if (bodyStr !== null) req.write(bodyStr);
+      req.end();
+    }
+  });
+}
+
 async function fetchInitialStoveState() {
   try {
-    const res = await fetch(`${NOBIS_API_URL}/api/latest`, {
-      signal: AbortSignal.timeout(3500),
-    });
+    const res = await nobisApiRequest("/api/latest", { method: "GET", timeoutMs: 3500 });
     if (!res.ok) return;
-    const data = await res.json();
+    const data = JSON.parse(res.text || "{}");
     const latest = data?.latest || {};
     if (latest.temp_ambient !== undefined) {
       liveState.localTemperatureC = clampAmbientC(latest.temp_ambient);
@@ -122,15 +222,15 @@ async function fetchInitialStoveState() {
 
 async function notifyNobisBackend(payload) {
   try {
-    const res = await fetch(`${NOBIS_API_URL}/api/matter/webhook`, {
+    const headers = WEBHOOK_SECRET ? { "X-Matter-Secret": WEBHOOK_SECRET } : {};
+    const res = await nobisApiRequest("/api/matter/webhook", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(10000),
+      headers,
+      body: payload,
+      timeoutMs: 10000,
     });
     if (!res.ok) {
-      const txt = await res.text();
-      console.error("[MatterBridge] Erreur webhook Nobis:", res.status, txt);
+      console.error("[MatterBridge] Erreur webhook Nobis:", res.status, res.text);
     }
   } catch (err) {
     console.error("[MatterBridge] Échec appel webhook Nobis:", err?.message || err);
@@ -357,7 +457,14 @@ const controlServer = http.createServer(async (req, res) => {
 
     if (req.method === "POST" && req.url === "/sync") {
       let rawBody = "";
+      let totalBytes = 0;
       for await (const chunk of req) {
+        totalBytes += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(String(chunk));
+        if (totalBytes > MAX_SYNC_BODY_BYTES) {
+          res.writeHead(413);
+          res.end(JSON.stringify({ error: "Payload trop volumineux" }));
+          return;
+        }
         rawBody += chunk;
       }
       const data = rawBody ? JSON.parse(rawBody) : {};

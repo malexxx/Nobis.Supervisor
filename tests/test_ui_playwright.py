@@ -1,10 +1,70 @@
 """Tests End-to-End (E2E) de l'interface utilisateur web et mobile (PWA) via Playwright."""
+import mimetypes
 import os
-import pytest
-from playwright.sync_api import Page, sync_playwright
 
-INDEX_HTML_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static", "index.html"))
-INDEX_URL = f"file:///{INDEX_HTML_PATH.replace(os.sep, '/')}"
+from playwright.sync_api import Page, sync_playwright
+import pytest
+
+from config import STATIC_DIR
+from routers.dashboard import render_spa_html
+
+APP_ORIGIN = "http://nobis.local"
+
+
+def _attach_app_routes(page: Page) -> None:
+    """Sert la SPA assemblée, les fichiers /static/* depuis le disque et mocke les endpoints /api/*."""
+    assembled_html = render_spa_html()
+
+    def handle_route(route):
+        url = route.request.url
+        if url.startswith(f"{APP_ORIGIN}/api/"):
+            if "/api/latest" in url:
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body='''{
+                        "latest": {
+                            "status_code": 5,
+                            "status_label": "TRAVAIL (Normal)",
+                            "temp_ambient": 20.5,
+                            "temp_amb_setpoint": 21.0,
+                            "temp_fumes": 165.0,
+                            "pellet_hopper_pct": 82.0,
+                            "pellet_daily_kg": 4.5
+                        },
+                        "comm_status": {"connected": true, "comm_mode": "simulation"}
+                    }''',
+                )
+            elif "/api/silence/status" in url:
+                route.fulfill(status=200, content_type="application/json", body='{"active": false}')
+            elif "/api/dashboard" in url:
+                route.fulfill(status=200, content_type="application/json", body='{"series": [], "latest": {"status_code": 5}}')
+            elif "/api/events" in url:
+                route.abort()
+            else:
+                route.fulfill(status=200, content_type="application/json", body='{"status": "ok"}')
+            return
+
+        if url.startswith(f"{APP_ORIGIN}/static/"):
+            rel_path = url.split("/static/", 1)[1].split("?", 1)[0]
+            disk_path = os.path.realpath(os.path.join(STATIC_DIR, rel_path))
+            static_root = os.path.realpath(STATIC_DIR)
+            if disk_path.startswith(static_root + os.sep) and os.path.isfile(disk_path):
+                ctype, _ = mimetypes.guess_type(disk_path)
+                with open(disk_path, "rb") as fh:
+                    route.fulfill(status=200, content_type=ctype or "application/octet-stream", body=fh.read())
+                return
+            route.fulfill(status=404, body="Not Found")
+            return
+
+        if url == APP_ORIGIN or url == f"{APP_ORIGIN}/":
+            route.fulfill(status=200, content_type="text/html; charset=utf-8", body=assembled_html)
+            return
+
+        # Ne pas dépendre de CDN externes hors-ligne dans les tests E2E
+        route.abort()
+
+    page.route("**/*", handle_route)
 
 
 @pytest.fixture(scope="module")
@@ -23,64 +83,47 @@ def browser_instance():
 
 @pytest.fixture
 def page(browser_instance):
-    """Crée une nouvelle page / onglet isolé avec intercepteur d'API mockées."""
+    """Crée une nouvelle page / onglet isolé avec intercepteur SPA/Static/API."""
     context = browser_instance.new_context(viewport={"width": 1280, "height": 800})
     page = context.new_page()
-
-    # Mock préventif des appels API pour des tests E2E déterministes et instantanés
-    def handle_route(route):
-        url = route.request.url
-        if "/api/latest" in url:
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body='''{
-                    "status_code": 5,
-                    "status_label": "TRAVAIL (Normal)",
-                    "temp_ambient": 20.5,
-                    "temp_amb_setpoint": 21.0,
-                    "temp_fumes": 165.0,
-                    "pellet_hopper_pct": 82.0,
-                    "pellet_daily_kg": 4.5,
-                    "comm_status": {"connected": true, "comm_mode": "simulation"}
-                }''',
-            )
-        elif "/api/silence/status" in url:
-            route.fulfill(status=200, content_type="application/json", body='{"active": false}')
-        elif "/api/dashboard" in url:
-            route.fulfill(status=200, content_type="application/json", body='{"series": []}')
-        else:
-            route.fulfill(status=200, content_type="application/json", body='{"status": "ok"}')
-
-    page.route("**/api/**", handle_route)
+    _attach_app_routes(page)
     yield page
     context.close()
 
 
 def test_ui_page_title_and_main_structure(page: Page):
-    """Vérifie le chargement de la page d'accueil, son titre et le conteneur principal."""
-    page.goto(INDEX_URL)
+    """Vérifie le chargement 100 % hors-ligne (0 CDN externe), Tailwind statique, Chart.js local et 0 erreur JS."""
+    page_errors = []
+    external_urls = []
+    page.on("pageerror", lambda err: page_errors.append(str(err)))
+    page.on("request", lambda req: external_urls.append(req.url) if not req.url.startswith(APP_ORIGIN) and not req.url.startswith("data:") else None)
+    page.goto(f"{APP_ORIGIN}/", wait_until="load")
     assert "Nobis.Supervisor" in page.title()
 
-    # Le conteneur principal et le premier onglet actif (Cockpit / Control) doivent être présents
     main = page.locator("main")
     assert main.is_visible()
     tab_control = page.locator("#tab-control")
     assert tab_control.is_visible()
 
+    # Aucune requête vers des CDN tiers (Tailwind / jsDelivr) — PWA 100 % autonome
+    assert external_urls == [], f"Requêtes externes détectées : {external_urls}"
+    # Chart.js local chargé et styles Tailwind pré-compilés effectivement appliqués
+    assert page.evaluate("() => typeof window.Chart === 'function'")
+    assert page.evaluate("() => getComputedStyle(document.querySelector('#tab-pellets')).display") == "none"
+    assert page.evaluate("() => getComputedStyle(document.querySelector('header')).display") == "flex"
+    assert page_errors == [], f"Erreurs JS au chargement modulaire : {page_errors}"
+
 
 def test_ui_tab_navigation(page: Page):
     """Vérifie le basculement fonctionnel entre les différents onglets de l'application."""
-    page.goto(INDEX_URL)
+    page.goto(f"{APP_ORIGIN}/", wait_until="domcontentloaded")
 
-    # Vérification de l'existence des sections d'onglets
     assert page.locator("#tab-control").count() > 0
     assert page.locator("#tab-pellets").count() > 0
     assert page.locator("#tab-chrono").count() > 0
     assert page.locator("#tab-dashboard").count() > 0
     assert page.locator("#tab-installer").count() > 0
 
-    # Clic sur un bouton d'onglet (ex: Pellets / Granulés)
     pellet_btn = page.locator("button[data-tab='tab-pellets']").first
     if pellet_btn.is_visible():
         pellet_btn.click()
@@ -89,7 +132,7 @@ def test_ui_tab_navigation(page: Page):
 
 def test_ui_modals_presence(page: Page):
     """Vérifie la présence des fenêtres modales (Silence, Matter, Actions)."""
-    page.goto(INDEX_URL)
+    page.goto(f"{APP_ORIGIN}/", wait_until="domcontentloaded")
     assert page.locator("#silence-modal").count() > 0
     assert page.locator("#matter-modal").count() > 0
     assert page.locator("#action-modal").count() > 0
@@ -99,9 +142,9 @@ def test_ui_mobile_viewport_and_bottom_nav(browser_instance):
     """Vérifie la disposition responsive sur smartphone (iPhone/Pixel 375x667)."""
     context = browser_instance.new_context(viewport={"width": 375, "height": 667})
     page = context.new_page()
-    page.goto(INDEX_URL)
+    _attach_app_routes(page)
+    page.goto(f"{APP_ORIGIN}/", wait_until="domcontentloaded")
 
-    # La barre de navigation inférieure mobile (fixed bottom) doit être visible
     bottom_nav = page.locator("nav.fixed.bottom-0")
     assert bottom_nav.is_visible()
     context.close()

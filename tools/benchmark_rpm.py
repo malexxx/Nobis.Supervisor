@@ -2,36 +2,35 @@
 Script d'évaluation du débit maximal de requêtes par minute (RPM) sans erreur.
 - Démarrage à 1 requête par minute.
 - Paliers de 5 minutes avec augmentation progressive.
-- Gestion de l'authentification (Agua IOT Cloud / API générique) avec prompt interactif sécurisé.
+- Réutilise directement AguaCloudClient pour l'authentification Cloud Agua IOT.
 """
 
 import argparse
 import asyncio
+from dataclasses import dataclass, field
+from datetime import datetime
 import getpass
 import json
+import logging
+import os
 import sys
 import time
 import uuid
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+
 import httpx
 
-# Tentative d'import de la base de données locale si disponible
+logger = logging.getLogger("nobis.benchmark")
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+from clients import AguaCloudClient  # noqa: E402
+
 try:
     from database import get_settings_dict
 except ImportError:
     get_settings_dict = None
-
-
-# Constantes Agua IOT Cloud
-AGUA_BASE_URL = "https://nobis.agua-iot.com"
-AGUA_CUSTOMER_CODE = "700700"
-AGUA_BRAND_ID = "1"
-AGUA_LOGIN_PATH = "/userLogin"
-AGUA_SIGNUP_PATH = "/appSignup"
-AGUA_BUFFER_PATH = "/deviceGetBufferReading"
-AGUA_DEVICE_LIST_PATH = "/deviceList"
 
 
 @dataclass
@@ -41,8 +40,8 @@ class StepResult:
     total_sent: int
     success_count: int
     error_count: int
-    latencies: List[float] = field(default_factory=list)
-    errors_by_type: Dict[str, int] = field(default_factory=dict)
+    latencies: list[float] = field(default_factory=list)
+    errors_by_type: dict[str, int] = field(default_factory=dict)
 
     @property
     def avg_latency_ms(self) -> float:
@@ -58,97 +57,26 @@ class StepResult:
 
 
 async def authenticate_agua_cloud(
-    client: httpx.AsyncClient,
     email: str,
     password: str,
-    app_uuid: Optional[str] = None
-) -> Tuple[str, str, str]:
-    """Authentifie l'utilisateur sur le cloud Agua IOT et retourne (token_jwt, id_device, id_product)."""
-    app_uuid = app_uuid or str(uuid.uuid4())
-    headers_base = {
-        "Accept": "application/json, text/javascript, */*; q=0.01",
-        "Content-Type": "application/json",
-        "Origin": "file://",
-        "User-Agent": "Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/88.0.4324.181 Mobile Safari/537.36",
-        "id_brand": AGUA_BRAND_ID,
-        "customer_code": AGUA_CUSTOMER_CODE,
-        "local": "true",
-    }
-
-    print("🔐 Enregistrement de l'application auprès d'Agua IOT (appSignup)...")
-    try:
-        await client.post(
-            f"{AGUA_BASE_URL}{AGUA_SIGNUP_PATH}",
-            headers=headers_base,
-            json={
-                "phone_type": "Android",
-                "phone_id": app_uuid,
-                "phone_version": "1.0",
-                "language": "fr",
-                "id_app": app_uuid,
-                "push_notification_token": app_uuid,
-                "push_notification_active": False,
-            },
-            timeout=20.0,
-        )
-    except Exception:
-        pass  # Si déjà enregistré, on continue vers le login
-
-    print("🔑 Authentification utilisateur (userLogin)...")
-    login_headers = dict(headers_base)
-    login_headers["Authorization"] = app_uuid
-    res = await client.post(
-        f"{AGUA_BASE_URL}{AGUA_LOGIN_PATH}",
-        headers=login_headers,
-        json={"email": email, "password": password},
-        timeout=25.0,
+    app_uuid: str | None = None,
+) -> tuple[AguaCloudClient, str, str]:
+    """Authentifie l'utilisateur via AguaCloudClient et retourne (client, id_device, id_product)."""
+    agua = AguaCloudClient()
+    info = await agua.login_and_discover(
+        email=email,
+        password=password,
+        app_uuid=app_uuid or str(uuid.uuid4()),
+        persist_discovery=False,
     )
-
-    if res.status_code >= 400:
-        raise RuntimeError(f"Échec de connexion Agua IOT (HTTP {res.status_code}) : {res.text}")
-
-    data = res.json()
-    token_jwt = data.get("token")
-    if not token_jwt:
-        raise RuntimeError(f"Token absent de la réponse : {data}")
-
-    print("✅ Authentification réussie ! Récupération des identifiants poêle (deviceList)...")
-    api_headers = {
-        "Accept": "application/json, text/javascript, */*; q=0.01",
-        "Content-Type": "application/json",
-        "id_brand": AGUA_BRAND_ID,
-        "customer_code": AGUA_CUSTOMER_CODE,
-        "local": "false",
-        "Authorization": str(token_jwt),
-    }
-
-    r_dev = await client.post(
-        f"{AGUA_BASE_URL}{AGUA_DEVICE_LIST_PATH}",
-        headers=api_headers,
-        timeout=20.0,
-    )
-
-    id_device = ""
-    id_product = ""
-    if r_dev.status_code == 200:
-        try:
-            dev_json = r_dev.json()
-            devices = dev_json.get("device", []) if isinstance(dev_json, dict) else []
-            if devices and isinstance(devices[0], dict):
-                id_device = str(devices[0].get("id_device") or "")
-                id_product = str(devices[0].get("id_product") or "")
-        except Exception:
-            pass
-
-    return token_jwt, id_device, id_product
+    return agua, str(info.get("id_device") or ""), str(info.get("id_product") or "")
 
 
-def obtain_credentials() -> Tuple[str, str]:
+def obtain_credentials() -> tuple[str, str]:
     """Récupère l'email et le mot de passe depuis la DB locale ou via prompt interactif sécurisé."""
     email = ""
     pwd = ""
 
-    # 1. Vérifier si des identifiants existent dans la base locale
     if get_settings_dict:
         try:
             settings = get_settings_dict()
@@ -158,10 +86,9 @@ def obtain_credentials() -> Tuple[str, str]:
                 choice = input(f"👉 Identifiants trouvés en base locale ({db_email}). Les utiliser ? [O/n] : ").strip().lower()
                 if choice in ("", "o", "oui", "y", "yes"):
                     return db_email, db_pwd
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Lecture identifiants DB locale ignorée : %s", exc)
 
-    # 2. Prompt interactif si nécessaire
     print("\n--- Saisie des identifiants Agua IOT Cloud ---")
     while not email:
         email = input("Email Agua IOT : ").strip()
@@ -176,8 +103,8 @@ async def send_single_request(
     method: str,
     url: str,
     headers: dict,
-    payload: Optional[str],
-) -> Tuple[bool, float, Optional[str]]:
+    payload: str | None,
+) -> tuple[bool, float, str | None]:
     """Envoie une requête et mesure le résultat et la latence."""
     t0 = time.perf_counter()
     try:
@@ -201,11 +128,10 @@ async def run_stage(
     method: str,
     url: str,
     headers: dict,
-    payload: Optional[str],
+    payload: str | None,
     stage_num: int,
 ) -> StepResult:
     """Exécute un palier à un rythme régulier (target_rpm) pendant duration_s."""
-    _target_rps = target_rpm / 60.0
     interval_s = 60.0 / target_rpm if target_rpm > 0 else 60.0
     total_expected = max(1, int(round((duration_s / 60.0) * target_rpm)))
 
@@ -215,8 +141,8 @@ async def run_stage(
 
     success_count = 0
     error_count = 0
-    latencies: List[float] = []
-    errors_by_type: Dict[str, int] = {}
+    latencies: list[float] = []
+    errors_by_type: dict[str, int] = {}
 
     start_stage = time.perf_counter()
 
@@ -237,13 +163,11 @@ async def run_stage(
             print(f"\n⚠️  ERREUR DÉTECTÉE au palier {target_rpm:.1f} req/min ! Arrêt immédiat pour protéger le service.")
             break
 
-        # Attendre le prochain intervalle si ce n'est pas la dernière requête
         if req_idx < total_expected:
             elapsed_since_start = time.perf_counter() - start_stage
             target_time = req_idx * interval_s
             sleep_time = target_time - elapsed_since_start
             if sleep_time > 0:
-                # Affichage discret d'attente
                 await asyncio.sleep(sleep_time)
 
     return StepResult(
@@ -257,7 +181,7 @@ async def run_stage(
     )
 
 
-async def main_benchmark():
+def _parse_benchmark_args():
     parser = argparse.ArgumentParser(
         description="Évalue le nombre maximum de requêtes par minute (RPM) sans erreur."
     )
@@ -269,52 +193,73 @@ async def main_benchmark():
     parser.add_argument("--max-rpm", type=float, default=60.0, help="Plafond RPM max à tester (défaut: 60)")
     parser.add_argument("--timeout", type=float, default=25.0, help="Timeout par requête en secondes (défaut: 25s)")
     parser.add_argument("--local", action="store_true", help="Tester le serveur Nobis local (http://localhost:8000/api/latest) sans login cloud")
+    return parser.parse_args()
 
-    args = parser.parse_args()
 
+async def _prepare_benchmark_target(args) -> tuple[str, str, dict[str, str], str | None]:
+    is_cloud = not args.local and (args.url is None or "agua-iot" in args.url)
+    if not is_cloud:
+        target_url = args.url or "http://localhost:8000/api/latest"
+        print(f"🎯 Cible locale/personnalisée configurée : [GET] {target_url}")
+        return target_url, "GET", {}, None
+
+    target_url = args.url or f"{AguaCloudClient.BASE_URL}{AguaCloudClient.API_PATH_DEVICE_BUFFER_READING}"
+    email, password = obtain_credentials()
+    try:
+        agua, id_device, id_product = await authenticate_agua_cloud(email, password)
+    except Exception as e:
+        print(f"\n❌ Erreur d'authentification : {e}")
+        sys.exit(1)
+
+    if not id_device and get_settings_dict:
+        s = get_settings_dict()
+        id_device = s.get("agua_id_device", "")
+        id_product = s.get("agua_id_product", "")
+
+    headers = agua._headers_for_api("false")
+    payload = json.dumps({"id_device": id_device, "id_product": id_product, "BufferId": 1})
+    print(f"🎯 Cible Cloud configurée : {target_url} (Device: {id_device})")
+    return target_url, "POST", headers, payload
+
+
+def _print_benchmark_summary(
+    last_success: StepResult | None,
+    failure: StepResult | None,
+    max_rpm: float,
+) -> None:
+    print("\n" + "=" * 75)
+    print("📊 BILAN DU TEST DE CHARGE")
+    print("=" * 75)
+    if last_success:
+        print("🏆 Débit MAXIMUM validé sans AUCUNE erreur :")
+        print(f"   ➤ {last_success.target_rpm:.1f} requêtes / minute")
+        interval = 60.0 / last_success.target_rpm
+        print(f"   ➤ Soit 1 requête toutes les {interval:.1f} secondes")
+        print(f"   ➤ Latence moyenne observée : {last_success.avg_latency_ms:.0f} ms")
+        print(f"   ➤ Latence P95 : {last_success.p95_latency_ms:.0f} ms")
+    else:
+        print("❌ Le tout premier palier a rencontré des erreurs.")
+
+    if failure:
+        print(f"\n⚠️  Plafond atteint : Erreurs apparues à {failure.target_rpm:.1f} req/min :")
+        for err, cnt in failure.errors_by_type.items():
+            print(f"   - {err} ({cnt} fois)")
+    else:
+        print(f"\n🎉 Plafond testé atteint ({max_rpm:.1f} req/min) sans aucune erreur.")
+    print("=" * 75 + "\n")
+
+
+async def main_benchmark():
+    args = _parse_benchmark_args()
     step_duration_s = args.step_minutes * 60.0
-    headers = {}
-    payload = None
-    method = "POST"
 
     print("\n" + "=" * 75)
     print("🚀 BENCHMARK DU TAUX DE REQUÊTES MAXIMAL SANS ERREUR")
     print(f"🕒 Démarrage : {args.start_rpm} req/min | Paliers : toutes les {args.step_minutes} minutes")
     print("=" * 75)
 
-    is_cloud = not args.local and (args.url is None or "agua-iot" in args.url)
-
     async with httpx.AsyncClient(timeout=args.timeout, follow_redirects=True) as client:
-        # Configuration pour Agua Cloud si nécessaire
-        if is_cloud:
-            target_url = args.url or f"{AGUA_BASE_URL}{AGUA_BUFFER_PATH}"
-            email, password = obtain_credentials()
-            try:
-                jwt_token, id_device, id_product = await authenticate_agua_cloud(client, email, password)
-            except Exception as e:
-                print(f"\n❌ Erreur d'authentification : {e}")
-                sys.exit(1)
-
-            # Si id_device/id_product non récupérés, utiliser ceux par défaut en base
-            if not id_device and get_settings_dict:
-                s = get_settings_dict()
-                id_device = s.get("agua_id_device", "597775E6-C29D-4CB0-ABF8-36F6C8E704ED")
-                id_product = s.get("agua_id_product", "CCC78CA4-E701-4976-A981-1F8F61C9D4F7")
-
-            headers = {
-                "Accept": "application/json, text/javascript, */*; q=0.01",
-                "Content-Type": "application/json",
-                "id_brand": AGUA_BRAND_ID,
-                "customer_code": AGUA_CUSTOMER_CODE,
-                "local": "false",
-                "Authorization": str(jwt_token),
-            }
-            payload = json.dumps({"id_device": id_device, "id_product": id_product, "BufferId": 1})
-            print(f"🎯 Cible Cloud configurée : {target_url} (Device: {id_device})")
-        else:
-            target_url = args.url or "http://localhost:8000/api/latest"
-            method = "GET"
-            print(f"🎯 Cible locale/personnalisée configurée : [{method}] {target_url}")
+        target_url, method, headers, payload = await _prepare_benchmark_target(args)
 
         print("\nTest de connectivité initial...")
         ok, lat, err = await send_single_request(client, method, target_url, headers, payload)
@@ -323,11 +268,10 @@ async def main_benchmark():
             return
         print(f"✅ Connectivité confirmée (latence : {lat * 1000:.0f} ms).\n")
 
-        # Boucle d'escalade des paliers
         current_rpm = args.start_rpm
         stage_num = 1
-        last_success: Optional[StepResult] = None
-        failure: Optional[StepResult] = None
+        last_success: StepResult | None = None
+        failure: StepResult | None = None
 
         while current_rpm <= args.max_rpm:
             res = await run_stage(
@@ -340,43 +284,15 @@ async def main_benchmark():
                 payload=payload,
                 stage_num=stage_num,
             )
-
             if res.error_count > 0:
                 failure = res
                 break
-
             last_success = res
             print(f"  ✨ Palier {stage_num} réussi (100% succès, latence moy: {res.avg_latency_ms:.0f}ms)")
-
-            # Calcul du palier suivant
-            if args.multiplier:
-                current_rpm = round(current_rpm * args.multiplier, 1)
-            else:
-                current_rpm = round(current_rpm + args.increment_rpm, 1)
-
+            current_rpm = round(current_rpm * args.multiplier, 1) if args.multiplier else round(current_rpm + args.increment_rpm, 1)
             stage_num += 1
 
-        # Rapport final
-        print("\n" + "=" * 75)
-        print("📊 BILAN DU TEST DE CHARGE")
-        print("=" * 75)
-        if last_success:
-            print("🏆 Débit MAXIMUM validé sans AUCUNE erreur :")
-            print(f"   ➤ {last_success.target_rpm:.1f} requêtes / minute")
-            interval = 60.0 / last_success.target_rpm
-            print(f"   ➤ Soit 1 requête toutes les {interval:.1f} secondes")
-            print(f"   ➤ Latence moyenne observée : {last_success.avg_latency_ms:.0f} ms")
-            print(f"   ➤ Latence P95 : {last_success.p95_latency_ms:.0f} ms")
-        else:
-            print("❌ Le tout premier palier a rencontré des erreurs.")
-
-        if failure:
-            print(f"\n⚠️  Plafond atteint : Erreurs apparues à {failure.target_rpm:.1f} req/min :")
-            for err, cnt in failure.errors_by_type.items():
-                print(f"   - {err} ({cnt} fois)")
-        else:
-            print(f"\n🎉 Plafond testé atteint ({args.max_rpm:.1f} req/min) sans aucune erreur.")
-        print("=" * 75 + "\n")
+        _print_benchmark_summary(last_success, failure, args.max_rpm)
 
 
 if __name__ == "__main__":

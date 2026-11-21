@@ -116,11 +116,9 @@ class TestStoveCommandsAndConfigurations(unittest.TestCase):
             regs = self.client.get("/api/latest").json()["registers"]
             self.assertEqual(regs["fun_pwf_set"]["current_val"], pwf_val)
 
-        # 4. Silence
-        r_sil = self.client.post("/api/command", json={"reg_key": "set_silece_set", "value": 1.0, "offset": 33250})
-        self.assertEqual(r_sil.status_code, 200)
+        # 4. Registre #33250 (set_silece_set) retiré du catalogue (inactif sur Nobis A10, #107 bit 2048 = 0)
         regs = self.client.get("/api/latest").json()["registers"]
-        self.assertEqual(regs["set_silece_set"]["current_val"], 1.0)
+        self.assertNotIn("set_silece_set", regs)
 
     def test_05_stove_on_off(self):
         """Test ordre Allumage (85) et Extinction (170) et mapping (6->85, 9->170)."""
@@ -229,12 +227,15 @@ class TestStoveCommandsAndConfigurations(unittest.TestCase):
 
     def test_10_pellet_batch_raz(self):
         """Test RAZ d'un lot de granulés."""
+        from tests.helpers import get_installer_auth_headers
+
+        headers = get_installer_auth_headers(self.client)
         # Modifier d'abord les trims
         self.client.post("/api/command", json={"reg_key": "trim_pellet_pct", "value": 2.0, "offset": 70})
         self.client.post("/api/command", json={"reg_key": "trim_exhaust_pct", "value": -2.0, "offset": 71})
 
         # Exécuter RAZ
-        resp = self.client.post("/api/pellet-batch/raz", json={"pellet_brand": "Total Pellets Premium"})
+        resp = self.client.post("/api/pellet-batch/raz", json={"pellet_brand": "Total Pellets Premium"}, headers=headers)
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["status"], "ok")
@@ -265,23 +266,30 @@ class TestStoveCommandsAndConfigurations(unittest.TestCase):
         self.assertEqual(r_act.status_code, 200)
         self.assertTrue(r_act.json()["silence_mode"]["active"])
 
-        # Consigne passée en hors gel (7°C)
-        regs = self.client.get("/api/latest").json()["registers"]
+        # Consigne passée en hors gel (7°C) et état Silence logiciel reflété en télémétrie
+        latest_act = self.client.get("/api/latest").json()
+        regs = latest_act["registers"]
         self.assertEqual(regs["temp_amb_setpoint"]["current_val"], 7.0)
-        self.assertEqual(regs["set_silece_set"]["current_val"], 1.0)
+        self.assertNotIn("set_silece_set", regs)
+        self.assertEqual(latest_act["latest"]["set_silece_set"], 1)
 
         # Désactiver Silence
         r_deact = self.client.post("/api/silence/deactivate")
         self.assertEqual(r_deact.status_code, 200)
         self.assertFalse(r_deact.json()["silence_mode"]["active"])
 
-        # Consigne restaurée à 21.0
-        regs = self.client.get("/api/latest").json()["registers"]
+        # Consigne restaurée à 21.0 et état Silence logiciel remis à 0
+        latest_deact = self.client.get("/api/latest").json()
+        regs = latest_deact["registers"]
         self.assertEqual(regs["temp_amb_setpoint"]["current_val"], 21.0)
-        self.assertEqual(regs["set_silece_set"]["current_val"], 0.0)
+        self.assertNotIn("set_silece_set", regs)
+        self.assertEqual(latest_deact["latest"]["set_silece_set"], 0)
 
     def test_13_rollback(self):
         """Test annulation (rollback) d'une consigne."""
+        from tests.helpers import get_installer_auth_headers
+
+        headers = get_installer_auth_headers(self.client)
         self.client.post("/api/command", json={"reg_key": "temp_amb_setpoint", "value": 25.0, "offset": 33122})
 
         conn = get_db("simulation")
@@ -295,7 +303,7 @@ class TestStoveCommandsAndConfigurations(unittest.TestCase):
         finally:
             conn.close()
 
-        r_rb = self.client.post(f"/api/rollback/{audit_id}")
+        r_rb = self.client.post(f"/api/rollback/{audit_id}", headers=headers)
         self.assertEqual(r_rb.status_code, 200)
 
         regs = self.client.get("/api/latest").json()["registers"]
@@ -303,15 +311,18 @@ class TestStoveCommandsAndConfigurations(unittest.TestCase):
 
     def test_14_matter_webhook(self):
         """Test webhook passerelle Matter (set_power ON/OFF, set_temperature)."""
-        r_on = self.client.post("/api/matter/webhook", json={"action": "set_power", "state": "ON"})
+        from tests.helpers import get_matter_webhook_headers
+
+        m_headers = get_matter_webhook_headers()
+        r_on = self.client.post("/api/matter/webhook", json={"action": "set_power", "state": "ON"}, headers=m_headers)
         self.assertEqual(r_on.status_code, 200)
         self.assertEqual(r_on.json()["status"], "ok")
 
-        r_off = self.client.post("/api/matter/webhook", json={"action": "set_power", "state": "OFF"})
+        r_off = self.client.post("/api/matter/webhook", json={"action": "set_power", "state": "OFF"}, headers=m_headers)
         self.assertEqual(r_off.status_code, 200)
         self.assertEqual(r_off.json()["status"], "ok")
 
-        r_temp = self.client.post("/api/matter/webhook", json={"action": "set_temperature", "temperature": 20.0})
+        r_temp = self.client.post("/api/matter/webhook", json={"action": "set_temperature", "temperature": 20.0}, headers=m_headers)
         self.assertEqual(r_temp.status_code, 200)
         regs = self.client.get("/api/latest").json()["registers"]
         self.assertEqual(regs["temp_amb_setpoint"]["current_val"], 20.0)

@@ -5,7 +5,8 @@ avec désactivation automatique du Boost (POWERFUL / P8) et suivi des phases.
 """
 
 from dataclasses import asdict
-from typing import Any, Dict, Callable
+from typing import Any
+from collections.abc import Callable
 from .nobis_calibration import (
     NobisA10CalibrationEngine,
     CalibrationMode,
@@ -36,7 +37,7 @@ class NobisCalibrationWizard:
 
     def step1_configure_and_preflight(
         self, mode_str: str, current_sample: TelemetrySample
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Étape 1 : Sélectionne le mode et désactive automatiquement le Boost POWERFUL (P8).
         """
@@ -70,7 +71,7 @@ class NobisCalibrationWizard:
 
     def step2_verify_empty_hopper_al03(
         self, current_sample: TelemetrySample, auto_reset_alarm: bool = True
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Étape 2 : Vérifie l'état initial AL-03 (Cuve 100% vide) et réarme l'alarme.
         """
@@ -92,7 +93,7 @@ class NobisCalibrationWizard:
         current_sample: TelemetrySample,
         weighed_bag_kg: float,
         aspirated_priming_grams: float = 0.0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Étape 3 : Enregistre le poids du sac étalon et guide l'amorçage CRG. VIS S. FIN.
         """
@@ -110,7 +111,7 @@ class NobisCalibrationWizard:
             "message": msg,
         }
 
-    def step4_poll_status(self, current_sample: TelemetrySample) -> Dict[str, Any]:
+    def step4_poll_status(self, current_sample: TelemetrySample) -> dict[str, Any]:
         """
         Étape 4 : Scrutation télémétrique temps réel avec diagnostic de filtrage des phases.
         """
@@ -140,7 +141,7 @@ class NobisCalibrationWizard:
             "waiting_for_al03": state == CalibrationState.RUNNING_ACQUISITION,
         }
 
-    def step5_apply_recommended_settings(self) -> Dict[str, Any]:
+    def step5_apply_recommended_settings(self) -> dict[str, Any]:
         """
         Étape 5 : Applique en 1 clic les Offsets 70 et 71 recommandés à la clôture AL-03.
         """

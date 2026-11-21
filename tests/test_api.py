@@ -1,34 +1,10 @@
+"""Tests API cœur : healthcheck, télémétrie, dashboard, pilotage poêle, calibration & UI mobile."""
 import re
-import unittest
-from fastapi.testclient import TestClient
-from main import app
+
+from tests.helpers import SimulationApiTestCase, get_installer_auth_headers
 
 
-class TestAPIEndpoints(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        from database import get_sys_db
-        sconn = get_sys_db()
-        try:
-            row = sconn.execute("SELECT value FROM settings WHERE key = 'comm_mode'").fetchone()
-            cls.orig_comm_mode = row["value"] if (row and row["value"]) else "agua_cloud"
-            sconn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('comm_mode', 'simulation')")
-            sconn.commit()
-        finally:
-            sconn.close()
-        cls.client = TestClient(app, raise_server_exceptions=False)
-
-    @classmethod
-    def tearDownClass(cls):
-        from database import get_sys_db
-        sconn = get_sys_db()
-        try:
-            mode = getattr(cls, "orig_comm_mode", "agua_cloud") or "agua_cloud"
-            sconn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('comm_mode', ?)", (mode,))
-            sconn.commit()
-        finally:
-            sconn.close()
-
+class TestAPIEndpoints(SimulationApiTestCase):
     def test_healthcheck(self):
         resp = self.client.get("/health")
         self.assertEqual(resp.status_code, 200)
@@ -55,158 +31,6 @@ class TestAPIEndpoints(unittest.TestCase):
         self.assertIn("series", data)
         self.assertIn("comm_status", data)
         self.assertIn("consumption_stats", data)
-
-    def test_silence_status(self):
-        resp = self.client.get("/api/silence/status")
-        self.assertEqual(resp.status_code, 200)
-        data = resp.json()
-        self.assertIn("active", data)
-        self.assertIn("remaining_seconds", data)
-
-    def test_silence_mode_intelligent_stove_off(self):
-        import time
-        from database import get_active_mode, get_db
-        active_mode = get_active_mode()
-        conn = get_db(active_mode)
-        try:
-            max_ep = conn.execute("SELECT MAX(epoch) FROM telemetry").fetchone()[0] or int(time.time())
-            test_epoch = max_ep + 100
-            # 1. Simuler poêle éteint (status_code = 0)
-            conn.execute("INSERT INTO telemetry (timestamp, epoch, comm_mode, status_code, status_label) VALUES ('2026-11-11 12:00:00', ?, ?, 0, 'OFF (Éteint)')", (test_epoch, active_mode))
-            # Initialiser des consignes personnalisées
-            for rk, off, val in [("temp_amb_setpoint", 33122, 21.0), ("duct_left_setpoint", 33126, 22.0), ("duct_right_setpoint", 33124, 20.0), ("power_level", 33120, 4.0)]:
-                conn.execute("UPDATE registers_catalog SET current_val = ? WHERE reg_key = ?", (val, rk))
-            conn.commit()
-        finally:
-            conn.close()
-
-        try:
-            # 2. Activation du mode Silence intelligent
-            resp_act = self.client.post("/api/silence/activate", json={"duration_hours": 1.0})
-            self.assertEqual(resp_act.status_code, 200)
-            data_act = resp_act.json()
-            self.assertEqual(data_act["status"], "ok")
-            self.assertTrue(data_act["silence_mode"]["active"])
-            self.assertFalse(data_act["silence_mode"]["is_stove_on"])
-            self.assertIn("temp_amb_setpoint", data_act["silence_mode"]["modified_keys"])
-
-            # Vérifier que toutes les consignes sont passées en hors gel (7°C)
-            resp_latest = self.client.get("/api/latest")
-            regs = resp_latest.json()["registers"]
-            self.assertEqual(regs["temp_amb_setpoint"]["current_val"], 7.0)
-            self.assertEqual(regs["duct_left_setpoint"]["current_val"], 7.0)
-            self.assertEqual(regs["duct_right_setpoint"]["current_val"], 7.0)
-            self.assertEqual(regs["set_silece_set"]["current_val"], 1.0)
-            # Seules les 3 consignes doivent avoir été modifiées (pas la puissance, ni ventilations, ni auto, ni éco, ni chrono)
-            self.assertEqual(
-                sorted(data_act["silence_mode"]["modified_keys"]),
-                sorted(["temp_amb_setpoint", "duct_left_setpoint", "duct_right_setpoint"])
-            )
-
-            # 3. Désactivation et restauration
-            resp_deact = self.client.post("/api/silence/deactivate")
-            self.assertEqual(resp_deact.status_code, 200)
-            self.assertFalse(resp_deact.json()["silence_mode"]["active"])
-
-            resp_latest2 = self.client.get("/api/latest")
-            regs2 = resp_latest2.json()["registers"]
-            self.assertEqual(regs2["temp_amb_setpoint"]["current_val"], 21.0)
-            self.assertEqual(regs2["duct_left_setpoint"]["current_val"], 22.0)
-            self.assertEqual(regs2["duct_right_setpoint"]["current_val"], 20.0)
-            self.assertEqual(regs2["set_silece_set"]["current_val"], 0.0)
-        finally:
-            conn = get_db(active_mode)
-            try:
-                conn.execute("DELETE FROM telemetry WHERE epoch = ?", (test_epoch,))
-                conn.commit()
-            finally:
-                conn.close()
-
-    def test_silence_mode_intelligent_stove_on(self):
-        import time
-        from database import get_active_mode, get_db
-        active_mode = get_active_mode()
-        conn = get_db(active_mode)
-        try:
-            max_ep = conn.execute("SELECT MAX(epoch) FROM telemetry").fetchone()[0] or int(time.time())
-            test_epoch = max_ep + 100
-            # 1. Simuler poêle allumé (status_code = 5, TRAVAIL)
-            conn.execute("INSERT INTO telemetry (timestamp, epoch, comm_mode, status_code, status_label) VALUES ('2026-11-11 12:05:00', ?, ?, 5, 'TRAVAIL (Normal)')", (test_epoch, active_mode))
-            init_vals = [
-                ("fun_pwf_set", 33154, 1.0),
-                ("standby_set", 33130, 1.0),
-                ("chrono_week_enable_set", 33162, 1.0),
-                ("fun_auto_set", 33128, 0.0),
-                ("fan_front_speed", 33132, 3.0),
-                ("duct_left_speed", 33136, 2.0),
-                ("duct_right_speed", 33134, 2.0),
-                ("temp_amb_setpoint", 33122, 20.0),
-                ("duct_left_setpoint", 33126, 21.0),
-                ("duct_right_setpoint", 33124, 19.0),
-            ]
-            for rk, off, val in init_vals:
-                conn.execute("UPDATE registers_catalog SET current_val = ? WHERE reg_key = ?", (val, rk))
-            conn.commit()
-        finally:
-            conn.close()
-
-        try:
-            # 2. Activation du mode Silence intelligent poêle allumé
-            resp_act = self.client.post("/api/silence/activate", json={"duration_hours": 2.0})
-            self.assertEqual(resp_act.status_code, 200)
-            data_act = resp_act.json()
-            self.assertEqual(data_act["status"], "ok")
-            self.assertTrue(data_act["silence_mode"]["active"])
-            self.assertTrue(data_act["silence_mode"]["is_stove_on"])
-
-            # Vérifier les ordres de bascule :
-            # - boost, éco, chrono désactivés (0)
-            # - auto total activé (fun_auto=1, ventilations=8)
-            # - consignes en hors-gel (7°C)
-            resp_latest = self.client.get("/api/latest")
-            regs = resp_latest.json()["registers"]
-            self.assertEqual(regs["fun_pwf_set"]["current_val"], 0.0)
-            self.assertEqual(regs["standby_set"]["current_val"], 0.0)
-            self.assertEqual(regs["chrono_week_enable_set"]["current_val"], 0.0)
-            self.assertEqual(regs["fun_auto_set"]["current_val"], 1.0)
-            self.assertEqual(regs["fan_front_speed"]["current_val"], 8.0)
-            self.assertEqual(regs["duct_left_speed"]["current_val"], 8.0)
-            self.assertEqual(regs["duct_right_speed"]["current_val"], 8.0)
-            self.assertEqual(regs["temp_amb_setpoint"]["current_val"], 7.0)
-            self.assertEqual(regs["duct_left_setpoint"]["current_val"], 7.0)
-            self.assertEqual(regs["duct_right_setpoint"]["current_val"], 7.0)
-            self.assertEqual(regs["set_silece_set"]["current_val"], 1.0)
-
-            # 3. Désactivation et restauration intégrale des paramètres
-            resp_deact = self.client.post("/api/silence/deactivate")
-            self.assertEqual(resp_deact.status_code, 200)
-
-            resp_latest2 = self.client.get("/api/latest")
-            regs2 = resp_latest2.json()["registers"]
-            self.assertEqual(regs2["fun_pwf_set"]["current_val"], 1.0)
-            self.assertEqual(regs2["standby_set"]["current_val"], 1.0)
-            self.assertEqual(regs2["chrono_week_enable_set"]["current_val"], 1.0)
-            self.assertEqual(regs2["fun_auto_set"]["current_val"], 0.0)
-            self.assertEqual(regs2["fan_front_speed"]["current_val"], 3.0)
-            self.assertEqual(regs2["duct_left_speed"]["current_val"], 2.0)
-            self.assertEqual(regs2["duct_right_speed"]["current_val"], 2.0)
-            self.assertEqual(regs2["temp_amb_setpoint"]["current_val"], 20.0)
-            self.assertEqual(regs2["duct_left_setpoint"]["current_val"], 21.0)
-            self.assertEqual(regs2["duct_right_setpoint"]["current_val"], 19.0)
-            self.assertEqual(regs2["set_silece_set"]["current_val"], 0.0)
-        finally:
-            conn = get_db(active_mode)
-            try:
-                conn.execute("DELETE FROM telemetry WHERE epoch = ?", (test_epoch,))
-                conn.commit()
-            finally:
-                conn.close()
-
-    def test_matter_status(self):
-        resp = self.client.get("/api/matter/status")
-        self.assertEqual(resp.status_code, 200)
-        data = resp.json()
-        self.assertIn("enabled", data)
 
     def test_comm_status_dissociation(self):
         # Vérifie que l'état de connexion conteneur (/health -> status: healthy)
@@ -237,105 +61,6 @@ class TestAPIEndpoints(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["status"], "ok")
 
-    def test_security_headers_present(self):
-        resp = self.client.get("/health")
-        self.assertEqual(resp.headers.get("x-content-type-options"), "nosniff")
-        self.assertEqual(resp.headers.get("x-frame-options"), "SAMEORIGIN")
-        self.assertEqual(resp.headers.get("referrer-policy"), "strict-origin-when-cross-origin")
-
-    def test_ssrf_protection_on_webhook(self):
-        # Tentative d'atteindre l'API de contrôle Matter interne
-        bad_payload = {"webhook_url": "http://127.0.0.1:5549/factory-reset"}
-        resp = self.client.post("/api/test-webhook", json=bad_payload)
-        self.assertEqual(resp.status_code, 400)
-        self.assertIn("anti-SSRF", resp.json()["detail"])
-
-        # Tentative d'atteindre le service de métadonnées AWS / Cloud
-        bad_cloud = {"webhook_url": "http://169.254.169.254/latest/meta-data/"}
-        resp_cloud = self.client.post("/api/test-webhook", json=bad_cloud)
-        self.assertEqual(resp_cloud.status_code, 400)
-
-    def test_matter_webhook_loopback_allowed(self):
-        # L'appel direct depuis TestClient simule la boucle locale autorisée
-        payload = {"action": "set_temperature", "temperature": 21.0}
-        resp = self.client.post("/api/matter/webhook", json=payload)
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["status"], "ok")
-
-    def test_matter_webhook_remote_rejected(self):
-        # Simulation d'un appel distant avec client_ip mocké
-        _payload = {"action": "set_power", "state": "ON"}
-        # Création d'une requête avec scope client distant
-        from starlette.requests import Request
-        scope = {
-            "type": "http",
-            "method": "POST",
-            "path": "/api/matter/webhook",
-            "headers": [(b"content-type", b"application/json")],
-            "client": ("192.168.1.99", 54321),
-            "app": app,
-        }
-        fake_req = Request(scope)
-        # Vérifions que le contrôle rejette une IP distante
-        client_ip = fake_req.client.host if fake_req.client else ""
-        self.assertNotIn(client_ip, ("127.0.0.1", "::1", "localhost", "testclient"))
-
-    def test_installer_auth_flow(self):
-        from database import get_sys_db
-
-        # 1. Vérification du statut initial
-        status_resp = self.client.get("/api/installer/status")
-        self.assertEqual(status_resp.status_code, 200)
-        self.assertFalse(status_resp.json()["authenticated"])
-
-        # 2. Configurer temporairement un mot de passe de test en base
-        test_pwd = "MonSuperMotDePasse123!"
-        conn = get_sys_db()
-        try:
-            old_pwd_row = conn.execute("SELECT value FROM settings WHERE key = 'agua_password'").fetchone()
-            orig_pwd = old_pwd_row["value"] if old_pwd_row else ""
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('agua_password', ?)", (test_pwd,))
-            conn.commit()
-        finally:
-            conn.close()
-
-        try:
-            # 3. Test mot de passe erroné -> HTTP 401
-            bad_resp = self.client.post("/api/installer/verify", json={"password": "MauvaisMotDePasse"})
-            self.assertEqual(bad_resp.status_code, 401)
-            self.assertIn("incorrect", bad_resp.json()["detail"])
-
-            # 4. Test bon mot de passe -> HTTP 200 avec jeton
-            good_resp = self.client.post("/api/installer/verify", json={"password": test_pwd})
-            self.assertEqual(good_resp.status_code, 200)
-            data = good_resp.json()
-            self.assertTrue(data["authenticated"])
-            token = data["token"]
-            self.assertTrue(len(token) >= 20)
-
-            # 5. Vérifier le statut avec le jeton
-            auth_status = self.client.get("/api/installer/status", headers={"X-Installer-Token": token})
-            self.assertEqual(auth_status.status_code, 200)
-            self.assertTrue(auth_status.json()["authenticated"])
-            self.assertTrue(auth_status.json()["has_password_configured"])
-
-            # 6. Verrouiller la session
-            lock_resp = self.client.post("/api/installer/lock", headers={"X-Installer-Token": token})
-            self.assertEqual(lock_resp.status_code, 200)
-            self.assertFalse(lock_resp.json()["authenticated"])
-
-            # 7. Vérifier que le statut est désormais non authentifié
-            locked_status = self.client.get("/api/installer/status", headers={"X-Installer-Token": token})
-            self.assertFalse(locked_status.json()["authenticated"])
-        finally:
-            # Restaurer l'état initial
-            conn = get_sys_db()
-            try:
-                conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('agua_password', ?)", (orig_pwd,))
-                conn.commit()
-            finally:
-                conn.close()
-
     def test_pellet_batch_status_endpoint(self):
         resp = self.client.get("/api/pellet-batch/status")
         self.assertEqual(resp.status_code, 200)
@@ -344,7 +69,8 @@ class TestAPIEndpoints(unittest.TestCase):
         self.assertIn("pellet_brand", data)
 
     def test_pellet_batch_raz_endpoint(self):
-        resp = self.client.post("/api/pellet-batch/raz", json={"pellet_brand": "DINplus Test Lot A1"})
+        headers = get_installer_auth_headers(self.client)
+        resp = self.client.post("/api/pellet-batch/raz", json={"pellet_brand": "DINplus Test Lot A1"}, headers=headers)
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["status"], "ok")
@@ -490,8 +216,9 @@ class TestAPIEndpoints(unittest.TestCase):
 
     def test_calibration_api_endpoints_background_flow(self):
         """Vérifie le cycle des endpoints API /api/calibration/ en arrière-plan."""
+        headers = get_installer_auth_headers(self.client)
         # 1. Reset
-        r_reset = self.client.post("/api/calibration/reset")
+        r_reset = self.client.post("/api/calibration/reset", headers=headers)
         self.assertEqual(r_reset.status_code, 200)
 
         # 2. Status initial
@@ -502,7 +229,7 @@ class TestAPIEndpoints(unittest.TestCase):
         self.assertEqual(data["state"], "IDLE")
 
         # 3. Step 1 : Pré-contrôle
-        r_s1 = self.client.post("/api/calibration/step1-start", json={"mode": "COMBINED_BOTH"})
+        r_s1 = self.client.post("/api/calibration/step1-start", json={"mode": "COMBINED_BOTH"}, headers=headers)
         self.assertEqual(r_s1.status_code, 200)
         self.assertTrue(r_s1.json()["success"])
 
@@ -571,6 +298,44 @@ class TestAPIEndpoints(unittest.TestCase):
             finally:
                 conn.close()
 
+    def test_canalization_aliases_and_pwf_crono_behavior(self):
+        """Vérifie la résolution directe par alias Agua Cloud des 4 canalisations et le comportement de Boost CRONO (2)."""
+        from clients import AguaCloudClient
 
-if __name__ == "__main__":
-    unittest.main()
+        cli = AguaCloudClient()
+        cli._parse_and_cache_registers_map({
+            "registers_map": [
+                {"reg_key": "canalization_sx_temp_air_set", "reg_type": "SET", "offset": 33126, "is_word": True, "big_endian": False, "mask": 65535},
+                {"reg_key": "canalization_sx_set", "reg_type": "SET", "offset": 33136, "is_word": True, "big_endian": False, "mask": 65535},
+                {"reg_key": "canalization_dx_temp_air_set", "reg_type": "SET", "offset": 33124, "is_word": True, "big_endian": False, "mask": 65535},
+                {"reg_key": "temp_rear_set", "reg_type": "SET", "offset": 33124, "is_word": False, "big_endian": True, "mask": 255},
+                {"reg_key": "canalization_dx_set", "reg_type": "SET", "offset": 33134, "is_word": True, "big_endian": False, "mask": 65535},
+                {"reg_key": "vent_rear_set", "reg_type": "SET", "offset": 33134, "is_word": False, "big_endian": True, "mask": 255},
+            ]
+        })
+        # Résolution directe par clé canalization_* (ne tombe pas sur vent_rear_set / temp_rear_set)
+        self.assertEqual(cli._resolve_register_write_params(33126, "duct_left_setpoint"), (33126, 16, "L", 65535))
+        self.assertEqual(cli._resolve_register_write_params(33136, "duct_left_speed"), (33136, 16, "L", 65535))
+        self.assertEqual(cli._resolve_register_write_params(33124, "duct_right_setpoint"), (33124, 16, "L", 65535))
+        self.assertEqual(cli._resolve_register_write_params(33134, "duct_right_speed"), (33134, 16, "L", 65535))
+
+        # Boost CRONO (2) accepté en écriture sans forcer P8 hors plage horaire en simulation
+        import asyncio
+        from telemetry import collect_telemetry_cycle
+
+        self.client.post("/api/command-batch", json={"commands": [
+            {"reg_key": "status_code", "value": 85.0, "offset": 232},
+            {"reg_key": "power_level", "value": 3.0, "offset": 33120},
+            {"reg_key": "fun_auto_set", "value": 0.0, "offset": 33128},
+            {"reg_key": "fun_pwf_set", "value": 2.0, "offset": 33154},
+        ]})
+        rec_crono = asyncio.run(collect_telemetry_cycle("simulation"))
+        r_crono = self.client.get("/api/latest").json()
+        self.assertEqual(r_crono["registers"]["fun_pwf_set"]["current_val"], 2.0)
+        self.assertEqual(rec_crono["power_actual"], 3)
+
+        self.client.post("/api/command", json={"reg_key": "fun_pwf_set", "value": 1.0, "offset": 33154})
+        rec_on = asyncio.run(collect_telemetry_cycle("simulation"))
+        self.assertEqual(rec_on["power_actual"], 8)
+
+        self.client.post("/api/command", json={"reg_key": "fun_pwf_set", "value": 0.0, "offset": 33154})

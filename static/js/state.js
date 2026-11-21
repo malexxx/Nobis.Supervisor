@@ -10,7 +10,7 @@ const SERIES_CONFIG = [
   // VOLET 1 : Thermique, Canalisations, Consignes & Fumées
   { key: "temp_ambient", label: "T° Ambiante Salon", unit: "°C", color: "#10b981", pane: 1, yAxisID: "yTemp", group: "THERMAL", visible: true },
   { key: "temp_amb_setpoint", label: "Cons. T° Amb", unit: "°C", color: "#34d399", pane: 1, yAxisID: "yTemp", group: "CONTROL", visible: true, dashed: true },
-  { key: "weather_temp_ext", label: "T° Ext. Bazoches", unit: "°C", color: "#3b82f6", pane: 1, yAxisID: "yTemp", group: "THERMAL", visible: true },
+  { key: "weather_temp_ext", label: "T° Extérieure", unit: "°C", color: "#3b82f6", pane: 1, yAxisID: "yTemp", group: "THERMAL", visible: true },
   { key: "duct_left_temp", label: "T° Canal. Gauche SX", unit: "°C", color: "#06b6d4", pane: 1, yAxisID: "yTemp", group: "DUCTS", visible: false },
   { key: "duct_left_setpoint", label: "Cons. Canal. SX", unit: "°C", color: "#67e8f9", pane: 1, yAxisID: "yTemp", group: "DUCTS", visible: false, dashed: true },
   { key: "duct_right_temp", label: "T° Canal. Droite DX", unit: "°C", color: "#0ea5e9", pane: 1, yAxisID: "yTemp", group: "DUCTS", visible: false },
@@ -51,7 +51,9 @@ const OFFSET_NAMES = {
   33214: "chrono_p3_tcanr", 33216: "chrono_p3_tcanl", 33218: "chrono_p3_fan_front", 33220: "chrono_p3_canr", 33222: "chrono_p3_canl",
   33224: "chrono_p4_start", 33226: "chrono_p4_stop", 33228: "chrono_p4_days_mask", 33230: "chrono_p4_power", 33232: "chrono_p4_temp",
   33234: "chrono_p4_tcanr", 33236: "chrono_p4_tcanl", 33238: "chrono_p4_fan_front", 33240: "chrono_p4_canr", 33242: "chrono_p4_canl",
-  33250: "set_silece_set",
+  // #33250 (0x81E2) vérifié inactif sur Nobis A10 (carte T033.NBS.AIR.MB01, enable_mask_107 bit 2048 = 0) :
+  // conservé en lecture seule pour documenter l'offset brut remonté par Agua Cloud.
+  33250: "set_silece_set (inactif Nobis A10)",
   34048: "clock_hour", 34049: "clock_minute", 34050: "cal_day", 34051: "cal_month", 34052: "cal_year", 34053: "cal_weekday"
 };
 

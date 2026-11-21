@@ -15,47 +15,34 @@ if BASE_DIR not in sys.path:
 import uvicorn
 
 from database import init_all_databases
+from services.lifecycle import install_windows_proactor_guard
 from tls_service import resolve_runtime_tls
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("nobis.server")
 
 
-def _silence_windows_proactor_reset() -> None:
-    """Ignore le bruit bénin WinError 10054 lors de la fermeture de sockets TLS sous Windows (ProactorEventLoop)."""
-    if sys.platform != "win32":
-        return
-    try:
-        from asyncio.proactor_events import _ProactorBasePipeTransport
-
-        orig = _ProactorBasePipeTransport._call_connection_lost
-
-        def _safe_call_connection_lost(self, exc):
-            try:
-                orig(self, exc)
-            except ConnectionResetError:
-                pass
-
-        _ProactorBasePipeTransport._call_connection_lost = _safe_call_connection_lost
-    except Exception:
-        pass
-
-
 def parse_args(argv=None) -> argparse.Namespace:
+    """Analyse les arguments CLI et variables d'environnement du serveur Uvicorn."""
     parser = argparse.ArgumentParser(description="Lanceur Nobis.Supervisor (HTTP/HTTPS autonome)")
     parser.add_argument("--host", default=os.environ.get("HOST", "0.0.0.0"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8080")))
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--proxy-headers", action="store_true", default=True)
-    parser.add_argument("--forwarded-allow-ips", default="*")
+    parser.add_argument(
+        "--forwarded-allow-ips",
+        default=os.environ.get("TRUSTED_PROXY_IPS", "127.0.0.1,::1"),
+    )
     parser.add_argument("--timeout-graceful-shutdown", type=int, default=5)
     args, _ = parser.parse_known_args(argv)
     return args
 
 
 def main() -> None:
-    _silence_windows_proactor_reset()
+    """Initialise les bases, résout la configuration TLS active et démarre Uvicorn."""
+    install_windows_proactor_guard()
     args = parse_args()
+    os.environ["NOBIS_RUNTIME_PORT"] = str(args.port)
     init_all_databases()
     tls_mode, certfile, keyfile = resolve_runtime_tls()
 

@@ -25,6 +25,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      - name: Install Playwright browsers
+        run: |
+          playwright install --with-deps chromium
+
+      - name: Check code with Ruff
+        run: |
+          ruff check .
+
+      - name: Check frontend & Matter JS syntax
+        run: |
+          node --check matter_bridge/bridge.mjs
+          find static/js -name '*.js' -print0 | xargs -0 -n1 node --check
+
       - name: Run Pytest
         run: pytest -v
 

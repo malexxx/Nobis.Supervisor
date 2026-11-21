@@ -186,8 +186,11 @@ class TestSystemEndpoints(unittest.TestCase):
 
     def test_test_connection_simulation(self):
         """Vérifie le endpoint /api/test-connection en mode simulation."""
+        from tests.helpers import get_installer_auth_headers
+
+        headers = get_installer_auth_headers(self.client)
         payload = {"comm_mode": "simulation"}
-        resp = self.client.post("/api/test-connection", json=payload)
+        resp = self.client.post("/api/test-connection", json=payload, headers=headers)
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["status"], "ok")
@@ -197,24 +200,30 @@ class TestSystemEndpoints(unittest.TestCase):
 
     def test_test_connection_local_gateway_mocked(self):
         """Vérifie le test de connexion passerelle UART (succès et échec)."""
+        from tests.helpers import get_installer_auth_headers
+
+        headers = get_installer_auth_headers(self.client)
         payload = {"comm_mode": "local_gateway", "local_gateway_url": "http://192.168.1.150"}
 
         # Cas succès
         with patch("clients.local_gateway_client.test_connection", new_callable=AsyncMock) as mock_test:
             mock_test.return_value = {"status": "ok", "latency_ms": 12}
-            resp = self.client.post("/api/test-connection", json=payload)
+            resp = self.client.post("/api/test-connection", json=payload, headers=headers)
             self.assertEqual(resp.status_code, 200)
             self.assertEqual(resp.json()["status"], "ok")
 
         # Cas échec (diagnostic renvoie status: error sans crash 5xx)
         with patch("clients.local_gateway_client.test_connection", new_callable=AsyncMock) as mock_test:
             mock_test.side_effect = Exception("Hôte passerelle UART injoignable")
-            resp = self.client.post("/api/test-connection", json=payload)
+            resp = self.client.post("/api/test-connection", json=payload, headers=headers)
             self.assertEqual(resp.status_code, 200)
             self.assertEqual(resp.json()["status"], "error")
 
     def test_test_connection_agua_cloud_mocked(self):
-        """Vérifie le test de connexion Cloud Agua IOT (succès et échec)."""
+        """Vérifie le test de connexion Cloud Agua IOT (succès et échec) sur client isolé."""
+        from tests.helpers import get_installer_auth_headers
+
+        headers = get_installer_auth_headers(self.client)
         payload = {
             "comm_mode": "agua_cloud",
             "agua_email": "test@example.com",
@@ -223,27 +232,30 @@ class TestSystemEndpoints(unittest.TestCase):
         }
 
         # Cas succès
-        with patch("clients.agua_client.login_and_discover", new_callable=AsyncMock) as mock_login:
+        with patch("clients.AguaCloudClient.login_and_discover", new_callable=AsyncMock) as mock_login:
             mock_login.return_value = {"token": "fake_tok", "id_device": "dev1"}
-            resp = self.client.post("/api/test-connection", json=payload)
+            resp = self.client.post("/api/test-connection", json=payload, headers=headers)
             self.assertEqual(resp.status_code, 200)
             self.assertEqual(resp.json()["status"], "ok")
 
         # Cas échec (diagnostic renvoie status: error sans crash 5xx)
-        with patch("clients.agua_client.login_and_discover", new_callable=AsyncMock) as mock_login:
+        with patch("clients.AguaCloudClient.login_and_discover", new_callable=AsyncMock) as mock_login:
             mock_login.side_effect = Exception("Identifiants Agua IOT rejetés")
-            resp = self.client.post("/api/test-connection", json=payload)
+            resp = self.client.post("/api/test-connection", json=payload, headers=headers)
             self.assertEqual(resp.status_code, 200)
             self.assertEqual(resp.json()["status"], "error")
 
     def test_agua_registers_map_endpoint_mocked(self):
         """Vérifie le endpoint /api/agua-registers-map."""
+        from tests.helpers import get_installer_auth_headers
+
+        headers = get_installer_auth_headers(self.client)
         with patch("clients.agua_client.scan_registers_map", new_callable=AsyncMock) as mock_scan, \
              patch("clients.agua_client.read_buffer", new_callable=AsyncMock) as mock_read:
             mock_scan.return_value = [{"offset": 103, "formula": "val", "label": "Temp amb"}]
             mock_read.return_value = {103: 19.5, 2: 150.0}
 
-            resp = self.client.get("/api/agua-registers-map")
+            resp = self.client.get("/api/agua-registers-map", headers=headers)
             self.assertEqual(resp.status_code, 200)
             data = resp.json()
             self.assertIn("registers_map", data)

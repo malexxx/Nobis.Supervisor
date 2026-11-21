@@ -1,6 +1,7 @@
+"""Configuration globale, chemins SQLite/statiques, constantes métier Nobis A10 et catalogue de registres Micronova."""
 import os
 import sys
-from typing import Dict, Any, List
+from typing import Any
 
 # ==============================================================================
 # GESTION DES CHEMINS & CONSTANTES MÉTIER (NOBIS A10 C LIGHT STYLE COAX)
@@ -38,7 +39,7 @@ DOCKER_VERSION: str = (
 )
 
 SYSTEM_DB_PATH = os.path.join(DATA_DIR, "nobis_a10_system.db")
-MODE_DB_PATHS: Dict[str, str] = {
+MODE_DB_PATHS: dict[str, str] = {
     "simulation": os.path.join(DATA_DIR, "nobis_a10_simulation.db"),
     "agua_cloud": os.path.join(DATA_DIR, "nobis_a10_agua_cloud.db"),
     "local_gateway": os.path.join(DATA_DIR, "nobis_a10_local_gateway.db"),
@@ -48,7 +49,7 @@ MODE_DB_PATHS: Dict[str, str] = {
 HOPPER_CAPACITY_KG: float = 35.0
 PELLET_BAG_WEIGHT_KG: float = 15.0
 
-STOVE_STATES: Dict[int, str] = {
+STOVE_STATES: dict[int, str] = {
     0: "OFF (Éteint)",
     1: "ATTENTE (Check-up)",
     2: "DÉBUT (Préchauffage)",
@@ -63,7 +64,7 @@ STOVE_STATES: Dict[int, str] = {
     11: "MÉMOIRE ALARME"
 }
 
-NOBIS_ALARMS: Dict[int, str] = {
+NOBIS_ALARMS: dict[int, str] = {
     0: "Aucune (____)",
     1: "AL01 - BLACK OUT (Coupure secteur)",
     2: "AL02 - IGNITION MANQUÉE",
@@ -91,28 +92,35 @@ NOBIS_ALARMS: Dict[int, str] = {
 }
 
 # Mapping officiel entre nos clés internes et les reg_key Micronova (vincentwolsink/home_assistant_micronova_agua_iot)
-AGUA_REG_KEY_ALIASES: Dict[str, List[str]] = {
+AGUA_REG_KEY_ALIASES: dict[str, list[str]] = {
     "status_code": ["status_managed_get", "status_managed", "power_on_off"],
     "power_level": ["power_set"],
     "temp_amb_setpoint": ["temp_air_set"],
     "fan_front_speed": ["vent_front_set"],
-    "duct_left_setpoint": ["can_sx_temp_set", "temp_can_sx_set"],
-    "duct_left_speed": ["can_sx_vent_set", "vent_can_sx_set"],
-    "duct_right_setpoint": ["can_dx_temp_set", "temp_can_dx_set"],
-    "duct_right_speed": ["can_dx_vent_set", "vent_can_dx_set"],
+    # Clés exactes exposées par /deviceGetRegistersMap sur Nobis A10 (prioritaires pour éviter
+    # la collision d'offset avec les alias Rear inactifs temp_rear_set / vent_rear_set sur #33124 / #33134).
+    "duct_left_setpoint": ["canalization_sx_temp_air_set", "can_sx_temp_set", "temp_can_sx_set"],
+    "duct_left_speed": ["canalization_sx_set", "can_sx_vent_set", "vent_can_sx_set"],
+    "duct_right_setpoint": ["canalization_dx_temp_air_set", "can_dx_temp_set", "temp_can_dx_set"],
+    "duct_right_speed": ["canalization_dx_set", "can_dx_vent_set", "vent_can_dx_set"],
     "fun_auto_set": ["fun_auto_set", "auto_mode_set"],
     "fun_pwf_set": ["fun_pwf_set", "powerful_set"],
-    "set_silece_set": ["set_silece_set", "silence_set"],
+    # NOTE : Le registre EEPROM #33250 (0x81E2, "set_silece_set" / "silence_set") a été retiré :
+    # vérifié inactif sur Nobis A10 (carte T033.NBS.AIR.MB01 — bit 2048 "set_silece_enable" = 0 dans #107
+    # dans tous les modes Manuel P3 / Auto P7 / Boost P8, aucun effet sur le poêle ni la radiocommande).
+    # Ne plus l'écrire évite d'user inutilement l'EEPROM.
     "chrono_week_enable_set": ["chrono_week_enable_set", "chrono_enable_set"]
 }
 
-DEFAULT_REGISTERS_CATALOG: List[Dict[str, Any]] = [
+DEFAULT_REGISTERS_CATALOG: list[dict[str, Any]] = [
     {"reg_key": "status_code", "offset": 232, "mem_type": "RAM", "label": "Commande Marche/Arrêt (85=ON, 170=OFF)", "unit": "cmd", "min_val": 0, "max_val": 255, "step": 1, "default_val": 0, "category": "STATE"},
     {"reg_key": "power_level", "offset": 33120, "mem_type": "EEPROM", "label": "Puissance de combustion (P1 à P7)", "unit": "P", "min_val": 1, "max_val": 7, "step": 1, "default_val": 4, "category": "CONTROL"},
     {"reg_key": "fun_auto_set", "offset": 33128, "mem_type": "EEPROM", "label": "Modulation Automatique - Auto puissance (0=OFF, 1=ON)", "unit": "bool", "min_val": 0, "max_val": 1, "step": 1, "default_val": 1, "category": "CONTROL"},
     {"reg_key": "standby_set", "offset": 33130, "mem_type": "EEPROM", "label": "Mode ECO - Stand-by auto sur consigne (Réglage radiocommande Nobis, 0=OFF, 1=ON)", "unit": "bool", "min_val": 0, "max_val": 1, "step": 1, "default_val": 0, "category": "CONTROL"},
+    # Note : /deviceGetRegistersMap déclare set_max=1 sur #33154 mais liste 2=CRONO dans enc_val ;
+    # vérifié en réel sur Nobis A10 : l'écriture de 2 (CRONO) via Agua Cloud est bien acceptée et relue à 2.
     {"reg_key": "fun_pwf_set", "offset": 33154, "mem_type": "EEPROM", "label": "Mode BOOST - Surpuissance (0=OFF, 1=ON, 2=CRONO)", "unit": "mode", "min_val": 0, "max_val": 2, "step": 1, "default_val": 0, "category": "CONTROL"},
-    {"reg_key": "set_silece_set", "offset": 33250, "mem_type": "EEPROM", "label": "Silencieux - Confort acoustique (0=OFF, 1=ON)", "unit": "bool", "min_val": 0, "max_val": 1, "step": 1, "default_val": 0, "category": "CONTROL"},
+    # Registre #33250 (0x81E2, set_silece_set) volontairement omis : inactif sur Nobis A10 (enable_mask_107 bit 2048 = 0).
     {"reg_key": "temp_amb_setpoint", "offset": 33122, "mem_type": "EEPROM", "label": "Consigne T° Ambiante Salon (7..40°C, 41=MAN)", "unit": "°C", "min_val": 7, "max_val": 41, "step": 1, "default_val": 19, "category": "CONTROL"},
     {"reg_key": "fan_front_speed", "offset": 33132, "mem_type": "EEPROM", "label": "Ventilation Frontale (0=OFF, 1..7, 8=PS Auto)", "unit": "lvl", "min_val": 0, "max_val": 8, "step": 1, "default_val": 3, "category": "CONTROL"},
     {"reg_key": "duct_left_setpoint", "offset": 33126, "mem_type": "EEPROM", "label": "Consigne T° Canalisation Gauche SX (7..40°C, 41=MAN)", "unit": "°C", "min_val": 7, "max_val": 41, "step": 1, "default_val": 20, "category": "DUCT"},
@@ -171,7 +179,7 @@ DEFAULT_REGISTERS_CATALOG: List[Dict[str, Any]] = [
     {"reg_key": "cat_service_hours", "offset": 260, "mem_type": "EEPROM", "label": "Compteur Heures avant Entretien CAT", "unit": "h", "min_val": 0, "max_val": 2500, "step": 1, "default_val": 1420, "category": "MAINTENANCE"},
 ]
 
-TELEMETRY_COLUMNS: Dict[str, str] = {
+TELEMETRY_COLUMNS: dict[str, str] = {
     "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
     "timestamp": "TEXT NOT NULL",
     "epoch": "INTEGER NOT NULL",
@@ -204,6 +212,8 @@ TELEMETRY_COLUMNS: Dict[str, str] = {
     "fun_auto_set": "INTEGER DEFAULT 1",
     "standby_enabled": "INTEGER DEFAULT 0",
     "fun_pwf_set": "INTEGER DEFAULT 0",
+    # Colonne historique conservée pour rétrocompatibilité SQLite : trace désormais l'état du mode Silence logiciel
+    # de l'application (silence_timer_state), le registre EEPROM #33250 étant inactif sur Nobis A10 (#107 bit 2048 = 0).
     "set_silece_set": "INTEGER DEFAULT 0",
     "fan_front_speed": "INTEGER DEFAULT 3",
     "vent_front_actual": "INTEGER DEFAULT 2",

@@ -1,4 +1,4 @@
-"""Instance partagée du planificateur asynchrone APScheduler pour Nobis.Supervisor."""
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+"""Façade de rétro-compatibilité pour le planificateur APScheduler (source : services/lifecycle.py)."""
+from services.lifecycle import scheduler
 
-scheduler = AsyncIOScheduler()
+__all__ = ["scheduler"]

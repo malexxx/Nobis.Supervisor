@@ -9,9 +9,12 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from database import add_container_log, db_log, get_active_mode, get_settings_dict
-from routers.installer import require_installer_auth_if_configured
-from routers.system import _delayed_process_restart
 from schemas import TlsLetsEncryptPayload, TlsModePayload
+from services.installer_auth import require_installer_auth_if_configured
+from services.lifecycle import (
+    delayed_process_restart as _delayed_process_restart,
+    spawn_background_task,
+)
 from tls_service import (
     DNS_PROVIDERS,
     ensure_selfsigned_cert,
@@ -31,7 +34,7 @@ router = APIRouter(prefix="/api/tls", tags=["TLS & HTTPS"])
 @router.get("/status")
 async def api_tls_status():
     """Retourne l'état complet du mode HTTPS, du certificat actif et des fournisseurs DNS supportés."""
-    return get_tls_status()
+    return await asyncio.to_thread(get_tls_status)
 
 
 @router.get(
@@ -43,7 +46,7 @@ async def api_tls_status():
 )
 async def api_tls_download_certificate():
     """Télécharge le certificat public actif (.crt) pour installation éventuelle sur mobile/PC."""
-    cert_path = get_active_cert_path()
+    cert_path = await asyncio.to_thread(get_active_cert_path)
     if not cert_path:
         raise HTTPException(status_code=404, detail="Aucun certificat TLS public disponible pour le moment.")
     return FileResponse(
@@ -52,6 +55,39 @@ async def api_tls_download_certificate():
         filename="nobis-supervisor.crt",
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
     )
+
+
+def _parse_and_resolve_san(payload: TlsModePayload) -> tuple[dict, list[str] | None, list[str] | None]:
+    updates = {"https_mode": payload.mode}
+    extra_ips = None
+    extra_dns = None
+    try:
+        if payload.san_ips is not None:
+            parsed_ips = parse_san_ips(payload.san_ips)
+            updates["https_san_ips"] = ", ".join(parsed_ips)
+            extra_ips = parsed_ips
+        if payload.san_dns is not None:
+            parsed_dns = parse_san_dns(payload.san_dns)
+            updates["https_san_dns"] = ", ".join(parsed_dns)
+            extra_dns = parsed_dns
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return updates, extra_ips, extra_dns
+
+
+def _fill_missing_san_from_settings(extra_ips: list[str] | None, extra_dns: list[str] | None) -> tuple[list[str], list[str]]:
+    settings = get_settings_dict()
+    if extra_ips is None:
+        try:
+            extra_ips = parse_san_ips(settings.get("https_san_ips", ""))
+        except ValueError:
+            extra_ips = []
+    if extra_dns is None:
+        try:
+            extra_dns = parse_san_dns(settings.get("https_san_dns", ""))
+        except ValueError:
+            extra_dns = []
+    return extra_ips, extra_dns
 
 
 @router.post(
@@ -65,37 +101,16 @@ async def api_tls_set_mode(payload: TlsModePayload, request: Request):
     """Bascule entre le mode 'http' et 'selfsigned' (avec régénération optionnelle des SAN)."""
     require_installer_auth_if_configured(request)
     active_mode = get_active_mode()
-
-    updates = {"https_mode": payload.mode}
-    extra_ips = None
-    extra_dns = None
-
-    try:
-        if payload.san_ips is not None:
-            parsed_ips = parse_san_ips(payload.san_ips)
-            updates["https_san_ips"] = ", ".join(parsed_ips)
-            extra_ips = parsed_ips
-        if payload.san_dns is not None:
-            parsed_dns = parse_san_dns(payload.san_dns)
-            updates["https_san_dns"] = ", ".join(parsed_dns)
-            extra_dns = parsed_dns
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    updates, extra_ips, extra_dns = _parse_and_resolve_san(payload)
 
     if payload.mode == "selfsigned":
-        settings = get_settings_dict()
-        if extra_ips is None:
-            try:
-                extra_ips = parse_san_ips(settings.get("https_san_ips", ""))
-            except ValueError:
-                extra_ips = []
-        if extra_dns is None:
-            try:
-                extra_dns = parse_san_dns(settings.get("https_san_dns", ""))
-            except ValueError:
-                extra_dns = []
-
-        ok, msg = ensure_selfsigned_cert(extra_ips=extra_ips, extra_dns=extra_dns, force=payload.regenerate)
+        resolved_ips, resolved_dns = _fill_missing_san_from_settings(extra_ips, extra_dns)
+        ok, msg = await asyncio.to_thread(
+            ensure_selfsigned_cert,
+            extra_ips=resolved_ips,
+            extra_dns=resolved_dns,
+            force=payload.regenerate,
+        )
         if not ok:
             raise HTTPException(status_code=400, detail=msg)
     else:
@@ -106,14 +121,14 @@ async def api_tls_set_mode(payload: TlsModePayload, request: Request):
     add_container_log("INFO", "TLS", f"Changement mode HTTPS -> {payload.mode} ({msg})")
 
     if payload.restart:
-        asyncio.create_task(_delayed_process_restart(0.8))
+        spawn_background_task(_delayed_process_restart(0.8))
 
     return {
         "status": "ok",
         "mode": payload.mode,
         "restarting": payload.restart,
         "message": msg,
-        "tls": get_tls_status(),
+        "tls": await asyncio.to_thread(get_tls_status),
     }
 
 
@@ -141,7 +156,7 @@ async def api_tls_letsencrypt_issue(payload: TlsLetsEncryptPayload, request: Req
         clean_domain = validate_domain(payload.domain)
         clean_email = validate_email(payload.email or "")
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     existing_settings = get_settings_dict()
     raw_token = (payload.dns_token or "").strip()
@@ -173,7 +188,7 @@ async def api_tls_letsencrypt_issue(payload: TlsLetsEncryptPayload, request: Req
             force=payload.force,
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     if not ok:
         db_log("ERROR", "TLS", f"Échec Let's Encrypt ({clean_domain}): {msg}", active_mode)
@@ -186,7 +201,7 @@ async def api_tls_letsencrypt_issue(payload: TlsLetsEncryptPayload, request: Req
     add_container_log("INFO", "TLS", f"Activation HTTPS Let's Encrypt réussie pour {clean_domain}.")
 
     if payload.restart:
-        asyncio.create_task(_delayed_process_restart(1.0))
+        spawn_background_task(_delayed_process_restart(1.0))
 
     return {
         "status": "ok",
@@ -194,7 +209,7 @@ async def api_tls_letsencrypt_issue(payload: TlsLetsEncryptPayload, request: Req
         "domain": clean_domain,
         "restarting": payload.restart,
         "message": msg,
-        "tls": get_tls_status(),
+        "tls": await asyncio.to_thread(get_tls_status),
     }
 
 
@@ -224,11 +239,11 @@ async def api_tls_letsencrypt_renew(request: Request):
 
     active_mode = get_active_mode()
     db_log("INFO", "TLS", f"Renouvellement manuel Let's Encrypt réussi pour {domain}.", active_mode)
-    asyncio.create_task(_delayed_process_restart(1.0))
+    spawn_background_task(_delayed_process_restart(1.0))
     return {
         "status": "ok",
         "domain": domain,
         "restarting": True,
         "message": msg,
-        "tls": get_tls_status(),
+        "tls": await asyncio.to_thread(get_tls_status),
     }

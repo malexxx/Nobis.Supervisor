@@ -4,15 +4,21 @@ Regroupe le réglage des températures/ventilations/puissances (/api/stove/set),
 les écritures directes de registres, le réapprovisionnement de la trémie et la gestion des lots de pellets.
 """
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, HTTPException, Path, Request
 
 from analytics import get_pellet_batch_state
 from config import HOPPER_CAPACITY_KG, PELLET_BAG_WEIGHT_KG
 from database import db_log, get_active_mode, get_db, get_registers_dict, get_settings_dict, get_sys_db
-from routers.installer import require_installer_auth_if_configured
-from schemas import BatchCommandPayload, CommandPayload, RefillHopperPayload, StoveSetPayload
+from schemas import (
+    BatchCommandPayload,
+    CommandPayload,
+    PelletBatchRazPayload,
+    RefillHopperPayload,
+    StoveSetPayload,
+)
+from services.installer_auth import require_installer_auth_if_configured
 from telemetry import (
     _stove_io_lock,
     collect_telemetry_cycle,
@@ -23,8 +29,11 @@ from telemetry import (
 
 router = APIRouter(prefix="/api", tags=["Stove Control"])
 
+_RAZ_DEFAULT = PelletBatchRazPayload()
+_AuditIdPath = Annotated[int, Path(ge=1, le=9223372036854775807)]
 
-def _is_raw_or_privileged_write(reg_key: str, offset: Optional[int], regs_catalog: Dict[str, Any]) -> bool:
+
+def _is_raw_or_privileged_write(reg_key: str, offset: int | None, regs_catalog: dict[str, Any]) -> bool:
     """Identifie les écritures d'offsets bruts ou hors catalogue réservées à l'installateur."""
     rk = (reg_key or "").strip()
     if rk == "raw_offset" or rk.upper().startswith("RAW_") or rk not in regs_catalog:
@@ -109,7 +118,7 @@ async def api_stove_set(payload: StoveSetPayload):
 
 
 @router.post("/refill-hopper")
-async def api_refill_hopper(payload: Optional[RefillHopperPayload] = Body(default=None)):
+async def api_refill_hopper(payload: Annotated[RefillHopperPayload | None, Body()] = None):
     """Recharge la trémie en granulés et met à jour le stock disponible."""
     bags_added = payload.bags_added if payload is not None else 2.0
     active_mode = get_active_mode()
@@ -139,26 +148,26 @@ async def api_refill_hopper(payload: Optional[RefillHopperPayload] = Body(defaul
         finally:
             conn.close()
 
-    settings = get_settings_dict()
-    try:
-        cur_stock = float(settings.get("pellet_bags_stock", "40"))
-    except (ValueError, TypeError):
-        cur_stock = 40.0
-    try:
-        cur_used = float(settings.get("pellet_bags_used_season", "0"))
-    except (ValueError, TypeError):
-        cur_used = 0.0
+        settings = get_settings_dict()
+        try:
+            cur_stock = float(settings.get("pellet_bags_stock", "40"))
+        except (ValueError, TypeError):
+            cur_stock = 40.0
+        try:
+            cur_used = float(settings.get("pellet_bags_used_season", "0"))
+        except (ValueError, TypeError):
+            cur_used = 0.0
 
-    new_stock = max(0.0, round(cur_stock - bags_added, 1))
-    new_used = round(cur_used + bags_added, 1)
+        new_stock = max(0.0, round(cur_stock - bags_added, 1))
+        new_used = round(cur_used + bags_added, 1)
 
-    sconn = get_sys_db()
-    try:
-        sconn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('pellet_bags_stock', ?)", (str(new_stock),))
-        sconn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('pellet_bags_used_season', ?)", (str(new_used),))
-        sconn.commit()
-    finally:
-        sconn.close()
+        sconn = get_sys_db()
+        try:
+            sconn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('pellet_bags_stock', ?)", (str(new_stock),))
+            sconn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('pellet_bags_used_season', ?)", (str(new_used),))
+            sconn.commit()
+        finally:
+            sconn.close()
 
     kg_added = round(bags_added * PELLET_BAG_WEIGHT_KG, 1)
     db_log(
@@ -189,10 +198,14 @@ async def api_refill_hopper(payload: Optional[RefillHopperPayload] = Body(defaul
     }
 
 
-@router.post("/pellet-batch/raz")
-async def api_pellet_batch_raz(payload: Dict[str, Any] = Body(default={})):
+@router.post("/pellet-batch/raz", responses={403: {"description": "Authentification installateur requise"}})
+async def api_pellet_batch_raz(
+    request: Request,
+    payload: Annotated[PelletBatchRazPayload, Body()] = _RAZ_DEFAULT,
+):
     """Réinitialise l'évaluation algorithmique lors d'un changement de marque de granulés."""
-    brand = str(payload.get("pellet_brand") or "Nouveau Lot Certifié A1")
+    require_installer_auth_if_configured(request)
+    brand = (payload.pellet_brand or "Nouveau Lot Certifié A1").strip() or "Nouveau Lot Certifié A1"
     return await reset_pellet_batch_calibration(brand)
 
 
@@ -225,9 +238,16 @@ async def api_sync_clock():
     return {"status": "ok", "synced_to": now.strftime("%H:%M %d/%m/%Y"), "latest": latest}
 
 
-@router.post("/rollback/{audit_id}", responses={404: {"description": "Entrée d'audit introuvable"}})
-async def api_rollback(audit_id: int = Path(..., ge=1, le=9223372036854775807)):
+@router.post(
+    "/rollback/{audit_id}",
+    responses={
+        403: {"description": "Authentification installateur requise"},
+        404: {"description": "Entrée d'audit introuvable"},
+    },
+)
+async def api_rollback(request: Request, audit_id: _AuditIdPath):
     """Restaure une valeur antérieure de registre depuis le journal d'audit."""
+    require_installer_auth_if_configured(request)
     active_mode = get_active_mode()
     conn = get_db(active_mode)
     try:

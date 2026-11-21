@@ -18,5 +18,7 @@ __pycache__
 *.db
 *.db-wal
 *.db-shm
+.secret.key
 data/
+node_modules/
 matter_bridge/node_modules

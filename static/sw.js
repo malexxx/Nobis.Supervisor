@@ -3,9 +3,28 @@ const CACHE_NAME = 'nobis-cockpit-v2.1.2';
 const PRECACHE_ASSETS = [
   '/',
   '/manifest.json',
+  '/static/css/tailwind.generated.css',
   '/static/css/styles.css',
+  '/static/css/calibration_wizard.css',
+  '/static/vendor/chart.umd.min.js',
   '/static/js/state.js',
-  '/static/js/charts.js',
+  '/static/js/calibration_wizard_ui.js',
+  '/static/js/charts/series_utils.js',
+  '/static/js/charts/cockpit_charts.js',
+  '/static/js/charts/security_pane.js',
+  '/static/js/core/ui_core.js',
+  '/static/js/features/stove_control.js',
+  '/static/js/features/silence.js',
+  '/static/js/features/chrono.js',
+  '/static/js/features/pellets_ai.js',
+  '/static/js/features/weather_flower.js',
+  '/static/js/features/installer.js',
+  '/static/js/features/settings.js',
+  '/static/js/features/tls.js',
+  '/static/js/features/matter.js',
+  '/static/js/features/triarc_controller.js',
+  '/static/js/features/triarc_render.js',
+  '/static/js/core/sync.js',
   '/static/js/app.js',
   '/static/icon-192.png',
   '/static/icon-512.png',
@@ -48,7 +67,26 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Stratégie Réseau d'abord avec repli sur le cache pour les fichiers statiques et pages
+  // Stratégie Cache-First pour les assets statiques versionnés (/static/*) : chargement quasi instantané
+  if (url.pathname.startsWith('/static/')) {
+    event.respondWith(
+      caches.match(event.request, { ignoreSearch: true }).then((cached) => {
+        if (cached) return cached;
+        return fetch(event.request).then((response) => {
+          if (response && response.status === 200 && response.type === 'basic') {
+            const responseToCache = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, responseToCache);
+            });
+          }
+          return response;
+        });
+      })
+    );
+    return;
+  }
+
+  // Stratégie Réseau d'abord avec repli sur le cache pour la page SPA (/) et manifest.json
   event.respondWith(
     fetch(event.request)
       .then((response) => {
@@ -62,8 +100,8 @@ self.addEventListener('fetch', (event) => {
         return response;
       })
       .catch(() => {
-        // En cas de perte de connexion réseau, servir la version en cache si disponible
-        return caches.match(event.request);
+        // En cas de perte de connexion réseau, servir la version en cache (ignoreSearch tolère ?v=...)
+        return caches.match(event.request, { ignoreSearch: true });
       })
   );
 });

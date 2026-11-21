@@ -13,7 +13,8 @@ services:
       - TZ=Europe/Paris
       - DB_PATH=/app/data/nobis_a10.db
       - HTTPS_DEFAULT_MODE=http
-      - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_TOKEN:-nobis-watchtower}
+      - TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS:-127.0.0.1,::1,172.16.0.0/12}
+      - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_TOKEN:?Definissez WATCHTOWER_TOKEN (ex: openssl rand -hex 24) dans votre fichier .env}
 
   caddy:
     image: caddy:alpine
@@ -34,7 +35,7 @@ services:
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    command: --interval 3600 --cleanup --http-api-update --http-api-token ${WATCHTOWER_TOKEN:-nobis-watchtower} nobis.supervisor
+    command: --interval 3600 --cleanup --http-api-update --http-api-token ${WATCHTOWER_TOKEN:?Definissez WATCHTOWER_TOKEN dans votre fichier .env} nobis.supervisor
 
 volumes:
   nobis_data:

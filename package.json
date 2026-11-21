@@ -1,0 +1,12 @@
+{
+  "name": "nobis-supervisor-frontend",
+  "version": "2.1.2",
+  "private": true,
+  "description": "Compilation statique Tailwind CSS pour Nobis.Supervisor (PWA 100 % hors-ligne)",
+  "scripts": {
+    "build:css": "tailwindcss -i ./static/css/tailwind.input.css -o ./static/css/tailwind.generated.css --minify"
+  },
+  "devDependencies": {
+    "tailwindcss": "3.4.17"
+  }
+}

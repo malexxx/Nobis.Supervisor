@@ -8,100 +8,28 @@ Dépôt cible : https://github.com/malexxx/Nobis.Supervisor
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, asdict
-from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
+from collections.abc import Callable
 
+from .models import (
+    CalibrationMode,
+    CalibrationResult,
+    CalibrationState,
+    PhaseBreakdownStats,
+    StoveOperationalPhase,
+    TelemetrySample,
+)
+from .serializer import deserialize_engine, serialize_engine
 
-class CalibrationMode(str, Enum):
-    CONSUMPTION_ONLY = "CONSUMPTION_ONLY"   # Étalonnage débit (kg/h) seul
-    COMBUSTION_ONLY = "COMBUSTION_ONLY"     # Tarage combustion (Offsets 70/71) seul
-    COMBINED_BOTH = "COMBINED_BOTH"         # « Lancer les deux » (Protocole complet AL-03 -> AL-03)
-
-
-class CalibrationState(str, Enum):
-    IDLE = "IDLE"
-    PREFLIGHT_CHECK = "PREFLIGHT_CHECK"             # Vérification et désactivation P8 (Powerful)
-    WAITING_INITIAL_AL03 = "WAITING_INITIAL_AL03"   # Attente cuve 100% vide confirmée par AL-03
-    WAITING_COOLING_OFF = "WAITING_COOLING_OFF"     # Réarmement AL-03 et attente état ÉTEINT (OFF)
-    WAITING_CHARGE_WEIGHT = "WAITING_CHARGE_WEIGHT" # Pesée du sac étalon et amorçage vis sans fin
-    RUNNING_ACQUISITION = "RUNNING_ACQUISITION"     # Enregistrement télémétrique multi-phases P0..P8
-    COMPLETED_LOCKED = "COMPLETED_LOCKED"           # Clôture figée sur AL-03 final
-    ABORTED_ERROR = "ABORTED_ERROR"
-
-
-class StoveOperationalPhase(str, Enum):
-    OFF = "ETEINT"
-    STARTING = "MISE_EN_MARCHE"                     # Préchauffage bougie + pré-charge granulés
-    WAITING_FLAME = "ATTENTE_FLAMME"                # Vis à 0 RPM, développement flamme sur air chaud
-    FLAME_PHASE = "PHASE_FLAMME"                    # Reprise vis sans fin et stabilisation brasero
-    WORK = "TRAVAIL"                                # Régime modulé P1 à P7 (Offsets 70/71 actifs)
-    ECONOMY_RIS = "ECONOMIE"                        # P0 : Modulation basse / RIS (consigne atteinte)
-    POWERFUL_BOOST = "POWERFUL"                     # P8 : Boost ventilation max + surcharge
-    BRAZIER_CLEANING = "NETTOYAGE_BRASERO"          # Nettoyage périodique en marche (extracteur poussé)
-    ACTIVE_CLEANER_CYCLE = "DISPOSITIF_NETTOYAGE_ACTIF"  # Extinction auto + raclage mécanique + rallumage
-    REIGNITION = "RALLUMAGE"                        # Attente refroidissement avant redémarrage auto
-    COOLING_FINAL = "NETTOYAGE_FINAL"               # Extinction : vis à 0 RPM, refroidissement échangeur
-    CLIMATE_COMFORT_STANDBY = "CONFORT_CLIMAT_ECO"  # Veille thermique ECO (poêle arrêté)
-    ALARM = "ALARME"                                # Arrêt sécurité (AL-01 à AL-29)
-
-
-@dataclass
-class TelemetrySample:
-    timestamp: float
-    phase: StoveOperationalPhase
-    power_level: int                  # 0 (P0/RIS), 1..7 (P1..P7), 8 (P8/Powerful)
-    alarm_code: Optional[str]         # ex: "AL-03", "AL-02", "AL-16", None
-    auger_rpm_actual: float           # VIS S. FIN (RPM réel lu sur encodeur BLDC 24V)
-    auger_rpm_set: float              # SET V.S.F. (RPM consigne)
-    auger_current_ma: float           # AMP. V.S.F. (mA - chute < 65 mA si vis tourne à vide)
-    flue_pressure_pa: float           # PRS (Pa)
-    flue_pressure_set_pa: float       # SET PRS (Pa)
-    smoke_extractor_rpm: float        # EXT. FUMEES (RPM)
-    flame_temp_c: float               # T. FLAMME (°C - Sonde K foyer)
-    smoke_temp_c: float               # T. HOT FUM (°C - Sonde fumées)
-    room_temp_c: float                # T. PALMAR (°C)
-    offset_70_pellet: int             # MELANGE P/A -> PELLET (-5 à +5 %)
-    offset_71_air: int                # MELANGE P/A -> PRISE D AIR (-5 à +5 %)
-    powerful_enabled_mode: str        # "OFF", "ON", "CHRONO"
-    optima_flame_active: bool = False
-    anticondensation_active: bool = False
-    excessive_load_flag: bool = False
-    hot_fumes_flag: bool = False
-    hopper_lid_open: bool = False
-    door_or_ashtray_open: bool = False
-
-
-@dataclass
-class PhaseBreakdownStats:
-    ignition_cycles_count: int = 0
-    startup_phases_duration_min: float = 0.0
-    startup_estimated_mass_kg: float = 0.0
-    brazier_cleaning_duration_min: float = 0.0
-    cooling_extinction_ignored_min: float = 0.0
-    starvation_pre_al03_ignored_min: float = 0.0
-    purged_pre_al03_combustion_samples: int = 0
-    warmup_filtered_combustion_samples: int = 0
-
-
-@dataclass
-class CalibrationResult:
-    mode: CalibrationMode
-    weighed_bag_kg: float
-    intrinsic_k_factor: float
-    before_flows_kgh: Dict[int, float]
-    measured_raw_flows_kgh: Dict[int, float]
-    coupled_effective_flows_kgh: Dict[int, float]
-    recommended_offset_70: int
-    recommended_offset_71: int
-    current_offset_70: int
-    current_offset_71: int
-    time_per_power_hours: Dict[int, float]
-    phase_stats: PhaseBreakdownStats
-    mean_smoke_temp_delta_c: float
-    mean_pressure_error_pct: float
-    diagnostic_summary: str
-    closed_by_al03: bool
+__all__ = [
+    "CalibrationMode",
+    "CalibrationState",
+    "StoveOperationalPhase",
+    "TelemetrySample",
+    "PhaseBreakdownStats",
+    "CalibrationResult",
+    "NobisA10CalibrationEngine",
+]
 
 
 class NobisA10CalibrationEngine:
@@ -112,7 +40,7 @@ class NobisA10CalibrationEngine:
     """
 
     # Débits nominaux certifiés (IMQ CS25-0117813-01) de P1 (0.86 kg/h) à P7 (2.16 kg/h)
-    NOMINAL_FLOWS_KGH: Dict[int, float] = {
+    NOMINAL_FLOWS_KGH: dict[int, float] = {
         0: 0.860,  # P0 : ÉCONOMIE / RIS (ajusté dynamiquement par ratio RPM si SET V.S.F. < P1)
         1: 0.860,  # P1 : Puissance réduite certifiée (4.1 kW in / 3.8 kW out)
         2: 1.077,
@@ -125,7 +53,7 @@ class NobisA10CalibrationEngine:
     }
 
     # Températures théoriques des fumées (°C) par palier stabilisé P1..P7
-    REF_SMOKE_TEMPS_C: Dict[int, float] = {
+    REF_SMOKE_TEMPS_C: dict[int, float] = {
         1: 101.0,
         2: 112.2,
         3: 123.3,
@@ -156,8 +84,8 @@ class NobisA10CalibrationEngine:
         self.priming_extracted_mass_kg: float = 0.0
 
         # Accumulateurs gravimétriques par palier (P0 à P8)
-        self.raw_time_seconds: Dict[int, float] = {k: 0.0 for k in range(0, 9)}
-        self.weighted_time_hours: Dict[int, float] = {k: 0.0 for k in range(0, 9)}
+        self.raw_time_seconds: dict[int, float] = {k: 0.0 for k in range(9)}
+        self.weighted_time_hours: dict[int, float] = {k: 0.0 for k in range(9)}
 
         # Accumulateurs spécifiques aux phases transitoires d'allumage (indépendants de l'Offset 70)
         self.startup_equivalent_p7_hours: float = 0.0
@@ -165,16 +93,16 @@ class NobisA10CalibrationEngine:
         self.phase_stats: PhaseBreakdownStats = PhaseBreakdownStats()
 
         # Tampons et repères temporels pour le tarage de combustion P/A
-        self.telemetry_window: List[TelemetrySample] = []
-        self._last_sample: Optional[TelemetrySample] = None
+        self.telemetry_window: list[TelemetrySample] = []
+        self._last_sample: TelemetrySample | None = None
         self._last_p8_timestamp: float = -1e9
         self._last_ignition_end_ts: float = -1e9
         self._current_tier_entry_ts: float = 0.0
         self._in_ignition_sequence: bool = False
         self._overload_event_detected: bool = False
-        self.result: Optional[CalibrationResult] = None
+        self.result: CalibrationResult | None = None
 
-    def get_effective_flow_rates(self, offset_70: int) -> Dict[int, float]:
+    def get_effective_flow_rates(self, offset_70: int) -> dict[int, float]:
         """
         Couplage mathématique bidirectionnel :
         Tout ajustement du tarage de la vis sans fin (Offset 70 : -5% à +5%)
@@ -190,8 +118,8 @@ class NobisA10CalibrationEngine:
     def start_process(self, mode: CalibrationMode) -> CalibrationState:
         """Réinitialise tous les accumulateurs et lance le pré-contrôle (désactivation P8)."""
         self.mode = mode
-        self.raw_time_seconds = {k: 0.0 for k in range(0, 9)}
-        self.weighted_time_hours = {k: 0.0 for k in range(0, 9)}
+        self.raw_time_seconds = {k: 0.0 for k in range(9)}
+        self.weighted_time_hours = {k: 0.0 for k in range(9)}
         self.startup_equivalent_p7_hours = 0.0
         self.startup_rpm_telemetry_available = False
         self.phase_stats = PhaseBreakdownStats()
@@ -208,8 +136,8 @@ class NobisA10CalibrationEngine:
     def verify_preflight_and_disable_p8(
         self,
         sample: TelemetrySample,
-        disable_p8_callback: Optional[Callable[[], bool]] = None
-    ) -> Tuple[bool, str]:
+        disable_p8_callback: Callable[[], bool] | None = None
+    ) -> tuple[bool, str]:
         """
         Vérifie que le mode Boost POWERFUL (P8) est désactivé (OFF).
         Si actif (ON ou CHRONO), déclenche sa désactivation automatique.
@@ -231,7 +159,7 @@ class NobisA10CalibrationEngine:
         self.state = CalibrationState.WAITING_INITIAL_AL03
         return True, "Pré-contrôle validé (Boost P8 désactivé). En attente de l'état initial AL-03."
 
-    def confirm_initial_al03(self, sample: TelemetrySample) -> Tuple[bool, str]:
+    def confirm_initial_al03(self, sample: TelemetrySample) -> tuple[bool, str]:
         """Valide le point de départ : cuve 100% vide et vis purgée confirmées par AL-03."""
         if sample.alarm_code != "AL-03":
             return False, f"État actuel ({sample.alarm_code or sample.phase.value}) différent de AL-03."
@@ -243,7 +171,7 @@ class NobisA10CalibrationEngine:
         sample: TelemetrySample,
         weighed_bag_kg: float,
         priming_aspirated_kg: float = 0.0
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """
         Enregistre la charge étalon pesée une fois le poêle en état ÉTEINT (ou NETTOYAGE FINAL)
         et déduit éventuellement la masse aspirée dans le brasero après CRG. VIS S. FIN.
@@ -269,9 +197,116 @@ class NobisA10CalibrationEngine:
 
         work_mass = sum(
             self.NOMINAL_FLOWS_KGH[k] * self.weighted_time_hours[k]
-            for k in range(0, 9)
+            for k in range(9)
         )
         return (startup_mass + work_mass) * self.k_intrinsic
+
+    def _ingest_ignition_phase(self, sample: TelemetrySample, dt_sec: float) -> None:
+        if not self._in_ignition_sequence:
+            self._in_ignition_sequence = True
+            self.phase_stats.ignition_cycles_count += 1
+        self.phase_stats.startup_phases_duration_min += dt_sec / 60.0
+        if sample.auger_rpm_actual > 0:
+            self.startup_rpm_telemetry_available = True
+            rpm_ratio = sample.auger_rpm_actual / self.REF_P7_AUGER_RPM
+            self.startup_equivalent_p7_hours += rpm_ratio * (dt_sec / 3600.0)
+        self._last_ignition_end_ts = sample.timestamp
+
+    def _resolve_production_tier(self, sample: TelemetrySample) -> int:
+        if sample.phase == StoveOperationalPhase.ECONOMY_RIS:
+            if sample.auger_rpm_set > 0:
+                self.NOMINAL_FLOWS_KGH[0] = round(
+                    self.NOMINAL_FLOWS_KGH[1] * (sample.auger_rpm_set / self.REF_P1_AUGER_RPM), 3
+                )
+            return 0
+        if sample.phase == StoveOperationalPhase.POWERFUL_BOOST:
+            self._last_p8_timestamp = sample.timestamp
+            if sample.auger_rpm_set > 0:
+                self.NOMINAL_FLOWS_KGH[8] = round(
+                    self.NOMINAL_FLOWS_KGH[7] * (sample.auger_rpm_set / self.REF_P7_AUGER_RPM), 3
+                )
+            return 8
+        return max(0, min(8, sample.power_level))
+
+    def _is_starving_before_al03(self, sample: TelemetrySample, dt_sec: float) -> bool:
+        if dt_sec <= 0 or sample.auger_current_ma >= self.EMPTY_AUGER_CURRENT_MA or self._last_sample is None:
+            return False
+        dt_min = dt_sec / 60.0
+        flame_drop = (sample.flame_temp_c - self._last_sample.flame_temp_c) / dt_min
+        smoke_drop = (sample.smoke_temp_c - self._last_sample.smoke_temp_c) / dt_min
+        return flame_drop < -15.0 or smoke_drop < -4.0
+
+    def _ingest_production_phase(self, sample: TelemetrySample, dt_sec: float) -> None:
+        if sample.phase == StoveOperationalPhase.BRAZIER_CLEANING:
+            self.phase_stats.brazier_cleaning_duration_min += dt_sec / 60.0
+
+        k = self._resolve_production_tier(sample)
+        is_starving = self._is_starving_before_al03(sample, dt_sec)
+
+        if is_starving:
+            self.phase_stats.starvation_pre_al03_ignored_min += dt_sec / 60.0
+        else:
+            alpha = 1.0
+            if sample.optima_flame_active:
+                alpha *= 0.92
+            if sample.anticondensation_active:
+                alpha *= 1.05
+            offset_factor = 1.0 + (sample.offset_70_pellet / 100.0)
+            self.raw_time_seconds[k] += dt_sec
+            self.weighted_time_hours[k] += alpha * offset_factor * (dt_sec / 3600.0)
+
+        if sample.phase == StoveOperationalPhase.WORK and 1 <= sample.power_level <= 7 and not is_starving:
+            if (
+                sample.timestamp - self._last_p8_timestamp > self.POST_P8_COOLDOWN_SEC
+                and sample.timestamp - self._last_ignition_end_ts >= self.POST_IGNITION_WARMUP_SEC
+                and sample.timestamp - self._current_tier_entry_ts >= self.MIN_STABLE_TIER_DURATION_SEC
+            ):
+                self.telemetry_window.append(sample)
+            else:
+                self.phase_stats.warmup_filtered_combustion_samples += 1
+
+    def _should_finalize_on_alarm(self, sample: TelemetrySample) -> bool:
+        if sample.alarm_code == "AL-03":
+            return True
+        return (
+            sample.alarm_code == "AL-02"
+            and self.weighed_mass_kg > 0
+            and self.get_current_estimated_consumed_mass_kg() >= 0.92 * self.weighed_mass_kg
+        )
+
+    _IGNITION_PHASES = frozenset({
+        StoveOperationalPhase.STARTING,
+        StoveOperationalPhase.WAITING_FLAME,
+        StoveOperationalPhase.FLAME_PHASE,
+    })
+    _IGNORED_PHASES = frozenset({
+        StoveOperationalPhase.COOLING_FINAL,
+        StoveOperationalPhase.OFF,
+        StoveOperationalPhase.CLIMATE_COMFORT_STANDBY,
+        StoveOperationalPhase.ACTIVE_CLEANER_CYCLE,
+        StoveOperationalPhase.REIGNITION,
+        StoveOperationalPhase.ALARM,
+    })
+    _PRODUCTION_PHASES = frozenset({
+        StoveOperationalPhase.WORK,
+        StoveOperationalPhase.ECONOMY_RIS,
+        StoveOperationalPhase.POWERFUL_BOOST,
+        StoveOperationalPhase.BRAZIER_CLEANING,
+    })
+
+    def _dispatch_phase(self, sample: TelemetrySample, dt_sec: float) -> None:
+        if sample.phase in self._IGNITION_PHASES:
+            self._ingest_ignition_phase(sample, dt_sec)
+            return
+
+        if self._in_ignition_sequence:
+            self._in_ignition_sequence = False
+            self._last_ignition_end_ts = sample.timestamp
+
+        if sample.phase in self._IGNORED_PHASES:
+            self.phase_stats.cooling_extinction_ignored_min += dt_sec / 60.0
+        elif sample.phase in self._PRODUCTION_PHASES:
+            self._ingest_production_phase(sample, dt_sec)
 
     def ingest_telemetry(self, sample: TelemetrySample) -> CalibrationState:
         """
@@ -283,152 +318,22 @@ class NobisA10CalibrationEngine:
         """
         if self.state != CalibrationState.RUNNING_ACQUISITION:
             return self.state
-
         if self._last_sample is None:
             self._last_sample = sample
             self._current_tier_entry_ts = sample.timestamp
             return self.state
 
         dt_sec = max(0.0, sample.timestamp - self._last_sample.timestamp)
-
-        # Mise à jour du timer de stabilisation lors d'un changement de palier ou de phase
-        if (sample.power_level != self._last_sample.power_level or
-                sample.phase != self._last_sample.phase):
+        if sample.power_level != self._last_sample.power_level or sample.phase != self._last_sample.phase:
             self._current_tier_entry_ts = sample.timestamp
-
-        # Enregistrement des drapeaux d'anomalie de surcharge thermique
         if sample.excessive_load_flag or sample.hot_fumes_flag:
             self._overload_event_detected = True
 
-        # --- DÉTECTION DE FIN DE CYCLE : AL-03 (ou AL-02 en fin de trémie > 92% à l'allumage) ---
-        if sample.alarm_code == "AL-03":
+        if self._should_finalize_on_alarm(sample):
             self._finalize_calibration(sample, closed_by_al03=True)
             return self.state
-
-        if (sample.alarm_code == "AL-02" and
-                self.weighed_mass_kg > 0 and
-                self.get_current_estimated_consumed_mass_kg() >= 0.92 * self.weighed_mass_kg):
-            # Cas limite : panne sèche survenant exactement pendant un rallumage automatique
-            self._finalize_calibration(sample, closed_by_al03=True)
-            return self.state
-
-        # Suspension sécurité si trémie ou porte ouverte (vis coupée par la carte mère)
-        if sample.hopper_lid_open or sample.door_or_ashtray_open:
-            self._last_sample = sample
-            return self.state
-
-        # --- CAS 1 : PHASES D'ALLUMAGE (MISE_EN_MARCHE, ATTENTE_FLAMME, PHASE_FLAMME) ---
-        if sample.phase in (
-            StoveOperationalPhase.STARTING,
-            StoveOperationalPhase.WAITING_FLAME,
-            StoveOperationalPhase.FLAME_PHASE,
-        ):
-            if not self._in_ignition_sequence:
-                self._in_ignition_sequence = True
-                self.phase_stats.ignition_cycles_count += 1
-
-            self.phase_stats.startup_phases_duration_min += dt_sec / 60.0
-
-            # Intégration exacte par encodeur RPM du motoréducteur BLDC (indépendant de l'Offset 70)
-            # En ATTENTE_FLAMME, auger_rpm_actual == 0 donc l'intégrale ajoute 0.0 kg
-            if sample.auger_rpm_actual > 0:
-                self.startup_rpm_telemetry_available = True
-                rpm_ratio = sample.auger_rpm_actual / self.REF_P7_AUGER_RPM
-                self.startup_equivalent_p7_hours += rpm_ratio * (dt_sec / 3600.0)
-
-            self._last_ignition_end_ts = sample.timestamp
-            self._last_sample = sample
-            return self.state
-
-        # Sortie de la séquence d'allumage
-        if self._in_ignition_sequence:
-            self._in_ignition_sequence = False
-            self._last_ignition_end_ts = sample.timestamp
-
-        # --- CAS 2 : PHASES D'EXTINCTION NORMALE, REFROIDISSEMENT ET VEILLE ---
-        if sample.phase in (
-            StoveOperationalPhase.COOLING_FINAL,
-            StoveOperationalPhase.OFF,
-            StoveOperationalPhase.CLIMATE_COMFORT_STANDBY,
-            StoveOperationalPhase.ACTIVE_CLEANER_CYCLE,
-            StoveOperationalPhase.REIGNITION,
-            StoveOperationalPhase.ALARM,
-        ):
-            # Vis sans fin à l'arrêt (0 RPM) et extracteur en refroidissement : on ignore totalement
-            self.phase_stats.cooling_extinction_ignored_min += dt_sec / 60.0
-            self._last_sample = sample
-            return self.state
-
-        # --- CAS 3 : PHASES DE PRODUCTION THERMIQUE (TRAVAIL P1..P7, P0 RIS, P8 POWERFUL, NETTOYAGE BRASERO) ---
-        if sample.phase in (
-            StoveOperationalPhase.WORK,
-            StoveOperationalPhase.ECONOMY_RIS,
-            StoveOperationalPhase.POWERFUL_BOOST,
-            StoveOperationalPhase.BRAZIER_CLEANING,
-        ):
-            if sample.phase == StoveOperationalPhase.BRAZIER_CLEANING:
-                self.phase_stats.brazier_cleaning_duration_min += dt_sec / 60.0
-
-            # Identification du palier effectif k in {0..8}
-            if sample.phase == StoveOperationalPhase.ECONOMY_RIS:
-                k = 0
-                if sample.auger_rpm_set > 0:
-                    self.NOMINAL_FLOWS_KGH[0] = round(
-                        self.NOMINAL_FLOWS_KGH[1] * (sample.auger_rpm_set / self.REF_P1_AUGER_RPM), 3
-                    )
-            elif sample.phase == StoveOperationalPhase.POWERFUL_BOOST:
-                k = 8
-                self._last_p8_timestamp = sample.timestamp
-                if sample.auger_rpm_set > 0:
-                    self.NOMINAL_FLOWS_KGH[8] = round(
-                        self.NOMINAL_FLOWS_KGH[7] * (sample.auger_rpm_set / self.REF_P7_AUGER_RPM), 3
-                    )
-            else:
-                k = max(0, min(8, sample.power_level))
-
-            # Détection de l'extinction par famine de fin de cuve (vis tournant à vide juste avant AL-03)
-            flame_drop_rate_c_per_min = (
-                (sample.flame_temp_c - self._last_sample.flame_temp_c) / (dt_sec / 60.0)
-                if dt_sec > 0 else 0.0
-            )
-            smoke_drop_rate_c_per_min = (
-                (sample.smoke_temp_c - self._last_sample.smoke_temp_c) / (dt_sec / 60.0)
-                if dt_sec > 0 else 0.0
-            )
-            is_starving_empty = (
-                sample.auger_current_ma < self.EMPTY_AUGER_CURRENT_MA
-                and (flame_drop_rate_c_per_min < -15.0 or smoke_drop_rate_c_per_min < -4.0)
-            )
-
-            if is_starving_empty:
-                # La vis tourne dans le vide en attendant que la chute de T° déclenche AL-03
-                self.phase_stats.starvation_pre_al03_ignored_min += dt_sec / 60.0
-            else:
-                # Facteurs modificateurs internes du firmware Micronova
-                alpha = 1.0
-                if sample.optima_flame_active:
-                    alpha *= 0.92
-                if sample.anticondensation_active:
-                    alpha *= 1.05
-
-                offset_factor = 1.0 + (sample.offset_70_pellet / 100.0)
-                self.raw_time_seconds[k] += dt_sec
-                self.weighted_time_hours[k] += alpha * offset_factor * (dt_sec / 3600.0)
-
-            # --- FILTRAGE STRICT POUR LE TARAGE DE COMBUSTION (Offsets 70/71) ---
-            # Exclusion de P0 (RIS), P8 (Powerful + 5 min), Nettoyage Brasero, Famine pré-AL03,
-            # ainsi que des 20 min de chauffe initiale post-allumage et 15 min de transition de palier.
-            time_since_p8 = sample.timestamp - self._last_p8_timestamp
-            time_since_ignition = sample.timestamp - self._last_ignition_end_ts
-            tier_stability_duration = sample.timestamp - self._current_tier_entry_ts
-
-            if sample.phase == StoveOperationalPhase.WORK and 1 <= sample.power_level <= 7 and not is_starving_empty:
-                if (time_since_p8 > self.POST_P8_COOLDOWN_SEC and
-                        time_since_ignition >= self.POST_IGNITION_WARMUP_SEC and
-                        tier_stability_duration >= self.MIN_STABLE_TIER_DURATION_SEC):
-                    self.telemetry_window.append(sample)
-                else:
-                    self.phase_stats.warmup_filtered_combustion_samples += 1
+        if not (sample.hopper_lid_open or sample.door_or_ashtray_open):
+            self._dispatch_phase(sample, dt_sec)
 
         self._last_sample = sample
         return self.state
@@ -461,7 +366,7 @@ class NobisA10CalibrationEngine:
             net_mass_kg = max(0.1, self.weighed_mass_kg - self.priming_extracted_mass_kg)
             theoretical_work_mass = sum(
                 self.NOMINAL_FLOWS_KGH[k] * self.weighted_time_hours[k]
-                for k in range(0, 9)
+                for k in range(9)
             )
             theoretical_total_mass = theoretical_startup_mass + theoretical_work_mass
             if theoretical_total_mass > 0.5:
@@ -522,12 +427,12 @@ class NobisA10CalibrationEngine:
             rec_off70 = cur_off70
             rec_off71 = cur_off71
 
-        before_flows = {k: round(self.NOMINAL_FLOWS_KGH[k], 3) for k in range(0, 9)}
+        before_flows = {k: round(self.NOMINAL_FLOWS_KGH[k], 3) for k in range(9)}
         raw_measured_flows = {
-            k: round(self.NOMINAL_FLOWS_KGH[k] * self.k_intrinsic, 3) for k in range(0, 9)
+            k: round(self.NOMINAL_FLOWS_KGH[k] * self.k_intrinsic, 3) for k in range(9)
         }
         coupled_flows = self.get_effective_flow_rates(rec_off70)
-        hours_by_tier = {k: round(self.raw_time_seconds[k] / 3600.0, 2) for k in range(0, 9)}
+        hours_by_tier = {k: round(self.raw_time_seconds[k] / 3600.0, 2) for k in range(9)}
 
         diag = (
             f"Facteur K={self.k_intrinsic:.4f} ({eps_m_pct:+.1f}%). "
@@ -561,7 +466,7 @@ class NobisA10CalibrationEngine:
         self,
         agua_write_register_fn: Callable[[int, int], bool],
         agua_read_register_fn: Callable[[int], int],
-    ) -> Tuple[bool, Dict[int, float], str]:
+    ) -> tuple[bool, dict[int, float], str]:
         """
         Applique en 1 clic les Offsets 70 et 71 dans l'EEPROM de la carte Micronova
         avec vérification Read-After-Write, et met à jour les débits horaires couplés.
@@ -592,99 +497,11 @@ class NobisA10CalibrationEngine:
         self.result.current_offset_71 = read_71
         return True, updated_flows, f"Offsets 70 ({read_70:+d}%) et 71 ({read_71:+d}%) appliqués et couplés."
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Sérialise l'état complet du moteur pour sauvegarde SQLite persistante."""
-        return {
-            "state": self.state.value,
-            "mode": self.mode.value,
-            "k_intrinsic": self.k_intrinsic,
-            "weighed_mass_kg": self.weighed_mass_kg,
-            "priming_extracted_mass_kg": self.priming_extracted_mass_kg,
-            "raw_time_seconds": {str(k): v for k, v in self.raw_time_seconds.items()},
-            "weighted_time_hours": {str(k): v for k, v in self.weighted_time_hours.items()},
-            "startup_equivalent_p7_hours": self.startup_equivalent_p7_hours,
-            "startup_rpm_telemetry_available": self.startup_rpm_telemetry_available,
-            "phase_stats": asdict(self.phase_stats),
-            "telemetry_window": [
-                {**asdict(s), "phase": s.phase.value}
-                for s in self.telemetry_window[-300:]
-            ],
-            "last_sample": (
-                {**asdict(self._last_sample), "phase": self._last_sample.phase.value}
-                if self._last_sample else None
-            ),
-            "last_p8_timestamp": self._last_p8_timestamp,
-            "last_ignition_end_ts": self._last_ignition_end_ts,
-            "current_tier_entry_ts": self._current_tier_entry_ts,
-            "in_ignition_sequence": self._in_ignition_sequence,
-            "overload_event_detected": self._overload_event_detected,
-            "result": (
-                {
-                    **asdict(self.result),
-                    "mode": self.result.mode.value,
-                    "phase_stats": asdict(self.result.phase_stats),
-                    "before_flows_kgh": {str(k): v for k, v in self.result.before_flows_kgh.items()},
-                    "measured_raw_flows_kgh": {str(k): v for k, v in self.result.measured_raw_flows_kgh.items()},
-                    "coupled_effective_flows_kgh": {str(k): v for k, v in self.result.coupled_effective_flows_kgh.items()},
-                    "time_per_power_hours": {str(k): v for k, v in self.result.time_per_power_hours.items()},
-                }
-                if self.result else None
-            ),
-        }
+        return serialize_engine(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> NobisA10CalibrationEngine:
+    def from_dict(cls, data: dict[str, Any]) -> NobisA10CalibrationEngine:
         """Désérialise l'état complet du moteur depuis un dump SQLite persisté."""
-        engine = cls(current_k_factor=float(data.get("k_intrinsic", 1.0)))
-        engine.state = CalibrationState(data.get("state", CalibrationState.IDLE.value))
-        engine.mode = CalibrationMode(data.get("mode", CalibrationMode.COMBINED_BOTH.value))
-        engine.weighed_mass_kg = float(data.get("weighed_mass_kg", 0.0))
-        engine.priming_extracted_mass_kg = float(data.get("priming_extracted_mass_kg", 0.0))
-
-        raw_ts = data.get("raw_time_seconds", {})
-        engine.raw_time_seconds = {int(k): float(v) for k, v in raw_ts.items()}
-        for k in range(0, 9):
-            engine.raw_time_seconds.setdefault(k, 0.0)
-
-        w_th = data.get("weighted_time_hours", {})
-        engine.weighted_time_hours = {int(k): float(v) for k, v in w_th.items()}
-        for k in range(0, 9):
-            engine.weighted_time_hours.setdefault(k, 0.0)
-
-        engine.startup_equivalent_p7_hours = float(data.get("startup_equivalent_p7_hours", 0.0))
-        engine.startup_rpm_telemetry_available = bool(data.get("startup_rpm_telemetry_available", False))
-
-        if "phase_stats" in data and isinstance(data["phase_stats"], dict):
-            engine.phase_stats = PhaseBreakdownStats(**data["phase_stats"])
-
-        def _parse_sample(d: Dict[str, Any]) -> TelemetrySample:
-            d_copy = dict(d)
-            if isinstance(d_copy.get("phase"), str):
-                d_copy["phase"] = StoveOperationalPhase(d_copy["phase"])
-            return TelemetrySample(**d_copy)
-
-        if "telemetry_window" in data and isinstance(data["telemetry_window"], list):
-            engine.telemetry_window = [_parse_sample(s) for s in data["telemetry_window"]]
-
-        if data.get("last_sample"):
-            engine._last_sample = _parse_sample(data["last_sample"])
-
-        engine._last_p8_timestamp = float(data.get("last_p8_timestamp", -1e9))
-        engine._last_ignition_end_ts = float(data.get("last_ignition_end_ts", -1e9))
-        engine._current_tier_entry_ts = float(data.get("current_tier_entry_ts", 0.0))
-        engine._in_ignition_sequence = bool(data.get("in_ignition_sequence", False))
-        engine._overload_event_detected = bool(data.get("overload_event_detected", False))
-
-        res_data = data.get("result")
-        if res_data and isinstance(res_data, dict):
-            res_copy = dict(res_data)
-            res_copy["mode"] = CalibrationMode(res_copy["mode"])
-            if isinstance(res_copy.get("phase_stats"), dict):
-                res_copy["phase_stats"] = PhaseBreakdownStats(**res_copy["phase_stats"])
-            res_copy["before_flows_kgh"] = {int(k): float(v) for k, v in res_copy.get("before_flows_kgh", {}).items()}
-            res_copy["measured_raw_flows_kgh"] = {int(k): float(v) for k, v in res_copy.get("measured_raw_flows_kgh", {}).items()}
-            res_copy["coupled_effective_flows_kgh"] = {int(k): float(v) for k, v in res_copy.get("coupled_effective_flows_kgh", {}).items()}
-            res_copy["time_per_power_hours"] = {int(k): float(v) for k, v in res_copy.get("time_per_power_hours", {}).items()}
-            engine.result = CalibrationResult(**res_copy)
-
-        return engine
+        return deserialize_engine(cls, data)

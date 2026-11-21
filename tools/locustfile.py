@@ -1,10 +1,10 @@
 """Scénarios de tests de charge et de montée en performance (Load Testing) avec Locust.
 
 Exécution en ligne de commande (CLI sans interface) :
-    locust -f locustfile.py --headless -u 20 -r 5 --run-time 30s --host http://localhost:8080
+    locust -f tools/locustfile.py --headless -u 20 -r 5 --run-time 30s --host http://localhost:8080
 
 Exécution avec tableau de bord web interactif :
-    locust -f locustfile.py --host http://localhost:8080
+    locust -f tools/locustfile.py --host http://localhost:8080
     (puis ouvrir http://localhost:8089 dans votre navigateur)
 """
 from locust import HttpUser, between, task

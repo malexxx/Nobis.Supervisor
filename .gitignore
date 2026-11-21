@@ -29,6 +29,7 @@ yarn-error.log*
 *.db
 *.db-wal
 *.db-shm
+.secret.key
 data/
 
 # IDE / Editor configuration
