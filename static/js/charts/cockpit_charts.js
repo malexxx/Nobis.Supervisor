@@ -436,7 +436,7 @@ function setSynchronizedHoverIndex(idx, pctLeft) {
   const deltaTxt = hasDelta ? `${deltaVal >= 0 ? "+" : ""}${Number(deltaVal).toFixed(1)}°C` : "--";
   const deltaClass = hasDelta ? (deltaVal > 30 ? "text-amber-400" : (deltaVal < -25 ? "text-rose-400" : "text-emerald-400")) : "text-gray-400";
   document.getElementById("hover-values-summary").innerHTML = `
-    <span>🏠 Salon: <b class="text-emerald-400">${escapeHtml(row.temp_ambient ?? "--")}°C</b></span>
+    <span>🏠 Salon: <b class="text-emerald-400">${escapeHtml(row.temp_ambient != null ? formatMeasuredTemp(row.temp_ambient) : "--")}°C</b></span>
     <span>🔥 Fumées: <b class="text-orange-400">${escapeHtml(row.temp_fumes ?? "--")}°C</b></span>
     <span>⚡ Puiss.: <b class="text-amber-400">${escapeHtml(row.power_actual !== undefined && row.power_actual !== null ? formatRealPower(row.power_actual) : "--")}</b></span>
     <span>⚖️ Écart Moy: <b class="${deltaClass}">${deltaTxt}</b></span>

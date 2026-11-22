@@ -113,9 +113,9 @@ function getTriArcTelemetryState() {
   const phaseIcon = meta ? meta.icon : (st === 0 ? "⚫" : "🔥");
   const phaseColor = meta ? meta.hex : (st === 5 ? "#ea580c" : "#94a3b8");
 
-  const realAmb = Number(latestData.temp_ambient ?? 20.0).toFixed(1);
-  const realSx = Number(latestData.duct_left_temp ?? 19.5).toFixed(1);
-  const realDx = Number(latestData.duct_right_temp ?? 19.0).toFixed(1);
+  const realAmb = formatMeasuredTemp(latestData.temp_ambient, 20);
+  const realSx = formatMeasuredTemp(latestData.duct_left_temp, 19);
+  const realDx = formatMeasuredTemp(latestData.duct_right_temp, 19);
 
   let spAmb = getTriArcLiveOrOpt("temp_amb_setpoint", getRegVal("temp_amb_setpoint", 20));
   let spSx = getTriArcLiveOrOpt("duct_left_setpoint", getRegVal("duct_left_setpoint", 20));
@@ -456,8 +456,7 @@ function renderTriArcSvgForZone(zone, T) {
       <text x="${CX}" y="79" text-anchor="middle" font-size="8.5" font-weight="800" fill="${zone === "SX" ? "#22d3ee" : (zone === "DX" ? "#38bdf8" : "#94a3b8")}" letter-spacing="0.5">${zone === "AMB" ? "" : escapeHtml((zone === "SX" ? (getDuctName("SX") === "SX" ? "CANAL. SX" : getDuctName("SX")) : (getDuctName("DX") === "DX" ? "CANAL. DX" : getDuctName("DX"))).toUpperCase().slice(0, 18))}</text>
 
       <!-- T° RÉELLE REDESCENDUE DANS LE CADRAN CENTRAL + FLÈCHE → CONSIGNE -->
-      <text x="${CX - 13}" y="134" text-anchor="middle" font-size="34" font-weight="900" fill="#ffffff">${realT}°</text>
-      <text x="${CX + 28}" y="124" text-anchor="start" font-size="12" font-weight="bold" fill="#fb923c">→ ${fmtTriArcTempSp(spT)}</text>
+      <text x="${CX}" y="134" text-anchor="middle"><tspan font-size="34" font-weight="900" fill="#ffffff">${realT}°</tspan><tspan dx="3" dy="-10" font-size="12" font-weight="bold" fill="#fb923c">→ ${fmtTriArcTempSp(spT)}</tspan></text>
 
       <!-- BULLE D'ÉTAT DU POÊLE (UNIQUEMENT SUR L'ÉCRAN CENTRAL AMB, DISPARAÎT SUR SX & DX) -->
       ${zone === "AMB" ? `

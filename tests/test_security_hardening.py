@@ -269,7 +269,7 @@ class TestSecurityHardening(BugBountyTestCase):
 
         with open(os.path.join(BASE_DIR, "static", "sw.js"), encoding="utf-8") as f:
             sw_js = f.read()
-        self.assertIn("nobis-cockpit-v2.1.2", sw_js)
+        self.assertIn("nobis-cockpit-v2.2.0", sw_js)
         self.assertIn("app.js", sw_js)
 
         r_spa = self.client.get("/")

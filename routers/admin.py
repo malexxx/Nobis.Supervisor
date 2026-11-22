@@ -1,17 +1,86 @@
-"""Sous-routeur d'administration système : redémarrage backend et mise à jour Git / Watchtower."""
+"""Sous-routeur d'administration système : redémarrage backend, stockage/sauvegarde ZIP et MAJ Git / Watchtower."""
 import asyncio
+from datetime import datetime
 import os
 import subprocess
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response
 import httpx
 
 from database import add_container_log, db_log, get_active_mode
-from services.installer_auth import require_installer_auth_if_configured
+from services.installer_auth import clear_installer_sessions, require_installer_auth_if_configured
 from services.lifecycle import spawn_background_task
+from services.storage_service import (
+    MAX_BACKUP_UPLOAD_BYTES,
+    create_backup_zip_bytes,
+    inspect_storage_persistence,
+    restore_backup_zip_bytes,
+)
 
 router = APIRouter(prefix="/api", tags=["System Admin"])
 _REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+@router.get("/system/storage")
+async def api_system_storage():
+    """Retourne le diagnostic de persistance du dossier DATA_DIR (bind mount, volume nommé, anonyme ou éphémère)."""
+    return await asyncio.to_thread(inspect_storage_persistence)
+
+
+@router.get(
+    "/system/backup",
+    responses={
+        200: {"content": {"application/zip": {}}},
+        403: {"description": "Authentification installateur requise"},
+    },
+)
+async def api_system_backup_download(request: Request):
+    """Télécharge une sauvegarde ZIP atomique complète (bases SQLite, .secret.key, certificats TLS et Matter)."""
+    require_installer_auth_if_configured(request)
+    zip_bytes = await asyncio.to_thread(create_backup_zip_bytes)
+    active_mode = await asyncio.to_thread(get_active_mode)
+    db_log("INFO", "BACKUP", f"Export sauvegarde complète généré ({len(zip_bytes)} octets).", active_mode)
+    add_container_log("INFO", "BACKUP", f"Export sauvegarde complète généré ({len(zip_bytes)} octets).")
+    filename = f"nobis_supervisor_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.post(
+    "/system/backup/restore",
+    responses={
+        400: {"description": "Archive ZIP invalide ou rejetée"},
+        403: {"description": "Authentification installateur requise"},
+        413: {"description": "Archive trop volumineuse"},
+    },
+)
+async def api_system_backup_restore(request: Request):
+    """Restaure atomiquement une sauvegarde ZIP validée dans DATA_DIR (bases SQLite, .secret.key, certs, Matter)."""
+    require_installer_auth_if_configured(request)
+    body = await request.body()
+    if len(body) > MAX_BACKUP_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Archive de sauvegarde trop volumineuse (limite 100 Mo).")
+
+    try:
+        result = await asyncio.to_thread(restore_backup_zip_bytes, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if "nobis_a10_system.db" in result.get("restored_files", []):
+        clear_installer_sessions()
+
+    active_mode = await asyncio.to_thread(get_active_mode)
+    msg = f"Restauration sauvegarde ZIP effectuée ({result['restored_count']} fichier(s))."
+    db_log("WARNING", "BACKUP", msg, active_mode)
+    add_container_log("WARNING", "BACKUP", msg)
+    return result
 
 
 @router.post("/system/restart", responses={403: {"description": "Authentification installateur requise"}})

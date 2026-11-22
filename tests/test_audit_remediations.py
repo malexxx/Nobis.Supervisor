@@ -329,9 +329,10 @@ class TestAuditRemediations(BugBountyTestCase):
         for html_rel in (os.path.join("static", "index.html"), os.path.join("src", "ui", "wizard_calibration.html")):
             with open(os.path.join(BASE_DIR, html_rel), encoding="utf-8") as f:
                 html_txt = f.read()
-            self.assertIn("/static/css/tailwind.generated.css?v=2.1.2", html_txt)
+            self.assertIn("/static/css/tailwind.generated.css?v=2.2.0", html_txt)
             self.assertNotIn("cdn.tailwindcss.com", html_txt)
             self.assertNotIn("cdn.jsdelivr.net", html_txt)
+            self.assertNotIn("?v=2.1.2", html_txt)
             self.assertNotIn("?v=2.1.3", html_txt)
 
         r_health = self.client.get("/health")
@@ -416,7 +417,7 @@ class TestAuditRemediations(BugBountyTestCase):
                     self.assertEqual(decrypt_secret(raw_cf), "")
 
     # ------------------------------------------------------------------
-    # R-01 / R-02 / R-03 : Manifest 2.1.2, échappement XSS, CSP durcie, anti-flood
+    # R-01 / R-02 / R-03 : Manifest 2.2.0, échappement XSS, CSP durcie, anti-flood
     # ------------------------------------------------------------------
     def test_r01_r02_r03_manifest_csp_no_inline_scripts_and_xss_escape(self):
         import json
@@ -424,7 +425,7 @@ class TestAuditRemediations(BugBountyTestCase):
 
         with open(os.path.join(BASE_DIR, "static", "manifest.json"), encoding="utf-8") as f:
             manifest = json.load(f)
-        self.assertEqual(manifest.get("version"), "2.1.2")
+        self.assertEqual(manifest.get("version"), "2.2.0")
 
         with open(os.path.join(BASE_DIR, "static", "index.html"), encoding="utf-8") as f:
             index_html = f.read()
@@ -477,7 +478,7 @@ class TestAuditRemediations(BugBountyTestCase):
     def test_perf_gzip_static_cache_slim_series_and_wcag_viewport(self):
         # 1. Static versionné -> Cache-Control immutable ; non-versionné -> max-age=3600
         r_ver = self.client.get(
-            "/static/css/tailwind.generated.css?v=2.1.2",
+            "/static/css/tailwind.generated.css?v=2.2.0",
             headers={"Accept-Encoding": "gzip"},
         )
         self.assertEqual(r_ver.status_code, 200)
@@ -506,7 +507,7 @@ class TestAuditRemediations(BugBountyTestCase):
         with open(os.path.join(BASE_DIR, "static", "index.html"), encoding="utf-8") as f:
             html = f.read()
         self.assertNotIn("user-scalable=no", html)
-        self.assertIn('<script defer src="/static/vendor/chart.umd.min.js?v=2.1.2"></script>', html)
+        self.assertIn('<script defer src="/static/vendor/chart.umd.min.js?v=2.2.0"></script>', html)
 
     def test_soa01_batch_evaluator_includes_first_27_rows_and_settings_cache_invalidation(self):
         from analytics.batch_evaluator import _collect_stabilized_batch_samples

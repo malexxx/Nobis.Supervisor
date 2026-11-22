@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Nobis.Supervisor — Cockpit Micronova & Passerelle Matter",
   "short_name": "Nobis.Supervisor",
-  "version": "2.1.2",
+  "version": "2.2.0",
   "description": "Supervision temps réel, pilotage Micronova V018_1, suivi trémie 35 kg & météo locale",
   "start_url": "/",
   "scope": "/",

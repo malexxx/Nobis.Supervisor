@@ -94,7 +94,9 @@ function renderMatterStatus(data) {
     modeEl.className = "text-sm font-bold mt-0.5 " + (isHeat ? "text-emerald-400" : "text-gray-400");
   }
   if (ambEl) {
-    ambEl.textContent = ls.localTemperatureC !== undefined ? `${Number(ls.localTemperatureC).toFixed(1)} °C` : "-- °C";
+    ambEl.textContent = ls.localTemperatureC !== undefined && ls.localTemperatureC !== null
+      ? `${formatMeasuredTemp(ls.localTemperatureC)} °C`
+      : "-- °C";
   }
   if (spEl) {
     spEl.textContent = ls.setpointC !== undefined ? `${Number(ls.setpointC).toFixed(0)} °C` : "-- °C";

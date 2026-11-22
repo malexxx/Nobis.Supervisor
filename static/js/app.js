@@ -20,6 +20,7 @@ window.addEventListener("DOMContentLoaded", () => {
   loadDashboard();
   initSSEStream();
   try { refreshMatterStatus(false); } catch (e) { console.error("[Init] MatterStatus:", e); }
+  try { if (typeof loadStorageStatus === "function") loadStorageStatus(); } catch (e) { console.error("[Init] StorageStatus:", e); }
   // Filet de sécurité adaptatif (60s) : inactif en arrière-plan ou lorsque le flux SSE est frais (< 150s)
   setInterval(() => {
     if (document.hidden) return;

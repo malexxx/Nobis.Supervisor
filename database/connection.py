@@ -83,6 +83,13 @@ def invalidate_settings_cache() -> None:
         _settings_cache["data"] = None
 
 
+def reset_db_caches() -> None:
+    """Réinitialise les caches mémoire SQLite (settings, état WAL et chmod) après une restauration."""
+    invalidate_settings_cache()
+    _wal_initialized_paths.clear()
+    _secured_sys_db_paths.clear()
+
+
 def _file_stat_sig(path: str) -> tuple[int, int] | None:
     try:
         st = os.stat(path)

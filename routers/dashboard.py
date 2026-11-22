@@ -25,6 +25,7 @@ from database import (
 )
 from services.installer_auth import _get_client_ip
 from services.silence_service import get_silence_status
+from services.storage_service import inspect_storage_persistence
 from telemetry import collect_telemetry_cycle, get_comm_status, sse_subscribers
 
 logger = logging.getLogger("nobis.dashboard")
@@ -136,6 +137,7 @@ async def serve_service_worker():
 async def healthcheck():
     """Point de contrôle de santé (healthcheck) pour Docker et les sondes de disponibilité."""
     mode = await asyncio.to_thread(get_active_mode)
+    storage = await asyncio.to_thread(inspect_storage_persistence)
     return {
         "status": "healthy",
         "version": APP_VERSION,
@@ -143,6 +145,8 @@ async def healthcheck():
         "timestamp": datetime.now().isoformat(),
         "active_mode": mode,
         "active_db": os.path.basename(MODE_DB_PATHS.get(mode, MODE_DB_PATHS["simulation"])),
+        "storage_status": storage["status"],
+        "storage_persistent": storage["persistent"],
         "comm_status": get_comm_status(),
     }
 

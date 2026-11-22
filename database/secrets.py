@@ -83,6 +83,13 @@ def _get_fernet() -> Fernet:
     return f
 
 
+def reset_secret_key_cache() -> None:
+    """Purge le cache mémoire de la clé Fernet (utile après restauration de data/.secret.key)."""
+    global _cached_fernet
+    with _key_lock:
+        _cached_fernet = None
+
+
 def is_encrypted_secret(value: str) -> bool:
     """Indique si une chaîne est déjà chiffrée avec le préfixe applicatif."""
     return isinstance(value, str) and value.startswith(ENC_PREFIX)

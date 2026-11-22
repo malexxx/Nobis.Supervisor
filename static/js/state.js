@@ -240,6 +240,20 @@ function formatTempSetpoint(val) {
 }
 
 /**
+ * Formate une température mesurée (supprime le ".0" inutile, conserve la décimale si non nulle).
+ * @param {number|string|null|undefined} val - Température en °C.
+ * @param {number} [fallback=20] - Valeur de repli si absente ou invalide.
+ * @returns {string} Ex: "22" pour 22.0, "20.5" pour 20.5.
+ */
+function formatMeasuredTemp(val, fallback = 20) {
+  const raw = (val === null || val === undefined || val === "") ? fallback : val;
+  const num = Number(raw);
+  if (!Number.isFinite(num)) return String(fallback);
+  const rounded = Math.round(num * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+/**
  * Formate la consigne de vitesse d'un ventilateur (0..8).
  * @param {number} val - Indice de vitesse (0=OFF, 8=Auto/PS).
  * @returns {string} Ex: "OFF", "PS (Auto)" ou "3/7".

@@ -61,6 +61,7 @@ from services.silence_service import (
     get_silence_status,
     save_silence_state,
 )
+from services.storage_service import inspect_storage_persistence
 from telemetry import collect_telemetry_cycle
 from tls_service import check_tls_renewal_job
 
@@ -152,6 +153,16 @@ async def lifespan(app: FastAPI):
         "CONTAINER",
         f"Démarrage Nobis.Supervisor v{APP_VERSION} (mode={active_mode}, docker={DOCKER_VERSION})",
     )
+    storage_info = inspect_storage_persistence()
+    if storage_info["warning"]:
+        add_container_log("WARNING", "STORAGE", storage_info["warning"])
+        db_log("WARNING", "STORAGE", storage_info["warning"], active_mode)
+    else:
+        add_container_log(
+            "INFO",
+            "STORAGE",
+            f"Stockage persistant vérifié ({storage_info['mount_type']} -> {storage_info['data_dir']}).",
+        )
 
     prepare_scheduler_for_running_loop()
     scheduler.add_job(collect_telemetry_cycle, "interval", seconds=interval_s, id="telemetry_job", replace_existing=True)

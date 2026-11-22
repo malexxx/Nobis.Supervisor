@@ -4,6 +4,7 @@
 
 let currentInstallerSubTab = null;
 let openSettingsAccId = null;
+let currentStorageStatus = null;
 
 function toggleSettingsAccordion(accId, forceOpen = false) {
   const targetBody = document.getElementById("acc-body-" + accId);
@@ -49,6 +50,8 @@ function toggleSettingsAccordion(accId, forceOpen = false) {
     updateConfigModalFields();
   } else if (accId === "zones") {
     updateDuctChevronPreview();
+  } else if (accId === "system") {
+    loadStorageStatus();
   }
 }
 
@@ -102,10 +105,10 @@ function updateDuctChevronPreview() {
   if (sumZones) sumZones.textContent = `${sx} • ${dx}`;
 
   // Hydrate les valeurs télémétriques des chevrons simulés avec les données réelles du poêle
-  const realSx = latestData && latestData.duct_left_temp != null ? Number(latestData.duct_left_temp).toFixed(1) : "17.0";
+  const realSx = latestData && latestData.duct_left_temp != null ? formatMeasuredTemp(latestData.duct_left_temp, 17) : "17";
   const spSx = getRegVal("duct_left_setpoint", 20);
   const fanSx = getRegVal("duct_left_speed", 8);
-  const realDx = latestData && latestData.duct_right_temp != null ? Number(latestData.duct_right_temp).toFixed(1) : "17.0";
+  const realDx = latestData && latestData.duct_right_temp != null ? formatMeasuredTemp(latestData.duct_right_temp, 17) : "17";
   const spDx = getRegVal("duct_right_setpoint", 20);
   const fanDx = getRegVal("duct_right_speed", 8);
 
@@ -244,9 +247,14 @@ function updateSettingsAccordionSummaries() {
   const rtcEl = document.getElementById("inst-clock-val");
   const verEl = document.getElementById("cfg-docker-version");
   const rtc = rtcEl ? rtcEl.textContent.trim() : "--:--";
-  const ver = verEl ? verEl.textContent.trim() : "v2.1.2";
+  const ver = verEl ? verEl.textContent.trim() : "v2.2.0";
   const sumSys = document.getElementById("acc-sum-system");
-  if (sumSys) sumSys.textContent = `RTC ${rtc} • Docker ${ver}`;
+  if (sumSys) {
+    const warnSuffix = (currentStorageStatus && currentStorageStatus.persistent === false)
+      ? " • ⚠️ Volume non persistant"
+      : "";
+    sumSys.textContent = `RTC ${rtc} • Docker ${ver}${warnSuffix}`;
+  }
 
   // 7. Expert
   const sumExp = document.getElementById("acc-sum-expert");
@@ -662,5 +670,134 @@ async function checkWatchtowerUpdate() {
     showToast(data.message || "✅ Vérification de mise à jour Watchtower déclenchée !");
   } catch (err) {
     showToast("Erreur réseau lors de l'appel à Watchtower.", true);
+  }
+}
+
+/**
+ * Met à jour l'indicateur de persistance du stockage et la bannière d'alerte volume Docker.
+ * @param {Object|null} info Charge utile de `/api/system/storage`.
+ */
+function renderStorageStatus(info) {
+  if (!info || typeof info.persistent !== "boolean") return;
+  currentStorageStatus = info;
+
+  const badgeEl = document.getElementById("cfg-storage-status");
+  const bannerEl = document.getElementById("storage-persistence-banner");
+  const labels = {
+    bind_mount: "✅ Persistant (bind)",
+    named_volume: "✅ Volume nommé",
+    host_fs: "✅ Disque local",
+    anonymous_volume: "⚠️ Volume anonyme",
+    container_layer: "🚨 Éphémère",
+  };
+  const label = labels[info.mount_type] || (info.persistent ? "✅ Persistant" : "⚠️ Non persistant");
+
+  if (badgeEl) {
+    badgeEl.textContent = label;
+    badgeEl.title = info.data_dir ? `${label} — ${info.data_dir}` : label;
+    badgeEl.className = info.persistent
+      ? "text-emerald-400 font-semibold text-xs truncate block mt-0.5"
+      : "text-amber-400 font-bold text-xs truncate block mt-0.5";
+  }
+
+  if (bannerEl) {
+    if (!info.persistent && info.warning) {
+      bannerEl.textContent = `⚠️ ${info.warning}`;
+      bannerEl.classList.remove("hidden");
+    } else {
+      bannerEl.textContent = "";
+      bannerEl.classList.add("hidden");
+    }
+  }
+
+  updateSettingsAccordionSummaries();
+}
+
+/** Charge le diagnostic de persistance du dossier de données via `/api/system/storage`. */
+async function loadStorageStatus() {
+  try {
+    const res = await fetch("/api/system/storage", { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    renderStorageStatus(data);
+  } catch (err) {
+    // Repli silencieux si hors-ligne
+  }
+}
+
+/** Télécharge une archive ZIP atomique complète (bases SQLite, clé Fernet, TLS, Matter). */
+async function downloadSystemBackup() {
+  try {
+    showToast("💾 Génération de la sauvegarde complète en cours...");
+    const res = await fetch("/api/system/backup", {
+      method: "GET",
+      headers: getInstallerHeaders(),
+    });
+    if (res.status === 403) {
+      showToast("🔒 Authentification installateur requise : déverrouillez l'onglet Expert & Registres.", true);
+      return;
+    }
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      showToast(errData.detail || "Échec de la génération de la sauvegarde.", true);
+      return;
+    }
+    const blob = await res.blob();
+    const disp = res.headers.get("content-disposition") || "";
+    const match = disp.match(/filename="?([^"]+)"?/i);
+    const filename = (match && match[1]) ? match[1] : "nobis_supervisor_backup.zip";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    showToast(`✅ Sauvegarde téléchargée (${filename}).`);
+  } catch (err) {
+    showToast("Erreur réseau lors du téléchargement de la sauvegarde.", true);
+  }
+}
+
+/** Ouvre le sélecteur de fichier ZIP pour restaurer une sauvegarde Nobis complète. */
+function triggerSystemBackupRestore() {
+  const inputEl = document.getElementById("system-backup-file-input");
+  if (!inputEl) return;
+  inputEl.value = "";
+  inputEl.click();
+}
+
+/** Envoie une archive ZIP sélectionnée vers `/api/system/backup/restore` et recharge l'état. */
+async function restoreSystemBackupFile(inputEl) {
+  const file = inputEl && inputEl.files && inputEl.files[0];
+  if (!file) return;
+  if (!confirm(`Restaurer la sauvegarde « ${file.name} » ? Les bases SQLite et réglages actuels seront remplacés.`)) {
+    inputEl.value = "";
+    return;
+  }
+  try {
+    showToast("📥 Restauration de la sauvegarde en cours...");
+    const res = await fetch("/api/system/backup/restore", {
+      method: "POST",
+      headers: getInstallerHeaders({ "Content-Type": "application/zip" }),
+      body: file,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403) {
+      showToast("🔒 Authentification installateur requise : déverrouillez l'onglet Expert & Registres.", true);
+      return;
+    }
+    if (!res.ok) {
+      showToast(data.detail || "Échec de la restauration de la sauvegarde.", true);
+      return;
+    }
+    showToast(`✅ ${data.message || "Sauvegarde restaurée avec succès !"}`);
+    if (typeof loadDashboard === "function") await loadDashboard();
+    loadStorageStatus();
+  } catch (err) {
+    showToast("Erreur réseau lors de la restauration de la sauvegarde.", true);
+  } finally {
+    inputEl.value = "";
   }
 }

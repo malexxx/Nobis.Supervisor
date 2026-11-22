@@ -8,6 +8,9 @@ services:
       # Accès HTTP direct conservé en secours sur le port 1220 (boucle locale uniquement) :
       - "127.0.0.1:1220:8080"
     volumes:
+      # Persistance obligatoire (SQLite, .secret.key, certificats TLS, Matter).
+      # Hors Docker Compose (ex: Synology Container Manager), mappez explicitement un dossier hôte
+      # (ex: /volume1/docker/nobis.supervisor/data:/app/data) pour éviter un volume anonyme perdu aux MAJ :
       - nobis_data:/app/data
     environment:
       - TZ=Europe/Paris

@@ -16,9 +16,25 @@ _DEFAULT_DATA_DIR = (
         else os.path.join(os.path.dirname(BASE_DIR), "data")
     )
 )
-_db_path_env = os.environ.get("DB_PATH", "").strip()
-_db_dir_env = os.path.dirname(_db_path_env) if _db_path_env else ""
-DATA_DIR = _db_dir_env or _DEFAULT_DATA_DIR
+
+
+def resolve_data_dir(db_path_env: str, default_data_dir: str = _DEFAULT_DATA_DIR) -> str:
+    """Résout le répertoire persistant DATA_DIR depuis DB_PATH (fichier .db ou dossier)."""
+    raw = (db_path_env or "").strip()
+    if not raw:
+        return default_data_dir
+    if raw.endswith(("/", "\\")) or os.path.isdir(raw):
+        candidate = os.path.normpath(raw)
+    elif os.path.isabs(raw) and not os.path.splitext(os.path.basename(raw))[1]:
+        candidate = os.path.normpath(raw)
+    else:
+        candidate = os.path.dirname(raw)
+    if not candidate or candidate == os.path.dirname(candidate):
+        return default_data_dir
+    return candidate
+
+
+DATA_DIR = resolve_data_dir(os.environ.get("DB_PATH", ""), _DEFAULT_DATA_DIR)
 os.makedirs(DATA_DIR, exist_ok=True)
 
 STATIC_DIR = next(
@@ -32,7 +48,7 @@ STATIC_DIR = next(
 )
 os.makedirs(STATIC_DIR, exist_ok=True)
 
-APP_VERSION: str = os.environ.get("APP_VERSION", "2.1.2").strip() or "2.1.2"
+APP_VERSION: str = os.environ.get("APP_VERSION", "2.2.0").strip() or "2.2.0"
 DOCKER_VERSION: str = (
     os.environ.get("DOCKER_VERSION", "").strip()
     or (f"v{APP_VERSION}" if not APP_VERSION.startswith("v") else APP_VERSION)

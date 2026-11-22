@@ -65,7 +65,7 @@ function applyDashboardState(data, updateSeries = true) {
 
   const dbEl = document.getElementById("hdr-db");
   if (dbEl) dbEl.textContent = activeDbFile;
-  const dockerVersion = data.docker_version || (currentSettings && currentSettings.docker_version) || "v2.1.2";
+  const dockerVersion = data.docker_version || (currentSettings && currentSettings.docker_version) || "v2.2.0";
   const cfgDockerVerEl = document.getElementById("cfg-docker-version");
   if (cfgDockerVerEl) cfgDockerVerEl.textContent = dockerVersion;
   const hdrDockerBadgeEl = document.getElementById("hdr-docker-version-badge");
@@ -102,7 +102,7 @@ function applyDashboardState(data, updateSeries = true) {
 
   // Carte 1 : Ambiance Salon
   const ambSp = Number(getRegVal("temp_amb_setpoint", 19));
-  document.getElementById("kpi-amb").textContent = latestData.temp_ambient ?? "--";
+  document.getElementById("kpi-amb").textContent = latestData.temp_ambient != null ? formatMeasuredTemp(latestData.temp_ambient) : "--";
   document.getElementById("kpi-amb-sp").textContent = formatTempSetpoint(ambSp);
 
   const deltaBadge = document.getElementById("kpi-amb-delta");
@@ -111,12 +111,12 @@ function applyDashboardState(data, updateSeries = true) {
   }
 
   // Cartes 3 à 7
-  document.getElementById("kpi-dl-t").textContent = latestData.duct_left_temp ?? "--";
+  document.getElementById("kpi-dl-t").textContent = latestData.duct_left_temp != null ? formatMeasuredTemp(latestData.duct_left_temp) : "--";
   document.getElementById("kpi-dl-sp").textContent = formatTempSetpoint(getRegVal("duct_left_setpoint", 20));
   document.getElementById("kpi-dl-v").textContent = formatFanSpeed(dlSpdVal);
   document.getElementById("kpi-dl-act").textContent = formatRealFan(latestData.duct_left_actual ?? 0);
 
-  document.getElementById("kpi-dr-t").textContent = latestData.duct_right_temp ?? "--";
+  document.getElementById("kpi-dr-t").textContent = latestData.duct_right_temp != null ? formatMeasuredTemp(latestData.duct_right_temp) : "--";
   document.getElementById("kpi-dr-sp").textContent = formatTempSetpoint(getRegVal("duct_right_setpoint", 20));
   document.getElementById("kpi-dr-v").textContent = formatFanSpeed(drSpdVal);
   document.getElementById("kpi-dr-act").textContent = formatRealFan(latestData.duct_right_actual ?? 0);
@@ -237,11 +237,11 @@ function applyDashboardState(data, updateSeries = true) {
     }
   }
 
-  document.getElementById("ctl-dl-meas").textContent = latestData.duct_left_temp ?? "--";
+  document.getElementById("ctl-dl-meas").textContent = latestData.duct_left_temp != null ? formatMeasuredTemp(latestData.duct_left_temp) : "--";
   document.getElementById("ctl-dl-sp").textContent = formatTempSetpoint(getRegVal("duct_left_setpoint", 20));
   document.getElementById("ctl-dl-slider").value = getRegVal("duct_left_setpoint", 20);
 
-  document.getElementById("ctl-dr-meas").textContent = latestData.duct_right_temp ?? "--";
+  document.getElementById("ctl-dr-meas").textContent = latestData.duct_right_temp != null ? formatMeasuredTemp(latestData.duct_right_temp) : "--";
   document.getElementById("ctl-dr-sp").textContent = formatTempSetpoint(getRegVal("duct_right_setpoint", 20));
   document.getElementById("ctl-dr-slider").value = getRegVal("duct_right_setpoint", 20);
 

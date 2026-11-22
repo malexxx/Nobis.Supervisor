@@ -148,3 +148,66 @@ def test_ui_mobile_viewport_and_bottom_nav(browser_instance):
     bottom_nav = page.locator("nav.fixed.bottom-0")
     assert bottom_nav.is_visible()
     context.close()
+
+
+def test_ui_measured_temp_formatting_omits_trailing_zero(page: Page):
+    """Vérifie que formatMeasuredTemp masque .0 pour les valeurs entières et conserve les décimales réelles."""
+    page.goto(f"{APP_ORIGIN}/", wait_until="load")
+
+    # Vérification unitaire de l'utilitaire JS et du rendu Tri-Arc (entiers vs décimales)
+    results = page.evaluate("""() => {
+        const unit = {
+            int22: formatMeasuredTemp(22.0),
+            int17: formatMeasuredTemp(17),
+            frac205: formatMeasuredTemp(20.5),
+            zero: formatMeasuredTemp(0),
+            fallback: formatMeasuredTemp(null, 19),
+        };
+        applyDashboardState({
+            latest: {
+                status_code: 5,
+                status_label: "TRAVAIL (Normal)",
+                temp_ambient: 22.0,
+                temp_amb_setpoint: 19.0,
+                duct_left_temp: 17.0,
+                duct_left_setpoint: 20.0,
+                duct_right_temp: 18.0,
+                duct_right_setpoint: 20.0,
+            }
+        }, false);
+        const ambHtmlInt = document.getElementById("triarc-slide-AMB").textContent;
+        const sxHtmlInt = document.getElementById("triarc-slide-SX").textContent;
+
+        applyDashboardState({
+            latest: {
+                status_code: 5,
+                status_label: "TRAVAIL (Normal)",
+                temp_ambient: 20.5,
+                temp_amb_setpoint: 21.0,
+                duct_left_temp: 17.5,
+                duct_left_setpoint: 20.0,
+                duct_right_temp: 18.0,
+                duct_right_setpoint: 20.0,
+            }
+        }, false);
+        const ambHtmlFrac = document.getElementById("triarc-slide-AMB").textContent;
+        return { unit, ambHtmlInt, sxHtmlInt, ambHtmlFrac };
+    }""")
+
+    assert results["unit"] == {
+        "int22": "22",
+        "int17": "17",
+        "frac205": "20.5",
+        "zero": "0",
+        "fallback": "19",
+    }
+    assert "22°" in results["ambHtmlInt"]
+    assert "22.0°" not in results["ambHtmlInt"]
+    assert "17°" in results["ambHtmlInt"]
+    assert "17.0°" not in results["ambHtmlInt"]
+    assert "18°" in results["ambHtmlInt"]
+    assert "18.0°" not in results["ambHtmlInt"]
+    assert "17°" in results["sxHtmlInt"]
+    assert "17.0°" not in results["sxHtmlInt"]
+    assert "20.5°" in results["ambHtmlFrac"]
+    assert "17.5°" in results["ambHtmlFrac"]

@@ -20,6 +20,7 @@ from database.connection import (
     query_dashboard_series_range,
     query_telemetry_range,
     read_registers_from_conn,
+    reset_db_caches,
     sys_db_session,
 )
 from database.logs import add_container_log, db_log, get_container_logs
@@ -33,6 +34,7 @@ from database.secrets import (
     encrypt_setting_value,
     is_encrypted_secret,
     migrate_plaintext_secrets,
+    reset_secret_key_cache,
 )
 from database.seeder import seed_simulation_db_if_empty
 
@@ -46,6 +48,7 @@ __all__ = [
     "TELEMETRY_RANGE_DURATIONS",
     "DASHBOARD_SERIES_COLUMNS",
     "invalidate_settings_cache",
+    "reset_db_caches",
     "read_registers_from_conn",
     "query_dashboard_series_range",
     "ENC_PREFIX",
@@ -56,6 +59,7 @@ __all__ = [
     "encrypt_setting_value",
     "decrypt_setting_value",
     "migrate_plaintext_secrets",
+    "reset_secret_key_cache",
     "get_sys_db",
     "sys_db_session",
     "get_settings_dict",

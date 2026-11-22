@@ -17,12 +17,12 @@ FROM python:3.12-slim-trixie
 
 LABEL org.opencontainers.image.title="Nobis.Supervisor" \
     org.opencontainers.image.description="Supervision haute fidélité et passerelle Matter locale pour poêle Nobis" \
-    org.opencontainers.image.version="2.1.2" \
+    org.opencontainers.image.version="2.2.0" \
     org.opencontainers.image.licenses="MIT" \
     org.opencontainers.image.source="https://github.com/malexxx/Nobis.Supervisor" \
     org.opencontainers.image.vendor="Nobis.Supervisor"
 
-ARG APP_VERSION=2.1.2
+ARG APP_VERSION=2.2.0
 ARG DOCKER_VERSION=""
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -64,7 +64,8 @@ COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN groupadd --system --gid 10001 nobis \
     && useradd --system --uid 10001 --gid nobis --home-dir /app --no-create-home nobis \
     && mkdir -p /app/data \
-    && chown -R nobis:nobis /app \
+    && chown -R root:root /app \
+    && chown -R nobis:nobis /app/data \
     && sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh \
     && chmod +x /usr/local/bin/docker-entrypoint.sh
 VOLUME ["/app/data"]
