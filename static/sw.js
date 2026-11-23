@@ -1,5 +1,5 @@
 // Service Worker pour Cockpit Nobis A10 (PWA)
-const CACHE_NAME = 'nobis-cockpit-v2.2.0';
+const CACHE_NAME = 'nobis-cockpit-v2.3.0';
 const PRECACHE_ASSETS = [
   '/',
   '/manifest.json',

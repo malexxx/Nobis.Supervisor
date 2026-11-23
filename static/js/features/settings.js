@@ -5,6 +5,7 @@
 let currentInstallerSubTab = null;
 let openSettingsAccId = null;
 let currentStorageStatus = null;
+let currentUpdateStatus = null;
 
 function toggleSettingsAccordion(accId, forceOpen = false) {
   const targetBody = document.getElementById("acc-body-" + accId);
@@ -52,6 +53,7 @@ function toggleSettingsAccordion(accId, forceOpen = false) {
     updateDuctChevronPreview();
   } else if (accId === "system") {
     loadStorageStatus();
+    loadUpdateStatus();
   }
 }
 
@@ -247,13 +249,16 @@ function updateSettingsAccordionSummaries() {
   const rtcEl = document.getElementById("inst-clock-val");
   const verEl = document.getElementById("cfg-docker-version");
   const rtc = rtcEl ? rtcEl.textContent.trim() : "--:--";
-  const ver = verEl ? verEl.textContent.trim() : "v2.2.0";
+  const ver = verEl ? verEl.textContent.trim() : "v2.3.0";
   const sumSys = document.getElementById("acc-sum-system");
   if (sumSys) {
     const warnSuffix = (currentStorageStatus && currentStorageStatus.persistent === false)
       ? " • ⚠️ Volume non persistant"
       : "";
-    sumSys.textContent = `RTC ${rtc} • Docker ${ver}${warnSuffix}`;
+    const updSuffix = (currentUpdateStatus && currentUpdateStatus.last_check && currentUpdateStatus.last_check.update_available)
+      ? " • ⬆️ MAJ dispo"
+      : "";
+    sumSys.textContent = `RTC ${rtc} • Docker ${ver}${warnSuffix}${updSuffix}`;
   }
 
   // 7. Expert
@@ -647,12 +652,154 @@ async function restartBackend() {
   }
 }
 
-async function checkWatchtowerUpdate() {
+async function waitForInternalUpdateReload(previousReleaseId, successMessage) {
+  const startedAt = Date.now();
+  await new Promise(r => setTimeout(r, 1800));
+  while (Date.now() - startedAt < 45000) {
+    try {
+      const hr = await fetch("/health", { cache: "no-store" });
+      if (hr.ok) {
+        const hdata = await hr.json().catch(() => ({}));
+        if (!previousReleaseId || hdata.active_release_id !== previousReleaseId || (Date.now() - startedAt) > 3500) {
+          showToast(successMessage);
+          if ("serviceWorker" in navigator) {
+            navigator.serviceWorker.getRegistration().then((reg) => {
+              if (reg) reg.update();
+            }).catch(() => {});
+          }
+          setTimeout(() => window.location.reload(), 900);
+          return;
+        }
+      }
+    } catch (_) {
+      // Serveur en cours de redémarrage interne
+    }
+    await new Promise(r => setTimeout(r, 1200));
+  }
+  showToast("⚠️ Le redémarrage prend du temps, rechargez manuellement la page.", true);
+}
+
+/**
+ * Met à jour la carte d'état du système de mise à jour interne et ses boutons d'action.
+ * @param {Object|null} info Charge utile retournée par `/api/system/update/status`.
+ */
+function renderUpdateStatus(info) {
+  if (!info || typeof info.current_version !== "string") return;
+  currentUpdateStatus = info;
+
+  const badgeEl = document.getElementById("update-status-badge");
+  const detailsEl = document.getElementById("update-details-text");
+  const applyBtn = document.getElementById("btn-apply-internal-update");
+  const rollbackBtn = document.getElementById("btn-rollback-internal-update");
+  const chanEl = document.getElementById("cfg-update-channel");
+  const autoApplyEl = document.getElementById("cfg-update-auto-apply");
+
+  if (chanEl && info.channel) chanEl.value = info.channel;
+  if (autoApplyEl && typeof info.auto_apply === "boolean") autoApplyEl.checked = info.auto_apply;
+
+  const lastCheck = info.last_check || null;
+  const hasUpdate = Boolean(lastCheck && lastCheck.update_available);
+
+  if (badgeEl) {
+    if (!info.self_update_supported) {
+      badgeEl.textContent = info.in_docker ? "Superviseur inactif" : "Mode local";
+      badgeEl.className = "px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-800 text-gray-300 border border-gray-700 shrink-0";
+    } else if (hasUpdate) {
+      badgeEl.textContent = `⬆️ MAJ disponible (v${lastCheck.remote_version || "?"})`;
+      badgeEl.className = "px-2 py-0.5 rounded-full text-[10px] font-semibold bg-teal-950/80 text-teal-300 border border-teal-600/70 shrink-0";
+    } else if (info.is_override && info.active_release) {
+      badgeEl.textContent = `✅ Interne ${info.active_release.display_version || info.docker_version}`;
+      badgeEl.className = "px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-600/70 shrink-0";
+    } else if (lastCheck) {
+      badgeEl.textContent = "✅ À jour";
+      badgeEl.className = "px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-600/70 shrink-0";
+    } else {
+      badgeEl.textContent = `Prêt (${info.docker_version || ("v" + info.current_version)})`;
+      badgeEl.className = "px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-950/80 text-indigo-300 border border-indigo-700/70 shrink-0";
+    }
+  }
+
+  if (detailsEl) {
+    const parts = [];
+    const shaShort = info.current_commit ? ` (${info.current_commit.slice(0, 7)})` : "";
+    parts.push(`Actif : ${info.docker_version || ("v" + info.current_version)}${shaShort} • Base image : v${info.image_version || info.current_version}`);
+    if (lastCheck && lastCheck.message) {
+      parts.push(lastCheck.message);
+    }
+    if (info.last_error) {
+      parts.push(`⚠️ ${info.last_error}`);
+    } else if (info.last_rollback && info.last_rollback.reason === "docker_image_newer") {
+      parts.push("ℹ️ Image Docker plus récente détectée au démarrage : l'image officielle a pris le relais.");
+    } else if (info.active_release && info.active_release.matter_deps_changed) {
+      parts.push("⚠️ Dépendances Node/Matter modifiées en amont : une MAJ d'image Docker est recommandée.");
+    }
+    detailsEl.textContent = parts.join(" — ");
+  }
+
+  if (applyBtn) {
+    applyBtn.classList.toggle("hidden", !(hasUpdate && info.self_update_supported));
+  }
+  if (rollbackBtn) {
+    rollbackBtn.classList.toggle("hidden", !info.can_rollback);
+  }
+
+  updateSettingsAccordionSummaries();
+}
+
+/** Charge l'état complet du système de mise à jour interne via `/api/system/update/status`. */
+async function loadUpdateStatus() {
   try {
-    showToast("⬆️ Vérification de mise à jour Watchtower en cours...");
-    const res = await fetch("/api/system/check-update", {
+    const res = await fetch("/api/system/update/status", { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    renderUpdateStatus(data);
+  } catch (err) {
+    // Repli silencieux si hors-ligne
+  }
+}
+
+/** Sauvegarde la configuration du canal et de l'installation automatique des mises à jour. */
+async function saveUpdateConfig() {
+  const chanEl = document.getElementById("cfg-update-channel");
+  const autoApplyEl = document.getElementById("cfg-update-auto-apply");
+  const payload = {
+    channel: chanEl ? chanEl.value : "v2",
+    auto_apply: autoApplyEl ? Boolean(autoApplyEl.checked) : false,
+  };
+  try {
+    const res = await fetch("/api/system/update/config", {
       method: "POST",
-      headers: getInstallerHeaders()
+      headers: getInstallerHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403) {
+      showToast("🔒 Authentification installateur requise : déverrouillez l'onglet Expert & Registres.", true);
+      loadUpdateStatus();
+      return;
+    }
+    if (!res.ok) {
+      showToast(data.detail || "Impossible d'enregistrer les options de mise à jour.", true);
+      loadUpdateStatus();
+      return;
+    }
+    renderUpdateStatus(data);
+    showToast("✅ Préférences de mise à jour enregistrées.");
+  } catch (err) {
+    showToast("Erreur réseau lors de l'enregistrement des options de mise à jour.", true);
+  }
+}
+
+/** Vérifie la disponibilité d'une mise à jour GitHub (ou Watchtower si configuré). */
+async function checkInternalUpdate() {
+  try {
+    const chanEl = document.getElementById("cfg-update-channel");
+    const channel = chanEl ? chanEl.value : undefined;
+    showToast("⬆️ Vérification de mise à jour en cours...");
+    const res = await fetch("/api/system/update/check", {
+      method: "POST",
+      headers: getInstallerHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(channel ? { channel } : {}),
     });
     const data = await res.json().catch(() => ({}));
     if (res.status === 403) {
@@ -660,17 +807,90 @@ async function checkWatchtowerUpdate() {
       return;
     }
     if (!res.ok) {
-      showToast(data.detail || "Watchtower injoignable ou erreur de mise à jour.", true);
+      showToast(data.detail || "Erreur lors de la vérification de mise à jour.", true);
       return;
     }
-    if (data.status === "unavailable") {
-      showToast(`ℹ️ ${data.message}`);
-      return;
+    await loadUpdateStatus();
+    if (data.update_available) {
+      showToast(`⬆️ ${data.message || "Mise à jour disponible !"}`);
+    } else {
+      showToast(`✅ ${data.message || "Nobis.Supervisor est déjà à jour."}`);
     }
-    showToast(data.message || "✅ Vérification de mise à jour Watchtower déclenchée !");
   } catch (err) {
-    showToast("Erreur réseau lors de l'appel à Watchtower.", true);
+    showToast("Erreur réseau lors de la vérification de mise à jour.", true);
   }
+}
+
+/** Télécharge et applique une mise à jour interne au conteneur sans perte de données /app/data. */
+async function applyInternalUpdate() {
+  const chanEl = document.getElementById("cfg-update-channel");
+  const channel = chanEl ? chanEl.value : undefined;
+  const prevReleaseId = (currentUpdateStatus && currentUpdateStatus.active_release && currentUpdateStatus.active_release.id) || "";
+  if (!confirm("Installer la mise à jour à l'intérieur du conteneur ? Une sauvegarde ZIP automatique sera créée et le serveur redémarrera quelques secondes sans perdre /app/data.")) {
+    return;
+  }
+  try {
+    showToast("🚀 Téléchargement et installation de la mise à jour en cours...");
+    const res = await fetch("/api/system/update/apply", {
+      method: "POST",
+      headers: getInstallerHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ channel }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403) {
+      showToast("🔒 Authentification installateur requise : déverrouillez l'onglet Expert & Registres.", true);
+      return;
+    }
+    if (!res.ok) {
+      showToast(data.detail || "Échec de l'installation de la mise à jour interne.", true);
+      loadUpdateStatus();
+      return;
+    }
+    if (data.status === "up_to_date") {
+      showToast(`✅ ${data.message || "Application déjà à jour."}`);
+      loadUpdateStatus();
+      return;
+    }
+    if (data.matter_deps_changed) {
+      showToast("⚠️ Dépendances Matter modifiées : redémarrez/mettez à jour l'image Docker plus tard si besoin.", true);
+    }
+    showToast(`🔄 ${data.message || "Mise à jour installée, rechargement en cours..."}`);
+    waitForInternalUpdateReload(prevReleaseId, "✅ Mise à jour interne active ! Rechargement de l'interface...");
+  } catch (err) {
+    showToast("Erreur réseau lors de l'application de la mise à jour.", true);
+  }
+}
+
+/** Annule la mise à jour interne active et revient à la version précédente ou l'image Docker. */
+async function rollbackInternalUpdate() {
+  const prevReleaseId = (currentUpdateStatus && currentUpdateStatus.active_release && currentUpdateStatus.active_release.id) || "";
+  if (!confirm("Revenir à la version précédente (ou à l'image Docker d'origine) ? Vos données dans /app/data resteront intactes.")) {
+    return;
+  }
+  try {
+    showToast("⏪ Rollback vers la version précédente en cours...");
+    const res = await fetch("/api/system/update/rollback", {
+      method: "POST",
+      headers: getInstallerHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403) {
+      showToast("🔒 Authentification installateur requise : déverrouillez l'onglet Expert & Registres.", true);
+      return;
+    }
+    if (!res.ok) {
+      showToast(data.detail || "Échec du rollback interne.", true);
+      return;
+    }
+    showToast(`🔄 ${data.message || "Rollback déclenché, rechargement..."}`);
+    waitForInternalUpdateReload(prevReleaseId, "✅ Rollback terminé ! Rechargement de l'interface...");
+  } catch (err) {
+    showToast("Erreur réseau lors du rollback interne.", true);
+  }
+}
+
+function checkWatchtowerUpdate() {
+  return checkInternalUpdate();
 }
 
 /**

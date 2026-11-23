@@ -14,10 +14,30 @@ from collections.abc import Coroutine
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from services.update_bootstrap import EXIT_CODE_RELOAD
+
 logger = logging.getLogger("nobis.lifecycle")
 scheduler = AsyncIOScheduler()
 _background_tasks: set[asyncio.Task] = set()
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_reload_requested = False
+
+
+def request_reload() -> None:
+    """Demande la sortie avec code EXIT_CODE_RELOAD (75) pour relance interne par le superviseur."""
+    global _reload_requested
+    _reload_requested = True
+
+
+def is_reload_requested() -> bool:
+    """Indique si une relance interne par le superviseur a été demandée."""
+    return _reload_requested
+
+
+def reset_reload_requested() -> None:
+    """Réinitialise le drapeau de relance interne (utile dans les tests)."""
+    global _reload_requested
+    _reload_requested = False
 
 
 def prepare_scheduler_for_running_loop() -> None:
@@ -92,10 +112,16 @@ async def _build_local_restart_cmd() -> list[str]:
     return [sys.executable] + sys.argv
 
 
-async def delayed_process_restart(delay_s: float = 0.5) -> None:
-    """Ferme les flux SSE et redémarre le processus (SIGTERM en Docker, respawning en local)."""
+async def delayed_process_restart(delay_s: float = 0.5, *, reload_exit: bool = True) -> None:
+    """Ferme les flux SSE et redémarre le processus (reload superviseur 75, SIGTERM Docker ou local)."""
     await asyncio.sleep(delay_s)
     await _shutdown_subsystems_for_restart()
+
+    if os.environ.get("NOBIS_SUPERVISOR_ENABLED") == "1" and reload_exit:
+        request_reload()
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.sleep(4.0)
+        os._exit(EXIT_CODE_RELOAD)
 
     if await asyncio.to_thread(os.path.exists, "/.dockerenv"):
         os.kill(os.getpid(), signal.SIGTERM)

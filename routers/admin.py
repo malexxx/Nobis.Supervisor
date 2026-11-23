@@ -1,12 +1,13 @@
-"""Sous-routeur d'administration système : redémarrage backend, stockage/sauvegarde ZIP et MAJ Git / Watchtower."""
+"""Sous-routeur d'administration système : redémarrage backend, stockage/sauvegarde ZIP et MAJ interne / Watchtower."""
 import asyncio
 from datetime import datetime
 import os
-import subprocess
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import Response
 import httpx
+from pydantic import BaseModel, ConfigDict, StrictBool
 
 from database import add_container_log, db_log, get_active_mode
 from services.installer_auth import clear_installer_sessions, require_installer_auth_if_configured
@@ -17,9 +18,41 @@ from services.storage_service import (
     inspect_storage_persistence,
     restore_backup_zip_bytes,
 )
+from services.update_service import (
+    UpdateConflictError,
+    UpdateUpstreamError,
+    apply_internal_update,
+    check_for_updates,
+    get_update_status,
+    rollback_internal_update,
+    save_update_settings,
+)
 
 router = APIRouter(prefix="/api", tags=["System Admin"])
-_REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+class UpdateCheckPayload(BaseModel):
+    """Paramètres optionnels pour vérifier une mise à jour GitHub."""
+
+    model_config = ConfigDict(extra="ignore")
+    channel: str | None = None
+
+
+class UpdateApplyPayload(BaseModel):
+    """Paramètres optionnels pour installer une mise à jour interne."""
+
+    model_config = ConfigDict(extra="ignore")
+    channel: str | None = None
+    force: StrictBool = False
+
+
+class UpdateConfigPayload(BaseModel):
+    """Configuration des préférences de mise à jour interne."""
+
+    model_config = ConfigDict(extra="ignore")
+    channel: str | None = None
+    auto_check: StrictBool | None = None
+    auto_apply: StrictBool | None = None
 
 
 @router.get("/system/storage")
@@ -96,66 +129,11 @@ async def api_system_restart(request: Request):
     return {"status": "ok", "message": "Redémarrage du backend déclenché. Reconnexion en cours..."}
 
 
-@router.post(
-    "/system/check-update",
-    responses={
-        403: {"description": "Authentification installateur requise"},
-        502: {"description": "Watchtower injoignable ou en erreur"},
-    },
-)
-async def api_system_check_update(request: Request):
-    """Déclenche une vérification/mise à jour via l'API HTTP de Watchtower (ou Git hors Docker)."""
+async def _trigger_watchtower_update(watchtower_url: str, active_mode: str) -> dict[str, str]:
     import routers.system as _sys_facade
 
-    require_installer_auth_if_configured(request)
-    active_mode = get_active_mode()
-    env_watchtower_url = os.environ.get("WATCHTOWER_URL", "").strip()
-    in_docker = await asyncio.to_thread(os.path.exists, "/.dockerenv")
-    if not env_watchtower_url and not in_docker:
-        try:
-            res_local = await asyncio.to_thread(
-                subprocess.run,
-                ["git", "rev-parse", "HEAD"],
-                cwd=_REPO_DIR,
-                capture_output=True,
-                text=True,
-                timeout=5.0,
-            )
-            local_sha = (res_local.stdout or "").strip()
-
-            res_remote = await asyncio.to_thread(
-                subprocess.run,
-                ["git", "ls-remote", "origin", "HEAD"],
-                cwd=_REPO_DIR,
-                capture_output=True,
-                text=True,
-                timeout=10.0,
-            )
-            remote_line = (res_remote.stdout or "").strip()
-            remote_sha = remote_line.split()[0] if remote_line else ""
-
-            if res_local.returncode == 0 and res_remote.returncode == 0 and local_sha and remote_sha:
-                if local_sha == remote_sha:
-                    msg = f"Application à jour ({local_sha[:7]})."
-                    up_to_date = True
-                else:
-                    msg = f"Mise à jour disponible sur GitHub ({local_sha[:7]} → {remote_sha[:7]}). Lancez 'git pull'."
-                    up_to_date = False
-                db_log("INFO", "UPDATE", msg, active_mode)
-                add_container_log("INFO", "UPDATE", msg)
-                return {"status": "ok", "update_available": not up_to_date, "message": msg}
-            err_txt = (res_remote.stderr or res_local.stderr or "").strip() or "Dépôt distant inaccessible"
-            msg = f"Vérification Git impossible : {err_txt[:150]}"
-        except Exception as exc:
-            msg = f"Vérification Git impossible : {exc or type(exc).__name__}"
-        db_log("WARNING", "UPDATE", msg, active_mode)
-        add_container_log("WARNING", "UPDATE", msg)
-        return {"status": "unavailable", "message": msg}
-
-    watchtower_url = env_watchtower_url or "http://watchtower:8080/v1/update"
     watchtower_token = os.environ.get("WATCHTOWER_HTTP_API_TOKEN", "").strip()
     headers = {"Authorization": f"Bearer {watchtower_token}"} if watchtower_token else {}
-
     add_container_log("INFO", "WATCHTOWER", f"Vérification de mise à jour demandée ({watchtower_url}).")
     try:
         async with _sys_facade.borrow_http_client(timeout=15.0) as client:
@@ -176,3 +154,129 @@ async def api_system_check_update(request: Request):
         db_log("WARNING", "WATCHTOWER", err_detail, active_mode)
         add_container_log("WARNING", "WATCHTOWER", err_detail)
         raise HTTPException(status_code=502, detail=err_detail) from exc
+
+
+@router.get("/system/update/status")
+async def api_system_update_status():
+    """Retourne l'état du système de mise à jour interne au conteneur."""
+    return await asyncio.to_thread(get_update_status)
+
+
+@router.post(
+    "/system/update/check",
+    responses={
+        400: {"description": "Canal de mise à jour invalide"},
+        403: {"description": "Authentification installateur requise"},
+        502: {"description": "GitHub API inaccessible ou en erreur"},
+    },
+)
+async def api_system_update_check(
+    request: Request,
+    payload: Annotated[UpdateCheckPayload | None, Body()] = None,
+):
+    """Interroge GitHub (sans recréer le conteneur) pour vérifier la disponibilité d'une mise à jour."""
+    require_installer_auth_if_configured(request)
+    channel = payload.channel if payload else None
+    try:
+        res = await check_for_updates(channel=channel)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except UpdateUpstreamError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    active_mode = await asyncio.to_thread(get_active_mode)
+    db_log("INFO", "UPDATE", res["message"], active_mode)
+    add_container_log("INFO", "UPDATE", res["message"])
+    return res
+
+
+@router.post(
+    "/system/update/apply",
+    responses={
+        400: {"description": "Environnement non supporté ou archive invalide"},
+        403: {"description": "Authentification installateur requise"},
+        409: {"description": "Une mise à jour est déjà en cours"},
+        502: {"description": "Téléchargement GitHub impossible"},
+    },
+)
+async def api_system_update_apply(
+    request: Request,
+    payload: Annotated[UpdateApplyPayload | None, Body()] = None,
+):
+    """Télécharge, valide, sauvegarde et applique une mise à jour interne sans perte de /app/data."""
+    require_installer_auth_if_configured(request)
+    channel = payload.channel if payload else None
+    force = bool(payload.force) if payload else False
+    try:
+        return await apply_internal_update(channel=channel, force=force)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except UpdateConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except UpdateUpstreamError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post(
+    "/system/update/rollback",
+    responses={
+        400: {"description": "Aucune mise à jour interne active à annuler"},
+        403: {"description": "Authentification installateur requise"},
+        409: {"description": "Une opération de mise à jour est déjà en cours"},
+    },
+)
+async def api_system_update_rollback(request: Request):
+    """Bascule vers la version précédente ou l'image Docker d'origine puis redémarre en interne."""
+    require_installer_auth_if_configured(request)
+    try:
+        return await rollback_internal_update()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except UpdateConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post(
+    "/system/update/config",
+    responses={
+        400: {"description": "Paramètres de mise à jour invalides"},
+        403: {"description": "Authentification installateur requise"},
+    },
+)
+async def api_system_update_config(request: Request, payload: UpdateConfigPayload):
+    """Met à jour le canal et les options d'auto-vérification / auto-installation des MAJ."""
+    require_installer_auth_if_configured(request)
+    try:
+        await asyncio.to_thread(
+            save_update_settings,
+            channel=payload.channel,
+            auto_check=payload.auto_check,
+            auto_apply=payload.auto_apply,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return await asyncio.to_thread(get_update_status)
+
+
+@router.post(
+    "/system/check-update",
+    responses={
+        403: {"description": "Authentification installateur requise"},
+        502: {"description": "Service de mise à jour injoignable ou en erreur"},
+    },
+)
+async def api_system_check_update(request: Request):
+    """Vérifie les mises à jour via Watchtower si WATCHTOWER_URL est configuré, sinon via GitHub."""
+    require_installer_auth_if_configured(request)
+    active_mode = await asyncio.to_thread(get_active_mode)
+    env_watchtower_url = os.environ.get("WATCHTOWER_URL", "").strip()
+    if env_watchtower_url:
+        return await _trigger_watchtower_update(env_watchtower_url, active_mode)
+    try:
+        res = await check_for_updates()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except UpdateUpstreamError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    db_log("INFO", "UPDATE", res["message"], active_mode)
+    add_container_log("INFO", "UPDATE", res["message"])
+    return res

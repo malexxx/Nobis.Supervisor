@@ -17,19 +17,21 @@ FROM python:3.12-slim-trixie
 
 LABEL org.opencontainers.image.title="Nobis.Supervisor" \
     org.opencontainers.image.description="Supervision haute fidélité et passerelle Matter locale pour poêle Nobis" \
-    org.opencontainers.image.version="2.2.0" \
+    org.opencontainers.image.version="2.3.0" \
     org.opencontainers.image.licenses="MIT" \
     org.opencontainers.image.source="https://github.com/malexxx/Nobis.Supervisor" \
     org.opencontainers.image.vendor="Nobis.Supervisor"
 
-ARG APP_VERSION=2.2.0
+ARG APP_VERSION=2.3.0
 ARG DOCKER_VERSION=""
+ARG GIT_COMMIT=""
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TZ=Europe/Paris \
     APP_VERSION=${APP_VERSION} \
-    DOCKER_VERSION=${DOCKER_VERSION}
+    DOCKER_VERSION=${DOCKER_VERSION} \
+    NOBIS_IMAGE_COMMIT=${GIT_COMMIT}
 
 ARG ACME_SH_VERSION=3.1.0
 ARG ACME_SH_SHA256=5bc8a72095e16a1a177d1a516728bbd3436abf8060232d5d36b462fce74447aa

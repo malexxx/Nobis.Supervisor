@@ -1,6 +1,6 @@
 {
   "name": "nobis-supervisor-frontend",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "private": true,
   "description": "Compilation statique Tailwind CSS pour Nobis.Supervisor (PWA 100 % hors-ligne)",
   "scripts": {

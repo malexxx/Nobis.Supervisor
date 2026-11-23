@@ -1,22 +1,29 @@
 """
-Point d'entrée serveur Uvicorn pour Nobis.Supervisor (conteneur Docker & lancement autonome).
-Initialise les bases SQLite, résout le mode TLS actif (auto-signé par défaut en Docker,
-Let's Encrypt si configuré, ou HTTP), puis démarre Uvicorn sur le port configuré.
+Point d'entrée serveur Uvicorn et superviseur léger de mise à jour interne pour Nobis.Supervisor.
+En environnement Docker, le processus parent orchestre les relances internes (code 75) et le
+rollback automatique en cas d'échec de démarrage sans recréer le conteneur ni perdre /app/data.
 """
 import argparse
 import logging
 import os
+import signal
+import subprocess
 import sys
+import time
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-import uvicorn
-
-from database import init_all_databases
-from services.lifecycle import install_windows_proactor_guard
-from tls_service import resolve_runtime_tls
+from config import resolve_data_dir
+from services.update_bootstrap import (
+    EXIT_CODE_RELOAD,
+    MIN_HEALTHY_UPTIME_S,
+    build_child_env,
+    read_update_state,
+    resolve_boot_target,
+    rollback_after_boot_failure,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("nobis.server")
@@ -38,10 +45,123 @@ def parse_args(argv=None) -> argparse.Namespace:
     return args
 
 
-def main() -> None:
+def should_run_supervisor() -> bool:
+    """Indique si server.py doit démarrer la boucle superviseur (Docker parent uniquement)."""
+    return (
+        os.path.exists("/.dockerenv")
+        and os.environ.get("NOBIS_SUPERVISOR_CHILD") != "1"
+        and os.environ.get("NOBIS_DISABLE_SUPERVISOR") != "1"
+        and not sys.platform.startswith("win")
+    )
+
+
+def _terminate_child_gracefully(proc: subprocess.Popen | None) -> None:
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=3)
+    except OSError:
+        return
+
+
+def _should_auto_rollback(data_dir: str, target: dict, rc: int, uptime_s: float) -> bool:
+    if not target.get("is_override") or not isinstance(target.get("release"), dict):
+        return False
+    rel_id = str(target["release"].get("id") or "")
+    fresh_state = read_update_state(data_dir)
+    fresh_active = fresh_state.get("active_release")
+    still_pending = bool(
+        isinstance(fresh_active, dict)
+        and fresh_active.get("id") == rel_id
+        and fresh_active.get("pending_verify")
+    )
+    if still_pending:
+        return True
+    return rc != 0 and uptime_s < MIN_HEALTHY_UPTIME_S
+
+
+def _run_supervisor_loop(argv: list[str]) -> int:
+    """Orchestre le sous-processus Uvicorn et bascule automatiquement en cas de boot défaillant."""
+    data_dir = resolve_data_dir(os.environ.get("DB_PATH", ""))
+    image_version = os.environ.get("APP_VERSION", "2.3.0").strip() or "2.3.0"
+    image_commit = os.environ.get("NOBIS_IMAGE_COMMIT", "").strip()
+
+    state = {"stop_requested": False, "proc": None}
+
+    def _on_stop_signal(signum, _frame):
+        state["stop_requested"] = True
+        logger.info("Signal d'arrêt (%s) reçu par le superviseur.", signum)
+        _terminate_child_gracefully(state["proc"])
+
+    for sig_name in ("SIGTERM", "SIGINT"):
+        sig = getattr(signal, sig_name, None)
+        if sig is not None:
+            signal.signal(sig, _on_stop_signal)
+
+    while not state["stop_requested"]:
+        target = resolve_boot_target(data_dir, BASE_DIR, image_version, image_commit)
+        target_dir = target["target_dir"]
+        child_env = build_child_env(os.environ, target, BASE_DIR, image_version, image_commit)
+        rel_info = target.get("release") or {}
+        if target["is_override"]:
+            logger.info(
+                "Superviseur : lancement release interne %s (%s)",
+                rel_info.get("id", "?"),
+                target_dir,
+            )
+        else:
+            logger.info("Superviseur : lancement version image Docker (%s)", image_version)
+
+        started_at = time.monotonic()
+        proc = subprocess.Popen(
+            [sys.executable, os.path.join(target_dir, "server.py"), *argv],
+            cwd=target_dir,
+            env=child_env,
+        )
+        state["proc"] = proc
+        rc = proc.wait()
+        state["proc"] = None
+        uptime_s = time.monotonic() - started_at
+
+        if state["stop_requested"]:
+            return 0 if rc in (0, -15, 143) else rc
+        if rc == EXIT_CODE_RELOAD:
+            logger.info("Superviseur : rechargement interne demandé (code %d).", EXIT_CODE_RELOAD)
+            continue
+        if _should_auto_rollback(data_dir, target, rc, uptime_s):
+            failed_id = str(rel_info.get("id") or "unknown")
+            logger.error(
+                "Superviseur : échec boot release %s (rc=%d, uptime=%.1fs) -> rollback automatique.",
+                failed_id,
+                rc,
+                uptime_s,
+            )
+            rollback_after_boot_failure(data_dir, failed_id, rc, uptime_s)
+            time.sleep(1.0)
+            continue
+        return rc
+
+    return 0
+
+
+def _run_server(argv=None) -> None:
     """Initialise les bases, résout la configuration TLS active et démarre Uvicorn."""
+    import uvicorn
+
+    from database import init_all_databases
+    from services.lifecycle import (
+        install_windows_proactor_guard,
+        is_reload_requested,
+        reset_reload_requested,
+    )
+    from tls_service import resolve_runtime_tls
+
     install_windows_proactor_guard()
-    args = parse_args()
+    args = parse_args(argv)
     os.environ["NOBIS_RUNTIME_PORT"] = str(args.port)
     init_all_databases()
     tls_mode, certfile, keyfile = resolve_runtime_tls()
@@ -63,6 +183,16 @@ def main() -> None:
         logger.info("Démarrage Nobis.Supervisor en HTTP sur http://%s:%d", args.host, args.port)
 
     uvicorn.run("main:app", **kwargs)
+    if is_reload_requested():
+        reset_reload_requested()
+        sys.exit(EXIT_CODE_RELOAD)
+
+
+def main() -> None:
+    """Point d'entrée unifié : boucle superviseur en Docker parent, sinon serveur Uvicorn."""
+    if should_run_supervisor():
+        sys.exit(_run_supervisor_loop(sys.argv[1:]))
+    _run_server()
 
 
 if __name__ == "__main__":

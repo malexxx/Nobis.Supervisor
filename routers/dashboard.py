@@ -10,9 +10,10 @@ import os
 import re
 import time
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 
 from analytics import enrich_telemetry_record
 from config import APP_VERSION, DOCKER_VERSION, MODE_DB_PATHS, STATIC_DIR
@@ -36,6 +37,8 @@ MAX_SSE_PER_IP = 8
 _sse_subscribers_by_ip: dict[str, set[asyncio.Queue]] = {}
 _is_shutting_down = False
 _INCLUDE_RE = re.compile(r"<!--\s*@include\s+([a-zA-Z0-9_./-]+)\s*-->")
+_STATIC_VERSION_RE = re.compile(r'(/static/[a-zA-Z0-9_./-]+\.(?:css|js)\?v=)[^"\'\s>]+')
+_SW_CACHE_RE = re.compile(r"(const\s+CACHE_NAME\s*=\s*['\"][^'\"]+)(['\"])")
 _spa_html_cache: dict = {"sig": None, "html": ""}
 
 
@@ -72,7 +75,8 @@ def render_spa_html() -> str:
             for fname in sorted(os.listdir(partials_dir))
             if fname.endswith(".html")
         )
-    sig = tuple((p, os.stat(p).st_mtime_ns) for p in watched_files if os.path.isfile(p))
+    asset_bust = os.environ.get("NOBIS_ASSET_BUST", "").strip()
+    sig = (asset_bust, *((p, os.stat(p).st_mtime_ns) for p in watched_files if os.path.isfile(p)))
     if _spa_html_cache["sig"] == sig and _spa_html_cache["html"]:
         return _spa_html_cache["html"]
 
@@ -88,6 +92,9 @@ def render_spa_html() -> str:
             return pf.read()
 
     rendered = _INCLUDE_RE.sub(_replace_include, raw_html)
+    if asset_bust:
+        safe_bust = quote(asset_bust, safe="._-")
+        rendered = _STATIC_VERSION_RE.sub(lambda m: f"{m.group(1)}{safe_bust}", rendered)
     _spa_html_cache["sig"] = sig
     _spa_html_cache["html"] = rendered
     return rendered
@@ -116,19 +123,32 @@ async def serve_manifest():
     raise HTTPException(status_code=404, detail="manifest.json introuvable")
 
 
+def _read_sw_with_bust(sw_file: str, safe_bust: str) -> str:
+    with open(sw_file, encoding="utf-8") as fh:
+        raw_sw = fh.read()
+    return _SW_CACHE_RE.sub(lambda m: f"{m.group(1)}-{safe_bust}{m.group(2)}", raw_sw, count=1)
+
+
 @router.get("/sw.js", responses={200: {"content": {"application/javascript": {}}}})
 @router.head("/sw.js", include_in_schema=False)
 async def serve_service_worker():
-    """Sert le script du Service Worker PWA sw.js."""
+    """Sert le script du Service Worker PWA sw.js (avec invalidation de cache post-MAJ interne)."""
     sw_file = os.path.join(STATIC_DIR, "sw.js")
     if await asyncio.to_thread(os.path.exists, sw_file):
+        sw_headers = {
+            "Service-Worker-Allowed": "/",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+        }
+        asset_bust = os.environ.get("NOBIS_ASSET_BUST", "").strip()
+        if asset_bust:
+            safe_bust = re.sub(r"[^A-Za-z0-9._-]+", "-", asset_bust).strip("-")
+            if safe_bust:
+                patched = await asyncio.to_thread(_read_sw_with_bust, sw_file, safe_bust)
+                return Response(content=patched, media_type="application/javascript", headers=sw_headers)
         return FileResponse(
             sw_file,
             media_type="application/javascript",
-            headers={
-                "Service-Worker-Allowed": "/",
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-            },
+            headers=sw_headers,
         )
     raise HTTPException(status_code=404, detail="sw.js introuvable")
 
@@ -142,6 +162,8 @@ async def healthcheck():
         "status": "healthy",
         "version": APP_VERSION,
         "docker_version": DOCKER_VERSION,
+        "active_release_id": os.environ.get("NOBIS_ACTIVE_RELEASE_ID", "").strip(),
+        "self_update_supported": os.environ.get("NOBIS_SUPERVISOR_ENABLED") == "1",
         "timestamp": datetime.now().isoformat(),
         "active_mode": mode,
         "active_db": os.path.basename(MODE_DB_PATHS.get(mode, MODE_DB_PATHS["simulation"])),

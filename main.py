@@ -17,7 +17,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from clients import close_http_client, init_http_client
-from config import APP_VERSION, DOCKER_VERSION, STATIC_DIR
+from config import APP_VERSION, DATA_DIR, DOCKER_VERSION, STATIC_DIR
 from database import (
     add_container_log,
     db_log,
@@ -62,6 +62,8 @@ from services.silence_service import (
     save_silence_state,
 )
 from services.storage_service import inspect_storage_persistence
+from services.update_bootstrap import mark_active_release_healthy
+from services.update_service import scheduled_update_check_job
 from telemetry import collect_telemetry_cycle
 from tls_service import check_tls_renewal_job
 
@@ -168,6 +170,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(collect_telemetry_cycle, "interval", seconds=interval_s, id="telemetry_job", replace_existing=True)
     scheduler.add_job(prune_database_retention, "interval", hours=12, id="retention_prune_job", replace_existing=True)
     scheduler.add_job(check_tls_renewal_job, "interval", hours=24, id="tls_renewal_job", replace_existing=True)
+    scheduler.add_job(scheduled_update_check_job, "interval", hours=6, id="update_check_job", replace_existing=True)
     scheduler.start()
 
     if matter_manager.is_enabled():
@@ -179,6 +182,12 @@ async def lifespan(app: FastAPI):
         db_log("ERROR", "STARTUP", f"Échec première collecte au démarrage : {str(e)}", active_mode)
 
     await _restore_or_schedule_silence_on_startup(active_mode)
+
+    active_rel_id = os.environ.get("NOBIS_ACTIVE_RELEASE_ID", "").strip()
+    if active_rel_id and await asyncio.to_thread(mark_active_release_healthy, DATA_DIR, active_rel_id):
+        ok_msg = f"Mise à jour interne {active_rel_id} vérifiée et validée au démarrage."
+        add_container_log("INFO", "UPDATE", ok_msg)
+        db_log("INFO", "UPDATE", ok_msg, active_mode)
 
     try:
         yield
