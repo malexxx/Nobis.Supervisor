@@ -65,7 +65,7 @@ function applyDashboardState(data, updateSeries = true) {
 
   const dbEl = document.getElementById("hdr-db");
   if (dbEl) dbEl.textContent = activeDbFile;
-  const dockerVersion = data.docker_version || (currentSettings && currentSettings.docker_version) || "v2.3.0";
+  const dockerVersion = data.docker_version || (currentSettings && currentSettings.docker_version) || "v2.4.0";
   const cfgDockerVerEl = document.getElementById("cfg-docker-version");
   if (cfgDockerVerEl) cfgDockerVerEl.textContent = dockerVersion;
   const hdrDockerBadgeEl = document.getElementById("hdr-docker-version-badge");
@@ -278,9 +278,9 @@ function applyDashboardState(data, updateSeries = true) {
       { label: "Trémie", fault: latestData.popup_pellet_empty, okTxt: "Niveau OK", errTxt: "VIDE !" }
     ];
     pelletSecBox.innerHTML = itemsPelletSec.map(i => `
-      <div class="px-2 py-1 rounded border flex justify-between items-center ${i.fault ? 'bg-rose-950/60 border-rose-600 text-rose-300 font-bold' : 'bg-gray-950/90 border-[#6e3b1f]/60 text-gray-300'}">
+      <div class="px-2 py-1 rounded border flex justify-between items-center min-w-0 gap-1 ${i.fault ? 'bg-rose-950/60 border-rose-600 text-rose-300 font-bold' : 'bg-gray-950/90 border-[#6e3b1f]/60 text-gray-300'}">
         <span class="truncate">${i.label} :</span>
-        <span class="${i.fault ? 'text-rose-400 font-bold' : 'text-[#d4976a] font-semibold'}">${i.fault ? i.errTxt : i.okTxt}</span>
+        <span class="shrink-0 ${i.fault ? 'text-rose-400 font-bold' : 'text-[#d4976a] font-semibold'}">${i.fault ? i.errTxt : i.okTxt}</span>
       </div>
     `).join("");
   }

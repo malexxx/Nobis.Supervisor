@@ -417,7 +417,7 @@ function setSynchronizedHoverIndex(idx, pctLeft) {
 
   if (row._isGap) {
     const gapLbl = row._gapDurationMin ? `Perte de connexion (~${row._gapDurationMin} min)` : "Perte de connexion";
-    document.getElementById("hover-timestamp").textContent = `${row.timestamp || "--"} — ⚠️ ${gapLbl}`;
+    document.getElementById("hover-timestamp").textContent = `${formatTimestampFR(row.timestamp)} — ⚠️ ${gapLbl}`;
     document.getElementById("hover-values-summary").innerHTML = `
       <span class="text-rose-400 font-semibold">⚠️ Aucune donnée télémétrique reçue durant cet intervalle</span>
     `;
@@ -430,7 +430,7 @@ function setSynchronizedHoverIndex(idx, pctLeft) {
     return;
   }
 
-  document.getElementById("hover-timestamp").textContent = row.timestamp || "--";
+  document.getElementById("hover-timestamp").textContent = formatTimestampFR(row.timestamp);
   const deltaVal = row.flame_delta_avg;
   const hasDelta = deltaVal !== undefined && deltaVal !== null && Number(row.status_code) === 5;
   const deltaTxt = hasDelta ? `${deltaVal >= 0 ? "+" : ""}${Number(deltaVal).toFixed(1)}°C` : "--";
@@ -687,7 +687,7 @@ function applyPreset(preset) {
 
 function updateChartDatasets() {
   if (!chartPane1 || !chartPane2) return;
-  const labels = cachedSeriesRows.map(r => String(r.timestamp || "").slice(5, 16));
+  const labels = cachedSeriesRows.map(r => formatChartAxisLabel(r.timestamp));
   const buildDs = (paneNum) => SERIES_CONFIG.filter(s => s.visible && s.pane === paneNum).map(s => {
     const pts = cachedSeriesRows.map(r => {
       if (r._isGap) return null;

@@ -87,7 +87,7 @@ def _should_auto_rollback(data_dir: str, target: dict, rc: int, uptime_s: float)
 def _run_supervisor_loop(argv: list[str]) -> int:
     """Orchestre le sous-processus Uvicorn et bascule automatiquement en cas de boot défaillant."""
     data_dir = resolve_data_dir(os.environ.get("DB_PATH", ""))
-    image_version = os.environ.get("APP_VERSION", "2.3.0").strip() or "2.3.0"
+    image_version = os.environ.get("APP_VERSION", "2.4.0").strip() or "2.4.0"
     image_commit = os.environ.get("NOBIS_IMAGE_COMMIT", "").strip()
 
     state = {"stop_requested": False, "proc": None}

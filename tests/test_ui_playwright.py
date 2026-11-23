@@ -211,3 +211,82 @@ def test_ui_measured_temp_formatting_omits_trailing_zero(page: Page):
     assert "17.0°" not in results["sxHtmlInt"]
     assert "20.5°" in results["ambHtmlFrac"]
     assert "17.5°" in results["ambHtmlFrac"]
+
+
+def test_ui_supervision_chart_dates_dd_mm(page: Page):
+    """Vérifie que l'axe temporel des graphiques de Supervision et la barre pointeur affichent JJ/MM."""
+    page.goto(f"{APP_ORIGIN}/", wait_until="load")
+
+    res = page.evaluate("""() => {
+        switchTab("tab-dashboard");
+        applyDashboardState({
+            latest: {
+                status_code: 5,
+                status_label: "TRAVAIL (Normal)",
+                temp_ambient: 20.5,
+                temp_fumes: 165.0
+            },
+            series: [
+                { timestamp: "2026-11-23 08:15:00", status_code: 5, temp_ambient: 19.5, temp_fumes: 150 },
+                { timestamp: "2026-11-23 18:35:00", status_code: 5, temp_ambient: 20.5, temp_fumes: 165 },
+                { timestamp: "2026-12-05 09:00:00", status_code: 5, temp_ambient: 21.0, temp_fumes: 170 }
+            ]
+        }, true);
+        setSynchronizedHoverIndex(1, 50);
+        return {
+            pane1Labels: chartPane1.data.labels.slice(),
+            pane2Labels: chartPane2.data.labels.slice(),
+            hoverText: document.getElementById("hover-timestamp").textContent
+        };
+    }""")
+
+    expected_labels = ["23/11 08:15", "23/11 18:35", "05/12 09:00"]
+    assert res["pane1Labels"] == expected_labels
+    assert res["pane2Labels"] == expected_labels
+    assert res["hoverText"] == "23/11/2026 18:35:00"
+
+
+def test_ui_pellets_tab_no_scrollbars_on_smartphone(browser_instance):
+    """Vérifie l'absence totale d'ascenseur horizontal/vertical dans l'onglet Pellets sur smartphone."""
+    for width, height in ((360, 640), (375, 667), (390, 844)):
+        context = browser_instance.new_context(viewport={"width": width, "height": height})
+        page = context.new_page()
+        _attach_app_routes(page)
+        page.goto(f"{APP_ORIGIN}/", wait_until="load")
+        metrics = page.evaluate("""() => {
+            applyDashboardState({
+                latest: {
+                    status_code: 5,
+                    status_label: "TRAVAIL (Normal)",
+                    pellet_hopper_pct: 78,
+                    pellet_rate_kgh: 1.15,
+                    pellet_daily_kg: 12.4,
+                    conso_week_kg: 78.5,
+                    conso_month_kg: 312.0,
+                    runway_days_est: 24,
+                    popup_pellet_open: 0,
+                    popup_pellet_empty: 0
+                },
+                settings: { pellet_bags_stock: 42, pellet_bag_price_eur: 5.8 }
+            }, false);
+            switchTab("tab-pellets");
+            const doc = document.documentElement;
+            const card = document.querySelector("#tab-pellets .card");
+            const bottomNav = document.querySelector("nav.fixed.bottom-0");
+            return {
+                scrollWidth: doc.scrollWidth,
+                clientWidth: doc.clientWidth,
+                scrollHeight: doc.scrollHeight,
+                clientHeight: doc.clientHeight,
+                cardBottom: card.getBoundingClientRect().bottom,
+                navTop: bottomNav.getBoundingClientRect().top
+            };
+        }""")
+
+        assert metrics["scrollWidth"] <= metrics["clientWidth"], f"Ascenseur horizontal sur {width}x{height}: {metrics}"
+        assert metrics["scrollHeight"] <= metrics["clientHeight"], f"Ascenseur vertical sur {width}x{height}: {metrics}"
+        assert metrics["cardBottom"] <= metrics["navTop"], f"Chevauchement barre basse sur {width}x{height}: {metrics}"
+
+        page.locator("#tab-pellets button[aria-label='Explication DJU']").click()
+        assert page.locator("#action-modal").is_visible()
+        context.close()

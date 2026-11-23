@@ -213,7 +213,7 @@ const connectionState = {
 function updateStatusPillBorder() {
   const pillEl = document.getElementById("hdr-status-pill");
   if (!pillEl) return;
-  const dockerVer = (typeof currentSettings !== "undefined" && currentSettings && currentSettings.docker_version) || "v2.3.0";
+  const dockerVer = (typeof currentSettings !== "undefined" && currentSettings && currentSettings.docker_version) || "v2.4.0";
   const cState = connectionState.containerStatus;
   const mState = connectionState.cloudStatus;
 
@@ -234,7 +234,7 @@ function updateContainerConnectionIndicator(overrideStatus, message) {
   const verEl = document.getElementById("hdr-container-version");
   const cfgDiagContainer = document.getElementById("cfg-diag-container");
 
-  const dockerVer = (typeof currentSettings !== "undefined" && currentSettings && currentSettings.docker_version) || "v2.3.0";
+  const dockerVer = (typeof currentSettings !== "undefined" && currentSettings && currentSettings.docker_version) || "v2.4.0";
   const effectiveStatus = overrideStatus || (connectionState.isServerConnected ? "connected" : "disconnected");
   connectionState.containerStatus = effectiveStatus;
 

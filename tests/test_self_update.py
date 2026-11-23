@@ -32,7 +32,7 @@ import server as server_mod
 from tests.helpers import BugBountyTestCase, temporary_settings
 
 
-def _build_synthetic_release_tarball(app_version: str = "2.3.0", *, broken_syntax: bool = False) -> bytes:
+def _build_synthetic_release_tarball(app_version: str = "2.4.0", *, broken_syntax: bool = False) -> bytes:
     with open(os.path.join(config.BASE_DIR, "requirements.txt"), encoding="utf-8") as fh:
         req_txt = fh.read()
     with open(os.path.join(config.BASE_DIR, "matter_bridge", "package.json"), encoding="utf-8") as fh:
@@ -106,13 +106,13 @@ class _FakeGitHubClient:
                     "sha": self.remote_sha,
                     "html_url": "https://github.com/malexxx/Nobis.Supervisor/commit/" + self.remote_sha,
                     "commit": {
-                        "message": "feat: version 2.4.0 test",
+                        "message": "feat: version 2.5.0 test",
                         "committer": {"date": "2026-11-23T00:00:00Z"},
                     },
                 },
             )
         if "raw.githubusercontent.com" in url:
-            return _FakeResp(200, text_data='APP_VERSION = "2.4.0"\n')
+            return _FakeResp(200, text_data='APP_VERSION = "2.5.0"\n')
         return _FakeResp(404, json_data={})
 
     def stream(self, _method: str, url: str, **_kwargs):
@@ -278,7 +278,7 @@ class TestSelfUpdateSystem(BugBountyTestCase):
 
             syntax_tar = os.path.join(tmpdir, "syntax.tar.gz")
             with open(syntax_tar, "wb") as fh:
-                fh.write(_build_synthetic_release_tarball("2.3.0", broken_syntax=True))
+                fh.write(_build_synthetic_release_tarball("2.4.0", broken_syntax=True))
             syn_dir = os.path.join(tmpdir, "out_syn")
             _extract_tarball_safely(syntax_tar, syn_dir)
             with self.assertRaises(ValueError):
@@ -286,7 +286,7 @@ class TestSelfUpdateSystem(BugBountyTestCase):
 
     def test_end_to_end_apply_and_rollback_with_synthetic_tarball(self):
         remote_sha = "abcdef1234567890" + "0" * 24
-        tar_bytes = _build_synthetic_release_tarball("2.4.0")
+        tar_bytes = _build_synthetic_release_tarball("2.5.0")
         fake_borrow = _make_fake_github_borrow(remote_sha, tar_bytes)
 
         with tempfile.TemporaryDirectory() as iso_dir:
@@ -317,20 +317,20 @@ class TestSelfUpdateSystem(BugBountyTestCase):
                         )
                     )
                     self.assertEqual(res["status"], "applying")
-                    self.assertEqual(res["version"], "2.4.0")
+                    self.assertEqual(res["version"], "2.5.0")
                     self.assertTrue(res["backup_created"])
                     self.assertFalse(res["matter_deps_changed"])
 
                     backups_dir = os.path.join(iso_dir, "updates", "backups")
                     self.assertTrue(any(f.endswith(".zip") for f in os.listdir(backups_dir)))
 
-                    target = resolve_boot_target(iso_dir, config.BASE_DIR, "2.3.0", "")
+                    target = resolve_boot_target(iso_dir, config.BASE_DIR, "2.4.0", "")
                     self.assertTrue(target["is_override"])
                     self.assertEqual(target["release"]["id"], res["release_id"])
 
                     rb = asyncio.run(rollback_internal_update(data_dir=iso_dir, trigger_restart=False))
                     self.assertEqual(rb["status"], "rolling_back")
-                    target_after = resolve_boot_target(iso_dir, config.BASE_DIR, "2.3.0", "")
+                    target_after = resolve_boot_target(iso_dir, config.BASE_DIR, "2.4.0", "")
                     self.assertFalse(target_after["is_override"])
             finally:
                 database.reset_secret_key_cache()
@@ -403,24 +403,24 @@ class TestSelfUpdateSystem(BugBountyTestCase):
         with patch.dict(
             os.environ,
             {
-                "NOBIS_ASSET_BUST": "v2.4.0-abcdef1",
-                "NOBIS_ACTIVE_RELEASE_ID": "v2.4.0-abcdef1",
+                "NOBIS_ASSET_BUST": "v2.5.0-abcdef1",
+                "NOBIS_ACTIVE_RELEASE_ID": "v2.5.0-abcdef1",
                 "NOBIS_SUPERVISOR_ENABLED": "1",
             },
             clear=False,
         ):
             r_spa = self.client.get("/")
             self.assertEqual(r_spa.status_code, 200)
-            self.assertIn("/static/css/tailwind.generated.css?v=v2.4.0-abcdef1", r_spa.text)
-            self.assertIn("/static/js/app.js?v=v2.4.0-abcdef1", r_spa.text)
+            self.assertIn("/static/css/tailwind.generated.css?v=v2.5.0-abcdef1", r_spa.text)
+            self.assertIn("/static/js/app.js?v=v2.5.0-abcdef1", r_spa.text)
 
             r_sw = self.client.get("/sw.js")
             self.assertEqual(r_sw.status_code, 200)
-            self.assertIn("nobis-cockpit-v2.3.0-v2.4.0-abcdef1", r_sw.text)
+            self.assertIn("nobis-cockpit-v2.4.0-v2.5.0-abcdef1", r_sw.text)
 
             r_health2 = self.client.get("/health")
             self.assertEqual(r_health2.status_code, 200)
-            self.assertEqual(r_health2.json()["active_release_id"], "v2.4.0-abcdef1")
+            self.assertEqual(r_health2.json()["active_release_id"], "v2.5.0-abcdef1")
             self.assertTrue(r_health2.json()["self_update_supported"])
 
     def test_dockerfile_and_workflow_git_commit_arg(self):

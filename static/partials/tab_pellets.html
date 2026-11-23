@@ -1,23 +1,23 @@
     <!-- =================================================================== -->
     <!-- ONGLET PELLETS : SUIVI TRÉMIE 35 KG, CONSOMMATIONS, STOCK & SONDES  -->
     <!-- =================================================================== -->
-    <section id="tab-pellets" class="hidden space-y-6 pb-8 md:pb-0">
+    <section id="tab-pellets" class="hidden space-y-4 sm:space-y-6 pb-8 md:pb-0">
       <div class="max-w-xl mx-auto">
-        <div class="card p-5 space-y-4 border-t-2 border-t-[#96562c] flex flex-col justify-between">
-          <div class="space-y-4">
-            <h3 class="text-base font-bold text-white border-b border-gray-800 pb-2 flex items-center justify-between">
+        <div class="card p-3 sm:p-5 space-y-2.5 sm:space-y-4 border-t-2 border-t-[#96562c] flex flex-col justify-between">
+          <div class="space-y-2.5 sm:space-y-4">
+            <h3 class="text-sm sm:text-base font-bold text-white border-b border-gray-800 pb-1.5 sm:pb-2 flex items-center justify-between">
               <span class="flex items-center gap-1.5 cursor-help"
                 title="Suivi en direct de la trémie de granulés (capacité 35 kg / ~2.3 sacs), sondes trappe/niveau, estimation d'autonomie et gestion du stock.">🪵
                 Pellets</span>
             </h3>
 
             <!-- Section Trémie 35 kg -->
-            <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-3.5 space-y-2.5">
-              <div class="flex items-center justify-between">
+            <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-2.5 sm:p-3.5 space-y-2 sm:space-y-2.5">
+              <div class="flex flex-wrap items-center justify-between gap-1.5">
                 <span class="text-xs text-[#e8b693] font-semibold flex items-center gap-1">
                   🪵 Trémie & Stock
                 </span>
-                <div class="flex items-center gap-1">
+                <div class="flex items-center gap-1 shrink-0">
                   <a href="/calibration" target="_blank"
                     class="text-[10px] px-2 py-0.5 rounded bg-orange-950/80 hover:bg-orange-900 text-orange-300 border border-orange-700/60 font-semibold transition flex items-center gap-1"
                     title="Lancer l'assistant d'étalonnage précis Nobis A10 (Protocole Sac 15 kg AL-03)">
@@ -34,7 +34,7 @@
 
               <!-- Jauge % et Autonomie -->
               <div class="flex items-baseline justify-between">
-                <div class="text-3xl font-black text-[#e09f67] tabular-nums">
+                <div class="text-2xl sm:text-3xl font-black text-[#e09f67] tabular-nums">
                   <span id="kpi-hop">--</span> <span class="text-lg font-bold text-[#b46534]">%</span>
                 </div>
                 <span class="text-xs text-[#d4976a] font-semibold tabular-nums" id="kpi-hop-autonomy">~--h</span>
@@ -46,12 +46,12 @@
               </div>
 
               <!-- Métriques de consommation & Stock -->
-              <div class="grid grid-cols-2 gap-2 pt-1 text-xs tabular-nums">
-                <div class="bg-gray-950/70 rounded-lg p-2 border border-gray-800">
+              <div class="grid grid-cols-2 gap-2 pt-0.5 sm:pt-1 text-xs tabular-nums">
+                <div class="bg-gray-950/70 rounded-lg p-1.5 sm:p-2 border border-gray-800">
                   <span class="text-[10px] text-gray-400 block">Débit instantané</span>
                   <span class="font-bold text-gray-200"><b id="kpi-kgh">--</b> kg/h</span>
                 </div>
-                <div class="bg-gray-950/70 rounded-lg p-2 border border-gray-800 flex flex-col justify-between">
+                <div class="bg-gray-950/70 rounded-lg p-1.5 sm:p-2 border border-gray-800 flex flex-col justify-between">
                   <div class="flex items-center justify-between">
                     <span class="text-[10px] text-gray-400">Stock Sacs 15kg</span>
                     <button type="button" onclick="openConfigModal('cfg-bags-stock')"
@@ -63,7 +63,7 @@
                   <span class="font-bold text-[#e09f67]"><b id="kpi-bags-stock">-- sacs</b></span>
                 </div>
                 <!-- Cadre fusionné : Consommation J, 7J et 30J (Poids & Coût) -->
-                <div class="bg-gray-950/70 rounded-lg p-2.5 border border-gray-800 col-span-2">
+                <div class="bg-gray-950/70 rounded-lg p-2 sm:p-2.5 border border-gray-800 col-span-2">
                   <div class="grid grid-cols-3 divide-x divide-gray-800/80 text-center">
                     <div class="px-1">
                       <span class="text-[10px] font-semibold text-gray-400 block">J</span>
@@ -98,22 +98,22 @@
 
               <!-- Prédiction Météo & Date Rupture Stock (DJU 14 jours) -->
               <div
-                class="bg-gray-950/70 border border-gray-800/90 rounded-lg p-2.5 flex items-center justify-between text-xs cursor-help relative group/dju-pellet"
+                class="bg-gray-950/70 border border-gray-800/90 rounded-lg p-2 sm:p-2.5 flex items-center justify-between gap-2 text-xs cursor-help relative group/dju-pellet"
                 title="Simulation prédictive jour par jour croisant votre stock de granulés avec les prévisions météo réelles Open-Meteo sur 14 jours (Degrés-Jours Unifiés DJU).">
-                <div class="flex items-center gap-2">
-                  <span class="text-base">📅</span>
-                  <div>
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="text-base shrink-0">📅</span>
+                  <div class="min-w-0">
                     <div class="flex items-center gap-1.5">
-                      <span class="text-[10px] text-gray-400 block">Rupture estimée (Prévisions 14j DJU)</span>
+                      <span class="text-[10px] text-gray-400 block leading-tight">Rupture estimée (Prévisions 14j DJU)</span>
                       <!-- Infobulle DJU Pellets -->
-                      <div class="relative inline-flex items-center">
+                      <div class="inline-flex items-center shrink-0">
                         <button type="button" onclick="showDjuInfoModal(event)"
                           class="w-3.5 h-3.5 rounded-full bg-orange-950/80 hover:bg-orange-800 text-orange-300 border border-orange-500/40 text-[9px] font-bold flex items-center justify-center transition shadow-sm cursor-pointer"
                           title="Degré Jour Unifié (DJU) • Cliquer pour l'explication"
                           aria-label="Explication DJU">?</button>
                         <!-- Bulle flottante au survol -->
                         <div
-                          class="pointer-events-none opacity-0 group-hover/dju-pellet:opacity-100 group-hover/dju-pellet:pointer-events-auto transition-all duration-200 absolute bottom-full left-0 mb-2 w-72 sm:w-80 p-3 bg-gray-950/95 border border-orange-500/50 rounded-xl shadow-2xl text-[11px] text-gray-200 z-50 backdrop-blur leading-relaxed text-left font-normal cursor-default">
+                          class="hidden sm:block pointer-events-none opacity-0 group-hover/dju-pellet:opacity-100 group-hover/dju-pellet:pointer-events-auto transition-all duration-200 absolute bottom-full left-0 mb-2 w-80 max-w-full p-3 bg-gray-950/95 border border-orange-500/50 rounded-xl shadow-2xl text-[11px] text-gray-200 z-50 backdrop-blur leading-relaxed text-left font-normal cursor-default">
                           <div class="flex items-center justify-between border-b border-gray-800 pb-1.5 mb-1.5">
                             <span class="font-bold text-orange-400 flex items-center gap-1.5">
                               <svg viewBox="0 0 24 24"
@@ -151,7 +151,7 @@
                     <span id="kpi-pellet-runway-date" class="font-bold text-[#e09f67] tabular-nums">--</span>
                   </div>
                 </div>
-                <div class="text-right">
+                <div class="text-right shrink-0">
                   <span class="text-[10px] text-gray-400 block">Autonomie Stock</span>
                   <span id="kpi-pellet-runway-days" class="text-xs font-semibold text-emerald-400 tabular-nums">~--
                     jours</span>
@@ -159,7 +159,7 @@
               </div>
 
               <!-- Sondes & Contacts Physiques Trémie (Trappe & Niveau bas) -->
-              <div class="pt-2 border-t border-gray-800/80 space-y-1.5">
+              <div class="pt-1.5 sm:pt-2 border-t border-gray-800/80 space-y-1.5">
                 <div class="text-[11px] text-[#c98a5e] font-semibold flex items-center justify-between cursor-help"
                   title="Notice Nobis : État en direct des sondes physiques de la trémie (contacteur microswitch de trappe et capteur niveau bas trémie).">
                   <span class="flex items-center gap-1">🪵 Sondes Trappe & Trémie</span>

@@ -14,6 +14,38 @@ function formatEpochToLocalStr(epochSec) {
 }
 
 /**
+ * Formate un horodatage "YYYY-MM-DD HH:MM:SS" (ou ISO) en libellé court d'axe "JJ/MM HH:MM".
+ * @param {string} ts Horodatage brut.
+ * @returns {string} Date formatée "JJ/MM HH:MM".
+ */
+function formatChartAxisLabel(ts) {
+  const raw = String(ts || "").trim();
+  if (!raw) return "";
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?/);
+  if (m) {
+    const datePart = `${m[3]}/${m[2]}`;
+    return m[4] ? `${datePart} ${m[4]}` : datePart;
+  }
+  return raw.slice(5, 16);
+}
+
+/**
+ * Formate un horodatage "YYYY-MM-DD HH:MM:SS" (ou ISO) en format français "JJ/MM/AAAA HH:MM:SS".
+ * @param {string} ts Horodatage brut.
+ * @returns {string} Horodatage formaté en JJ/MM/AAAA.
+ */
+function formatTimestampFR(ts) {
+  const raw = String(ts || "").trim();
+  if (!raw) return "--";
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}(?::\d{2})?))?/);
+  if (m) {
+    const datePart = `${m[3]}/${m[2]}/${m[1]}`;
+    return m[4] ? `${datePart} ${m[4]}` : datePart;
+  }
+  return raw;
+}
+
+/**
  * Détecte si une ligne de télémétrie correspond à une perte de connexion ou un buffer matériel vide.
  * Compatible à la fois avec la projection légère (`has_raw_buffer`) et les lignes complètes (`raw_buffer_json`).
  * @param {Object} r Enregistrement de télémétrie.

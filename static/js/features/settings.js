@@ -249,7 +249,7 @@ function updateSettingsAccordionSummaries() {
   const rtcEl = document.getElementById("inst-clock-val");
   const verEl = document.getElementById("cfg-docker-version");
   const rtc = rtcEl ? rtcEl.textContent.trim() : "--:--";
-  const ver = verEl ? verEl.textContent.trim() : "v2.3.0";
+  const ver = verEl ? verEl.textContent.trim() : "v2.4.0";
   const sumSys = document.getElementById("acc-sum-system");
   if (sumSys) {
     const warnSuffix = (currentStorageStatus && currentStorageStatus.persistent === false)

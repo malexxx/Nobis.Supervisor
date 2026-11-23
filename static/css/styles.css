@@ -312,18 +312,23 @@ input[type="range"]::-webkit-slider-thumb {
 
 @media (max-width: 767px) {
   body {
-    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px)) !important;
+    min-height: 100dvh !important;
+    padding-bottom: 0 !important;
   }
 
   main {
-    padding-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px)) !important;
+    padding-bottom: calc(4.25rem + env(safe-area-inset-bottom, 0px)) !important;
   }
 
-  #tab-pellets,
+  #tab-pellets {
+    padding-bottom: 0 !important;
+    overflow-x: clip;
+  }
+
   #tab-chrono,
   #tab-dashboard,
   #tab-installer {
-    padding-bottom: calc(2.5rem + env(safe-area-inset-bottom, 0px)) !important;
+    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px)) !important;
   }
 
   #toast-box {

@@ -48,7 +48,7 @@ STATIC_DIR = next(
 )
 os.makedirs(STATIC_DIR, exist_ok=True)
 
-APP_VERSION: str = os.environ.get("APP_VERSION", "2.3.0").strip() or "2.3.0"
+APP_VERSION: str = os.environ.get("APP_VERSION", "2.4.0").strip() or "2.4.0"
 DOCKER_VERSION: str = (
     os.environ.get("DOCKER_VERSION", "").strip()
     or (f"v{APP_VERSION}" if not APP_VERSION.startswith("v") else APP_VERSION)
