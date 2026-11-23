@@ -23,7 +23,7 @@ LABEL org.opencontainers.image.title="Nobis.Supervisor" \
     org.opencontainers.image.vendor="Nobis.Supervisor"
 
 ARG APP_VERSION=2.4.0
-ARG DOCKER_VERSION=""
+ARG DOCKER_VERSION=v2.4.0
 ARG GIT_COMMIT=""
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

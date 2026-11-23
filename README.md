@@ -2,21 +2,21 @@
 
 > **Cockpit de supervision haute fidélité, télémétrie temps réel et passerelle domotique Matter locale pour poêles à granulés Nobis (gamme A10 / A8 C Light Style Coax - électronique Micronova).**
 
-[![Release](https://img.shields.io/badge/Release-v1.0.0-blueviolet.svg)](https://github.com/malexxx/Nobis.Supervisor/releases/tag/v1.0)
-[![Python Version](https://img.shields.io/badge/Python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-1.0.0-009688.svg)](https://fastapi.tiangolo.com/)
-[![Node.js](https://img.shields.io/badge/Node.js-20%2B-green.svg)](https://nodejs.org/)
+[![Release](https://img.shields.io/badge/Release-v2.4.0-blueviolet.svg)](https://github.com/malexxx/Nobis.Supervisor/tree/v2)
+[![Python Version](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688.svg)](https://fastapi.tiangolo.com/)
+[![Node.js](https://img.shields.io/badge/Node.js-22-green.svg)](https://nodejs.org/)
 [![Matter Ready](https://img.shields.io/badge/Matter-1.2%2B-orange.svg)](https://csa-iot.org/all-solutions/matter/)
 [![Docker Ready](https://img.shields.io/badge/Docker-Compose-2496ED.svg)](https://www.docker.com/)
-[![PWA Ready](https://img.shields.io/badge/PWA-Installable-5A0FC8.svg)](https://web.dev/progressive-web-apps/)
-[![Tests](https://img.shields.io/badge/Tests-42%20passing-brightgreen.svg)]()
+[![PWA Ready](https://img.shields.io/badge/PWA-100%25%20Hors--Ligne-5A0FC8.svg)](https://web.dev/progressive-web-apps/)
+[![Tests](https://img.shields.io/badge/Tests-155%2B%20passing-brightgreen.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
-## 🖥️ Visite Guidée des Écrans
+## 🖥️ Visite Guidée des Écrans (v2)
 
-Découvrez l'interface de **Nobis.Supervisor v1.0**, pensée pour offrir une expérience réactive, moderne et épurée sur PC, tablette et smartphone :
+Découvrez l'interface de **Nobis.Supervisor v2**, pensée pour offrir une expérience réactive, moderne et autonome sur PC, tablette et smartphone :
 
 ---
 
@@ -29,227 +29,111 @@ Découvrez l'interface de **Nobis.Supervisor v1.0**, pensée pour offrir une exp
 
 - **Triple Jauge Tri-Arc haute précision** : manipulation fluide à la souris ou au doigt de la **Consigne de Température** (7 à 40°C), de la **Puissance de chauffe** (P1 à P7) et de la **Vitesse de ventilation frontale** (0=OFF, 1 à 7, ou 8=Auto/PS).
 - **Affichage Double-État** : distinction visuelle claire entre la consigne désirée (marqueur lumineux) et la valeur réelle instantanée mesurée par les thermocouples et capteurs de la carte mère.
-- **Bandeau de Statut & Sécurité** : état temps réel du poêle (Allumage, Travail, Nettoyage, Arrêt, Alarme) avec bouton Marche/Arrêt sécurisé.
-- **Accès Rapide Confort** : activation en 1 clic du **Mode Silence !** temporisé, des bascules **Modulation Auto**, **Mode ECO (Stand-by)** et **BOOST (PWF)**.
-- **Canalisations Séparées** : volets dédiés pour la gestion indépendante des ventilateurs de canalisation d'air chaud Gauche (SX) et Droite (DX).
-- **Mini-Frise Hebdomadaire intégrée** : projection miniature des plages programmées avec ligne rouge centrale marquant l'heure courante.
+- **Carrousel Tactile Multi-Zones** : navigation par balayage horizontal entre le **Salon (AMB)** et les canalisations d'air chaud **Gauche (SX)** et **Droite (DX)**.
+- **Accès Rapide Confort** : activation en 1 clic du **Mode Silence !** temporisé, des bascules **Modulation Auto**, **Mode ECO (Stand-by)** et **BOOST (PWF)**, ainsi que la **Fleur du Cycle de Vie** (11 états Micronova).
 
 ---
 
-### 2. 🪵 Écran Pellets, Trémie & Autonomie Météo
-> *Suivi précis du combustible restant, ravitaillement express et calcul d'autonomie corrélé aux températures extérieures.*
+### 2. 🪵 Écran Pellets, Trémie 35 kg & Autonomie Météo
+> *Suivi précis du combustible restant, étalonnage couplé et calcul d'autonomie corrélé aux températures extérieures (DJU).*
 
 <p align="center">
   <img src="docs/screenshots/02_pellets_tremie.png" alt="Écran Pellets Trémie et Météo" width="950" style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
 </p>
 
-- **Jauge de Réservoir Granulés (30 kg)** : niveau en temps réel affiché en pourcentage (%) et en kilogrammes restants avec alerte visuelle sous le seuil critique de réserve.
-- **Ravitaillement en 1 clic** : bouton **"+ Sac 15 kg"** pour ajouter rapidement un sac lors du rechargement avec plafonnement automatique à 30 kg et mise à jour de l'historique.
-- **Météo Locale en Direct (Open-Meteo)** : température extérieure, vitesse du vent, humidité relative et conditions atmosphériques locales sans clé API.
-- **Prédiction d'Autonomie (Runway)** : estimation dynamique du nombre de jours de chauffage restants selon la consommation réelle de la vis sans fin d'alimentation (`auger_duty_pct`) et la rigueur climatique prévue sur les 7 prochains jours.
+- **Jauge de Réservoir Granulés (35 kg)** : niveau en temps réel affiché en pourcentage (%) et en kilogrammes restants avec alerte visuelle sous le seuil critique de réserve.
+- **Ravitaillement & Stock Sacs 15 kg** : boutons **"+1 Sac"** et **"100%"**, suivi des consommations et coûts **J / 7J / 30J**, et assistant dédié d'**étalonnage couplé (`/calibration`)**.
+- **Météo Locale en Direct (Open-Meteo)** : température extérieure, vitesse du vent, humidité relative et calcul des **Degrés-Jours Unifiés (DJU Base 19°C)** sur 14 jours sans clé API.
+- **Sondes Physiques Trappe & Trémie** : surveillance en direct des microswitchs de trappe granulés et niveau bas (Offset 115).
 
 ---
 
 ### 3. 📅 Écran Chrono — Programmation Hebdomadaire 4 Pistes
-> *Planification fine du chauffage avec frise chronologique 4 pistes non superposées et synchronisation d'horloge NTP.*
+> *Planification fine du chauffage avec frise chronologique 4 pistes non superposées et synchronisation d'horloge RTC.*
 
 <p align="center">
   <img src="docs/screenshots/03_chrono_hebdomadaire.png" alt="Écran Programmation Chrono Hebdomadaire" width="950" style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
 </p>
 
-- **Frise Visuelle 4 Pistes Indépendantes** :
-  - **P1** (Vert Émeraude)
-  - **P2** (Ambre Chaleureux)
-  - **P3** (Cyan Lumineux)
-  - **P4** (Violet Moderne)
-- **Repère Temporel Central** : ligne verticale rouge à 50% matérialisant l'instant présent sur une fenêtre glissante de 24h (12h passées / 12h à venir) sans encombrement textuel superflu.
-- **Édition Intuitive des Programmes** :
-  - Sélection des jours actifs de la semaine (Lundi au Dimanche).
-  - Plages de début et de fin par incréments de 10 minutes.
-  - Consignes thermiques dédiées par programme : température d'ambiance, puissance de flamme et ventilation.
-- **Synchronisation NTP en 1 Clic** : bouton permettant d'aligner l'horloge interne de la carte mère Micronova avec la seconde exacte de votre serveur ou box domotique.
+- **Frise Visuelle 4 Pistes Indépendantes** : programmes **P1** (Émeraude), **P2** (Ambre), **P3** (Cyan) et **P4** (Violet) sur une fenêtre glissante de 24h avec repère central temps réel.
+- **Édition Intuitive des Programmes** : jours actifs (Lundi à Dimanche), plages de début/fin par pas de 10 minutes, consignes d'ambiance, canalisations SX/DX, puissance et ventilation.
+- **Synchronisation Horloge Poêle (RTC)** : alignement en 1 clic de la date et de l'heure internes de la carte mère Micronova.
 
 ---
 
-### 4. 📈 Écran Supervision & Télémétrie Graphique
-> *Tableau de bord thermodynamique haute fidélité avec graphiques Chart.js et indicateurs de santé du foyer.*
+### 4. 📈 Écran Supervision — 4 Volets Synchronisés
+> *Tableau de bord thermodynamique haute fidélité à 4 volets synchronisés à 60 FPS avec curseur unifié souris & tactile.*
 
 <p align="center">
   <img src="docs/screenshots/04_supervision_graphiques.png" alt="Écran Supervision et Télémétrie Graphique" width="950" style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
 </p>
 
-- **Graphiques Historiques Interactifs** : sélecteur de portée temporelle multi-échelle (**1h, 6h, 12h, 24h, 7 jours, 30 jours**).
-- **Courbes Thermiques & Aérauliques** :
-  - Température des fumées (°C) vs régime de l'extracteur (RPM).
-  - Température ambiante mesurée vs température de consigne.
-  - Dépression du foyer en Pascal (Pa) pour la surveillance du tirage du conduit coaxial.
-- **Qualité de Combustion** : indicateur temps réel corrélant la température du thermocouple flamme K aux débits théoriques attendus.
-- **Compteur de Maintenance CAT** : suivi du temps de fonctionnement résiduel avant le passage obligatoire d'entretien préventif des 2500 heures.
+- **Portées Multi-Échelles (`3h`, `6h`, `24h`, `7j`, `30j`, `3M`)** : horodatage français (`JJ/MM HH:MM`) et export CSV Excel FR complet.
+- **Volets 1 & 2 (Chart.js)** : températures salon, canalisations SX/DX, fumées, sonde K, consignes, puissance réelle, dépression (Pa), régime extracteur (RPM), niveau trémie (%) et tarages.
+- **Volets 3 & 4 (Rubans Booléens & Sécurités)** : chronologie des 11 phases Micronova (avec stepper de cycle, fond coloré et bilans de durées), modes actifs et historique des sécurités (porte foyer, pressostat Pa, sondes TCK/TCJ, coupure secteur AL01, thermostats M/SX/DX, trappe et trémie).
 
 ---
 
-### 5. 🔧 Écran Paramètres, Pont Matter & Installateur
-> *Gestion de la connectivité Matter, choix du mode de communication matériel, sauvegardes EEPROM et diagnostic des alarmes.*
+### 5. 🔧 Écran Paramètres, HTTPS/TLS, MAJ Interne & Observabilité
+> *Gestion complète du pont Matter, de la sécurité TLS, des mises à jour internes au conteneur, des sauvegardes ZIP et des registres EEPROM.*
 
 <p align="center">
   <img src="docs/screenshots/05_installateur_matter.png" alt="Écran Installateur et Pont Matter" width="950" style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);" />
 </p>
 
-- **Passerelle Matter Locale** : affichage du **QR Code SVG** haute résolution et du code manuel d'appairage local (sans cloud) pour Google Home, Apple Maison / Siri, Amazon Alexa et Home Assistant.
-- **Bascule de Mode de Communication** : passage à chaud entre `simulation` (jumeau numérique physique), `agua_cloud` (API Cloud Micronova) et `local_gateway` (passerelle locale UART/RS485).
-- **Instantanés de Configuration (Snapshots)** : sauvegarde complète de tous les registres RAM et EEPROM en base SQLite avec restauration totale en 1 clic.
-- **Audit des Ordres & Rollback** : journal horodaté de toutes les commandes émises avec possibilité de rollback unitaire en cas d'erreur de manipulation.
-- **Gestionnaire d'Alarmes & Défauts** : diagnostic immédiat parmi les 29 codes de sécurité Micronova (AL01 à AL29) et commande de réarmement à distance.
+- **Mise à jour interne au conteneur** : vérification et installation directe depuis GitHub (`Branche v2`, `Releases`, `main`) dans `/app/data/updates/` avec sauvegarde ZIP pré-MAJ, vérification de santé au redémarrage interne (exit code `75`) et **auto-rollback** en cas d'anomalie — sans perte de données ni recréation du conteneur.
+- **HTTPS / Certificat TLS Autonome** : certificat auto-signé par défaut ou **Let's Encrypt DNS-01** automatisé (`acme.sh` : DuckDNS, Cloudflare, OVH, Gandi, Infomaniak).
+- **Sauvegarde & Restauration Atomique (`.zip`)** : export/import complet des bases SQLite, de la clé de chiffrement `.secret.key`, des certificats TLS et des données Matter, avec détection de persistance des volumes Docker.
+- **Passerelle Matter Locale & Expert** : QR Code / code manuel d'appairage Matter, bascule à chaud `agua_cloud` / `local_gateway` / `simulation`, snapshots RAM/EEPROM, inspecteur des 76 offsets et logs conteneur temps réel.
 
 ---
 
-### 📱 Vue Mobile Dédiée (PWA Installable)
-> *Une expérience d'application native sur iOS et Android sans passer par les stores d'applications.*
+### 📱 Vue Mobile Dédiée (PWA 100 % Hors-Ligne)
+> *Une expérience d'application native sur iOS et Android sans dépendance CDN externe (Tailwind CSS pré-compilé et Chart.js embarqué).*
 
 <p align="center">
   <img src="docs/screenshots/00_cockpit_mobile.png" alt="Cockpit Mobile PWA Nobis Supervisor" width="380" style="border-radius: 18px; box-shadow: 0 15px 35px rgba(0,0,0,0.6);" />
 </p>
 
-- **Format Standalone** : plein écran sans barre d'adresse ni boutons de navigation du navigateur.
-- **Ergonomie Touch Optimisée** : zones de saisie agrandies pour un confort parfait au pouce et navigation tactile par barre d'onglets inférieure.
-- **Support Hors-Ligne & Cache Rapide** : Service Worker v1.0 avec mise en cache locale des assets.
+- **Format Standalone** : plein écran optimisé sans ascenseur parasite, barre de navigation inférieure adaptée au pouce et cache PWA versionné (`sw.js` + cache-busting dynamique post-MAJ).
 
 ---
 
 ## 📖 Sommaire
 
-- [Aperçu & Objectifs](#-aperçu--objectifs)
-- [Visite Guidée des Écrans](#-visite-guidée-des-écrans)
-- [Nouveautés de la Version 1.0](#-nouveautés-de-la-version-10)
-- [Fonctionnalités Principales](#-fonctionnalités-principales)
-  - [Pilotage Thermique & Cockpit Tri-Arc](#-pilotage-thermique--cockpit-tri-arc)
-  - [Mode Silence ! Temporisé](#-mode-silence--temporisé)
-  - [Chrono Hebdomadaire (P1 à P4)](#-chrono-hebdomadaire-p1-à-p4)
-  - [Gestion de Trémie & Autonomie Météo](#-gestion-de-trémie--autonomie-météo)
-  - [Diagnostics Avancés & Maintenance Prédictive](#-diagnostics-avancés--maintenance-prédictive)
-  - [Pont Domotique Matter Local](#-pont-domotique-matter-local)
-  - [Sauvegarde, Audit & Snapshots](#-sauvegarde-audit--snapshots)
+- [Visite Guidée des Écrans (v2)](#-visite-guidée-des-écrans-v2)
+- [Nouveautés de la Version 2](#-nouveautés-de-la-version-2)
 - [Modes de Communication](#-modes-de-communication)
 - [Architecture Technique](#-architecture-technique)
 - [Arborescence du Projet](#-arborescence-du-projet)
 - [Installation & Démarrage](#-installation--démarrage)
-  - [Option 1 : Déploiement Docker (Recommandé)](#option-1--déploiement-docker-recommandé)
-  - [Option 2 : Installation Manuelle (Local / Développement)](#option-2--installation-manuelle-local--développement)
-- [Configuration](#-configuration)
-- [Intégration Matter (Google Home, Apple Home, Alexa)](#-intégration-matter)
+- [Configuration & Variables d'Environnement Docker](#-configuration--variables-denvironnement-docker)
+- [Intégration Matter](#-intégration-matter)
 - [API REST & Flux SSE](#-api-rest--flux-sse)
-- [Tests Automatisés](#-tests-automatisés)
-- [Remerciements & Crédits](#-remerciements--crédits)
-- [Références & Documentation Technique](#-références--documentation-technique)
-- [Dépannage & FAQ](#-dépannage--faq)
+- [Tests Automatisés & Qualité](#-tests-automatisés--qualité)
+- [Remerciements & Références Techniques](#-remerciements--références-techniques)
 - [Avertissement & Licence](#-avertissement--licence)
 
 ---
 
-## 🎯 Aperçu & Objectifs
+## 🌟 Nouveautés de la Version 2
 
-Le poêle à pellets étanche et coaxial **Nobis A10 C Light Style Coax** (comme l'ensemble des poêles Nobis motorisés par carte électronique **Micronova**) est un équipement de chauffage haut de gamme alliant convection naturelle, ventilation forcée et régulation fine. Bien que performant, son utilisation au quotidien via les solutions mobiles d'origine souffre souvent de dépendances au cloud constructeur, de latences et de l'absence d'intégration domotique locale.
-
-**Nobis.Supervisor** apporte une solution complète, moderne et autonome :
-1. **Souveraineté locale** : fonctionnement 100% autonome sur votre réseau local (via passerelle locale ou jumeau numérique) avec bascule transparente vers le cloud Micronova Agua IOT si désiré.
-2. **Interface PWA moderne** : cockpit web ultra-réactif, installable sur smartphone/tablette/PC (icône dédiée, mode plein écran, thème sombre soigné avec effet *glassmorphism*).
-3. **Passerelle Matter native** : appairage direct du poêle en tant que thermostat standard avec Google Home, Nest Hub Max, Apple Home / Siri, Alexa et Home Assistant, sans passer par un cloud externe.
-4. **Précision & Télémétrie** : suivi en temps réel par Server-Sent Events (SSE) de tous les registres RAM/EEPROM, calcul dynamique de l'autonomie en granulés corrélé aux prévisions météo locales (Open-Meteo), indices de qualité de combustion et suivi d'usure CAT.
-
----
-
-## 🌟 Nouveautés de la Version 1.0
-
-- 🎛️ **Cockpit Tri-Arc Révolutionnaire** :
-  - Remplacement des sliders classiques par 3 jauges circulaires haute précision : **Température**, **Puissance de chauffe** et **Ventilation d'ambiance**.
-  - **Affichage Double-État** : visualisation simultanée de la **valeur de consigne** (repère visuel immédiat) et de la **valeur réelle mesurée** en temps réel par les sondes de la carte mère.
-  - Manipulation fluide au doigt (tactile mobile) ou à la souris avec verrouillage contextuel de la zone manipulée.
-  - Gestion précise du niveau 7 et du mode automatique 8 (*PS Auto*).
-- 📊 **Frise Chronologique Hebdomadaire 4 Pistes** :
-  - 4 pistes visuelles indépendantes pour les programmes P1 (Émeraude), P2 (Ambre), P3 (Cyan) et P4 (Violet).
-  - Fin des chevauchements illisibles : chaque plage horaire est projetée sur sa propre ligne temporelle.
-  - Grisement dynamique des programmes désactivés et ligne rouge centrale de repère temporel en temps réel.
-- ⚡ **Performance & Sécurité Renforcées** :
-  - Audit complet du code : suppression des fonctions et écouteurs orphelins, minification du cycle de rendu.
-  - 42 tests automatisés couvrant l'analyse télémétrique, la cartographie des registres Micronova et les endpoints REST.
-
----
-
-## ✨ Fonctionnalités Principales
-
-### 🎛️ Pilotage Thermique & Cockpit Tri-Arc
-- **Marche / Arrêt sécurisé** avec gestion des phases de transition (Préchauffage, Allumage, Travail, Nettoyage, Arrêt/Refroidissement).
-- **Consigne de température ambiante** réglable de 7 à 40°C (ou 41°C = Mode Manuel continu).
-- **Puissance de combustion** échelonnée de P1 à P7.
-- **Ventilation frontale** réglable de 0 (OFF / Convection naturelle pure) à 7, ou 8 (*PS Auto* proportionnel à la puissance de chauffe).
-- **Canalisations d'air indépendantes** : gestion séparée de la canalisation **Gauche (SX)** et de la canalisation **Droite (DX)** (consigne de température de 7 à 40°C et vitesse de soufflerie de 0 à 8).
-- **Modes de combustion automatiques** :
-  - **Modulation Auto** : ajustement dynamique de la puissance selon le différentiel de température.
-  - **Mode ECO (Stand-by)** : coupure et réallumage automatiques dès que la température de consigne est atteinte.
-  - **Mode BOOST (PWF)** : surpuissance temporaire pour réchauffer rapidement la pièce.
-
-### 🤫 Mode Silence ! Intelligent & Temporisé
-Une exclusivité conçue pour les moments de repos ou de lecture :
-- **Activation en 1 clic** avec temporisation réglable (présélections rapides 1h, **2h par défaut**, 3h, 4h ou durée libre).
-- **Régulation intelligente selon l'état du poêle** :
-  - **Si le poêle est éteint** : bascule immédiatement toutes les consignes de température (Ambiance Salon, Canalisation Gauche SX, Canalisation Droite DX) en **hors gel (7°C)**.
-  - **Si le poêle est allumé** : désactive le mode **BOOST**, le **Mode Éco (Stand-by)** et la **programmation horaire (Chrono)**, active le **Mode Auto total** et passe toutes les consignes en **hors gel (7°C)**. Le poêle régule ainsi automatiquement en puissance minimale **P0** et ventilation **Ventil 0** (convection 100% silencieuse) **sans jamais s'éteindre**.
-- **Compte à rebours dynamique** affiché en temps réel dans l'interface et sur le bouton de commande.
-- **Restauration automatique intégrale** : à l'échéance du timer ou lors d'une modification manuelle, l'ensemble des consignes et paramètres initiaux sont fidèlement rétablis.
-
-### 📅 Chrono Hebdomadaire (P1 à P4)
-- **4 plages programmables indépendantes** (P1, P2, P3, P4).
-- Sélection des jours actifs via masques hebdomadaires (Lundi au Dimanche).
-- Définition pour chaque programme de :
-  - L'heure de démarrage et d'extinction (au pas de 10 minutes).
-  - La puissance de consigne (P1 à P7).
-  - La température ambiante souhaitée.
-  - La température et vitesse des canalisations Gauche et Droite.
-  - La vitesse du ventilateur d'ambiance frontal.
-- **Synchronisation d'horloge NTP en 1 clic** : met à l'heure la date et l'heure internes de la carte mère du poêle avec l'horloge système.
-
-### 🪵 Gestion de Trémie & Autonomie Météo
-- Suivi du niveau de granulés dans le réservoir de **30 kg** (affichage en pourcentage et en kilogrammes).
-- Bouton de remplissage rapide **"+ Sac 15 kg"** avec plafonnement automatique à 30 kg.
-- Consommation calculée en continu d'après le temps d'activation de la vis sans fin d'alimentation (`auger_duty_pct`).
-- **Prévisions météo locales intégrées** (API Open-Meteo) : température extérieure, humidité, vent et historique récent.
-- **Calcul prévisionnel de l'autonomie restante (Runway en jours)** basé sur les moyennes thermiques extérieures prévues pour les prochains jours.
-
-### 🔍 Diagnostics Avancés & Maintenance Prédictive
-- **Indice de qualité des granulés** : compare en temps réel la température de la sonde de flamme K à la courbe théorique attendue selon la puissance sélectionnée (pastille colorée : optimale, acceptable ou dégradée).
-- **Indice d'extraction & tirage** : surveille la dépression du foyer en Pascal (Pa), le régime de l'extracteur de fumées (RPM) et la température des gaz brûlés.
-- **Tarages installateur (Trims)** : ajustement fin du chargement granulés (-30% à +30%) et de la vitesse de l'extracteur de fumées (-30% à +30%).
-- **Compteur de maintenance CAT** : décompte des heures de fonctionnement avant l'entretien obligatoire des 2500 heures.
-- **Gestion des alarmes Micronova** : détection et libellé explicite des 29 codes d'alarme de sécurité (AL01 Black-out, AL02 Manque allumage, AL03 Manque pellets, AL11 Dépression tirage, AL15 Sécurité porte/cendres, etc.) avec bouton de réinitialisation.
-
-### 🌐 Pont Domotique Matter Local
-- Embarque un pont Matter autonome écrit en Node.js moderne avec `@matter/main`.
-- Expose le poêle sur le réseau local en tant qu'accessoire **Thermostat standard**.
-- Compatible avec les contrôleurs du marché :
-  - **Google Home** & **Nest Hub / Nest Hub Max**
-  - **Apple HomeKit**, **Apple TV**, **HomePod** (avec commande vocale Siri)
-  - **Amazon Alexa**
-  - **Home Assistant** (intégration Matter officielle)
-- Affichage direct du **QR Code d'appairage** SVG et du code manuel dans l'onglet Installateur.
-- Synchronisation bidirectionnelle : une consigne modifiée sur Google Home ou Apple Home met à jour le poêle, et un changement manuel sur le poêle remonte aussitôt sur les applications domotiques.
-
-### 💾 Sauvegarde, Audit & Snapshots
-- **Snapshots de registres** : mémorisez l'état complet de vos registres EEPROM/RAM avant modification et restaurez-les à tout moment.
-- **Audit des commandes & Rollback** : chaque ordre envoyé au poêle est consigné dans une base SQLite. Possibilité de faire un retour arrière (*Rollback*) sur n'importe quel ordre unitaire.
-- **Export CSV** : téléchargez en un clic l'historique complet de télémétrie ou les logs pour une analyse sous Excel / Grafana.
-- **Webhooks & Alertes Push** : notifications instantanées (Discord, Slack, ntfy.sh, Home Assistant) lors d'un défaut, d'une alarme ou d'un niveau bas de trémie (protection anti-SSRF incluse).
+- 🏗️ **Architecture Modulaire & Performance x6** : découpage propre en packages (`routers/`, `services/`, `database/`, `clients/`, `telemetry/`, `analytics/`, `tls/`), projection SQL des 42 colonnes graphiques (-99 % de payload `/api/dashboard`), compression GZip sélective et rendu UI 60 FPS coalescé par `requestAnimationFrame`.
+- 🔒 **Durcissement Sécurité Complet** : chiffrement Fernet au repos (`enc:v1:`) des secrets SQLite (`agua_password`, `https_dns_token`), authentification installateur par jeton, protection anti-SSRF stricte, CSP durcie (0 script inline, 0 CDN externe), HTTPS autonome et certificate pinning Matter.
+- 🚀 **Superviseur de Mise à Jour Interne (`server.py`)** : mise à jour applicative en 1 clic à l'intérieur du conteneur Docker avec vérification de santé et rollback automatique.
+- 💾 **Persistance Docker & Backup ZIP** : détection automatique des montages (`/app/data`), gestion de la trémie certifiée **35 kg** et assistant d'étalonnage couplé (`/calibration`).
 
 ---
 
 ## 📡 Modes de Communication
 
-L'application prend en charge 3 modes de communication interchangeables à chaud :
+L'application prend en charge 3 modes de communication interchangeables à chaud (chacun isolé dans sa propre base SQLite) :
 
 | Mode | Description | Cas d'usage |
 | :--- | :--- | :--- |
-| **`simulation`** | **Jumeau numérique physique haute fidélité** : simule la thermique du poêle, la montée en flamme, les dépressions, les alarmes et la consommation de combustible sans matériel physique. | Développement, démonstration, tests hors saison de chauffe. |
-| **`agua_cloud`** | **Client Cloud Micronova Agua IOT** : communique avec l'API officielle Micronova par jeton JWT et protocole `RWMSmaster`. | Pilotage à distance sans modification matérielle de l'installation. |
+| **`agua_cloud`** | **Client Cloud Micronova Agua IOT** : communique avec l'API Micronova par jeton JWT et protocole `RWMSmaster`. | Pilotage à distance sans modification matérielle de l'installation. |
 | **`local_gateway`** | **Passerelle locale UART/RS485/Modbus** : interroge directement une passerelle matérielle connectée sur le port série de la carte mère. | Zéro latence, zéro cloud, résilience totale aux pannes Internet. |
+| **`simulation`** | **Jumeau numérique physique haute fidélité** : simule la thermique du poêle, la montée en flamme, les dépressions, les alarmes et la consommation sans matériel physique. | Développement, démonstration, tests hors saison de chauffe. |
 
 ---
 
@@ -258,30 +142,32 @@ L'application prend en charge 3 modes de communication interchangeables à chaud
 ```mermaid
 flowchart TD
     subgraph Clients["📱 Écosystème Utilisateur"]
-        Browser["PWA (Navigateur / Mobile / Tablette)\nTailwind CSS • Chart.js • SSE"]
+        Browser["PWA 100% Locale (Navigateur / Mobile)\nTailwind Pré-compilé • Chart.js • SSE"]
         SmartHome["Domotique Matter\nGoogle Home • Apple Home • Alexa • Home Assistant"]
     end
 
-    subgraph Core["⚙️ Nobis.Supervisor (FastAPI 1.0.0)"]
-        API["FastAPI REST & SSE Router\n(/api/latest, /api/command, /api/events)"]
-        Scheduler["APScheduler\n(Boucle télémétrie 5s-30s • Purge SQLite)"]
-        TelemetryEngine["Moteur d'Analyse Télémétrique\n(Autonomie météo, Qualité flamme K, Tirage Pa)"]
-        DB[(SQLite WAL\nSystème, Audit, Snapshots, Télémétrie)]
+    subgraph Core["⚙️ Nobis.Supervisor v2 (server.py + FastAPI)"]
+        Supervisor["Superviseur Stdlib (server.py)\nAuto-Rollback & Relance Code 75"]
+        API["FastAPI REST & SSE (routers/)\n(/api/latest, /api/dashboard, /api/events)"]
+        Scheduler["APScheduler\n(Télémétrie • Météo • MAJ Auto 6h)"]
+        TelemetryEngine["Moteur Télémétrique & Analytique\n(telemetry/, analytics/, tls/)"]
+        DB[(SQLite WAL + Fernet\nSystème, Audit, Snapshots, Télémétrie)]
     end
 
     subgraph MatterBridge["🌐 Pont Matter (@matter/main)"]
-        NodeBridge["Serveur Node.js (Port 5540)\nCluster Thermostat • QR Code Commissioning"]
+        NodeBridge["Serveur Node.js (Port 5540)\nCluster Thermostat • QR Code • HTTPS Pinning"]
     end
 
     subgraph Harvesters["🔌 Interfaces Matérielles"]
-        Sim["Jumeau Numérique (Simulation)"]
         AguaCloud["Cloud Micronova Agua IOT"]
         LocalGW["Passerelle Locale UART/RS485"]
+        Sim["Jumeau Numérique (Simulation)"]
     end
 
-    Browser <-->|HTTP REST & Flux SSE temps réel| API
+    Browser <-->|HTTP/HTTPS REST & Flux SSE temps réel| API
     SmartHome <-->|Protocole Matter IPv6/UDP 5540| NodeBridge
-    NodeBridge <-->|Webhook local & Sync JSON| API
+    NodeBridge <-->|Webhook sécurisé X-Matter-Secret| API
+    Supervisor --> API
     API <--> DB
     Scheduler --> TelemetryEngine
     TelemetryEngine <--> Harvesters
@@ -294,41 +180,24 @@ flowchart TD
 
 ```text
 Nobis_App/
-├── docker-compose.yml          # Déploiement multi-conteneurs prêt à l'emploi
-├── Dockerfile                  # Image Docker basée sur python:3.12-slim + Node.js 20
-├── requirements.txt            # Dépendances Python (FastAPI, Uvicorn, APScheduler, Pydantic, HTTPX)
-├── docs/
-│   └── screenshots/            # Captures d'écran du cockpit v1.0
-│       ├── cockpit_triarc_v1.0.png
-│       └── cockpit_timeline_v1.0.png
-├── data/                       # Données persistantes montées en volume (bases SQLite, Matter)
-│   ├── nobis_a10_system.db     # Configuration, audits, snapshots, réglages
-│   ├── nobis_a10_*.db          # Historique télémétrique selon le mode actif
-│   └── matter_storage/         # Clés cryptographiques et fabrications Matter
-├── main.py                     # Serveur FastAPI v1.0, endpoints REST et flux SSE
-├── config.py                   # Constantes poêle (alarmes AL01-AL29, registres EEPROM/RAM)
-├── database.py                 # Gestion SQLite en mode WAL, migrations, snapshots et audits
-├── clients.py                  # Clients HTTPX (Agua IOT Cloud, Passerelle Locale, Open-Meteo)
-├── schemas.py                  # Modèles de validation des données Pydantic v2
-├── telemetry.py                # Algorithmes thermodynamiques, calculs d'autonomie et débits
-├── matter_service.py           # Superviseur Python du sous-processus Node.js Matter Bridge
-├── matter_bridge/              # Pont Matter autonome en Node.js
-│   ├── package.json            # Dépendances @matter/main et qrcode
-│   └── bridge.mjs              # Serveur de cluster Thermostat Matter
-├── static/                     # Frontend PWA v1.0 (Single Page Application)
-│   ├── index.html              # Cockpit Tri-Arc, panneaux de contrôle, onglets
-│   ├── manifest.json           # Manifest PWA installable v1.0.0
-│   ├── sw.js                   # Service Worker et cache nobis-cockpit-v1.0
-│   ├── css/styles.css          # Thème sombre, animations flamme et ventilation
-│   └── js/
-│       ├── app.js              # Contrôleur Tri-Arc, synchronisation SSE, modales
-│       ├── state.js            # Gestion d'état réactive côté client
-│       └── charts.js           # Rendu des graphiques historiques Chart.js
-└── tests/                      # Suite de tests automatisés (42 tests)
-    ├── test_analytics.py       # Validation des algorithmes de qualité et d'autonomie
-    ├── test_api.py             # Tests d'intégration des routes REST et sécurité
-    ├── test_collector_mapping.py # Validation des correspondances registres RAM/EEPROM
-    └── test_schemas.py         # Validation des schémas Pydantic
+├── Dockerfile                  # Image multi-stage (Node Matter, Tailwind CSS, Python 3.12)
+├── docker-compose.yml          # Stack prête à l'emploi (Supervisor, Caddy, Watchtower)
+├── docker-entrypoint.sh        # Initialisation droits /app/data et redirection server.py
+├── server.py                   # Superviseur parent léger (MAJ interne & auto-rollback)
+├── main.py                     # Application FastAPI v2, lifespan et montage des routeurs
+├── config.py                   # Versions, chemins DATA_DIR et catalogue registres Micronova
+├── schemas.py                  # Validation stricte Pydantic v2
+├── scheduler.py                # Tâches périodiques APScheduler
+├── routers/                    # Sous-routeurs API (admin, dashboard, stove, settings, tls, matter, calibration...)
+├── services/                   # Services métier (update_service, update_bootstrap, storage_service, installer_auth, silence_service)
+├── database/                   # SQLite WAL multi-bases, cache settings, migrations, chiffrement Fernet
+├── clients/                    # Clients HTTPX (Agua Cloud, Passerelle Locale, Open-Meteo, Notifications)
+├── telemetry/                  # Collecte, décodage trames Micronova, commandes et simulateur
+├── analytics/                  # Évaluateur de combustion par lots, stabilité, prévisions autonomie
+├── tls/                        # Gestion TLS autonome (auto-signé + Let's Encrypt acme.sh DNS-01)
+├── matter_bridge/              # Pont Matter autonome Node.js (@matter/main)
+├── static/                     # Frontend PWA modulaire (index.html, partials/, js/{core,features,charts}/, css/)
+└── tests/                      # Suite de tests pytest, contrat OpenAPI Schemathesis et E2E Playwright
 ```
 
 ---
@@ -337,272 +206,90 @@ Nobis_App/
 
 ### Option 1 : Déploiement Docker (Recommandé)
 
-Le déploiement sous Docker est la solution la plus simple et la plus fiable. L'image embarque à la fois l'environnement Python 3.12 et le runtime Node.js nécessaire au pont Matter.
+```bash
+git clone -b v2 https://github.com/malexxx/Nobis.Supervisor.git
+cd Nobis.Supervisor
+docker compose up -d
+```
 
-1. **Cloner le dépôt Git :**
-   ```bash
-   git clone https://github.com/malexxx/Nobis.Supervisor.git
-   cd Nobis.Supervisor
-   ```
-
-2. **Lancer le conteneur avec Docker Compose :**
-   ```bash
-   docker compose up -d
-   ```
-
-3. **Accéder à l'application :**
-   - Ouvrez votre navigateur sur : **`http://localhost:8080`** (ou l'adresse IP locale de votre machine / Raspberry Pi).
-   - Les données et états Matter sont automatiquement persistés dans le répertoire `./data`.
-
-4. **Consulter les journaux d'exécution :**
-   ```bash
-   docker compose logs -f nobis-supervisor
-   ```
-
----
+- L'interface est accessible sur **`http://127.0.0.1:1220`** (ou via Caddy sur le port **`1221`**, ou en HTTPS autonome selon `HTTPS_DEFAULT_MODE`).
+- Le dossier `/app/data` **doit** être monté en volume persistant (`nobis_data:/app/data` ou bind mount hôte) pour conserver bases SQLite, `.secret.key`, certificats TLS, appairage Matter et mises à jour internes.
 
 ### Option 2 : Installation Manuelle (Local / Développement)
 
-#### Prérequis
-- **Python 3.11** ou **Python 3.12**
-- **Node.js 20+** et **npm** (pour le pont Matter)
+```bash
+python3 -m venv .venv
+source .venv/bin/activate   # ou .\.venv\Scripts\Activate.ps1 sous Windows
+pip install -r requirements.txt
 
-#### Étapes
+cd matter_bridge && npm install --omit=dev && cd ..
+npm install && npm run build:css
 
-1. **Cloner le dépôt :**
-   ```bash
-   git clone https://github.com/malexxx/Nobis.Supervisor.git
-   cd Nobis.Supervisor
-   ```
-
-2. **Configurer l'environnement virtuel Python :**
-   ```bash
-   # Sous Linux / macOS
-   python3 -m venv .venv
-   source .venv/bin/activate
-
-   # Sous Windows PowerShell
-   python -m venv .venv
-   .\.venv\Scripts\Activate.ps1
-
-   # Installation des dépendances
-   pip install -r requirements.txt
-   ```
-
-3. **Installer les dépendances du pont Matter :**
-   ```bash
-   cd matter_bridge
-   npm install --omit=dev
-   cd ..
-   ```
-
-4. **Démarrer le superviseur :**
-   ```bash
-   # Lancement direct avec Python (serveur Uvicorn intégré)
-   python main.py
-
-   # Ou via Uvicorn (recommandé avec rechargement à chaud)
-   uvicorn main:app --host 0.0.0.0 --port 8080 --reload
-   ```
-
-L'application initialise automatiquement les bases de données SQLite nécessaires dans `data/` et démarre en mode `simulation` par défaut.
-
----
-
-## ⚙️ Configuration
-
-Toutes les configurations principales peuvent être ajustées directement depuis l'onglet **"Installateur"** de l'interface web, ou via des variables d'environnement.
-
-### Variables d'Environnement Disponibles
-
-| Variable | Valeur par défaut | Description |
-| :--- | :--- | :--- |
-| `DB_PATH` | `/app/data/nobis_a10.db` | Chemin du dossier des bases SQLite |
-| `TZ` | `Europe/Paris` | Fuseau horaire pour l'horodatage des relevés |
-| `NOBIS_API_URL` | `http://127.0.0.1:8080` | URL FastAPI utilisée par le pont Matter |
-| `MATTER_PORT` | `5540` | Port réseau UDP/TCP pour le protocole Matter |
-| `MATTER_CONTROL_PORT`| `5549` | Port de contrôle interne du pont Matter |
-| `MATTER_PASSCODE` | `20202021` | Code secret d'appairage Matter |
-| `MATTER_DISCRIMINATOR`| `3840` | Discriminateur d'appairage Matter |
-
----
-
-## 📱 Intégration Matter
-
-Le pont Matter intégré expose votre poêle sous forme d'un **Thermostat** standardisé :
-
-```text
-Type d'appareil : Thermostat (Device ID: 0x0301)
-Nom par défaut  : Poêle Nobis A10
-Passcode        : 20202021
-Discriminator   : 3840
-Port Matter     : 5540 (UDP / TCP)
+python server.py --host 0.0.0.0 --port 8080
 ```
 
-### Procédure d'Appairage
+---
 
-1. Dans l'interface web, rendez-vous dans l'onglet **🔧 Installateur** > section **Pont Matter**.
-2. Vérifiez que le statut indique **"En ligne / Opérationnel"**.
-3. Sur votre smartphone (connecté au même réseau Wi-Fi local avec Bluetooth activé) :
-   - **Google Home** : Appuyez sur `+` > *Configurer un appareil* > *Appareil compatible avec Matter* > Scannez le QR Code affiché à l'écran.
-   - **Apple Home** : Ouvrez Maison > `+` > *Ajouter un accessoire* > Scannez le QR Code.
-   - **Alexa / Home Assistant** : Choisissez l'ajout d'appareil Matter et suivez les instructions.
-4. Une fois appairé, vous pouvez piloter votre poêle à la voix ou via vos automatisations :
-   - *"Dis Google, règle le poêle à 21 degrés."*
-   - *"Dis Siri, éteins le poêle du salon."*
+## ⚙️ Configuration & Variables d'Environnement Docker
+
+Toutes les options applicatives peuvent être ajustées depuis l'onglet **🔧 Paramètres & Logs** ou via les variables d'environnement du conteneur Docker :
+
+| Variable | Valeur par défaut image | Description |
+| :--- | :--- | :--- |
+| `APP_VERSION` | `2.4.0` | Version applicative embarquée dans l'image Docker (protégée contre toute variable obsolète antérieure au code) |
+| `DOCKER_VERSION` | `v2.4.0` | Libellé de version Docker affiché dans le cockpit et retourné par `/health` |
+| `NOBIS_IMAGE_COMMIT` | `""` (`ARG GIT_COMMIT`) | SHA du commit Git embarqué lors du build Docker |
+| `DB_PATH` | `/app/data/nobis_a10.db` | Chemin de base permettant de résoudre `DATA_DIR` |
+| `TZ` | `Europe/Paris` | Fuseau horaire du conteneur et des relevés |
+| `HTTPS_DEFAULT_MODE` | `self_signed` (`http` en compose) | Mode TLS par défaut (`http`, `self_signed`, `letsencrypt`) |
+| `TRUSTED_PROXY_IPS` | `127.0.0.1,::1` | Adresses IP de reverse-proxy autorisées pour les en-têtes `X-Forwarded-*` |
+| `NOBIS_UPDATE_CHANNEL` | `v2` | Canal de mise à jour interne par défaut (`v2`, `releases`, `main`) |
+| `GITHUB_TOKEN` | `""` | Jeton GitHub optionnel (évite le rate limit API ou permet l'accès à un fork privé) |
+| `MATTER_PORT` | `5540` | Port réseau UDP/TCP du pont Matter local |
+
+---
+
+## 🌐 Intégration Matter
+
+Le pont Matter embarqué expose le poêle en tant que **Thermostat** standard (`Device ID: 0x0301`) compatible **Google Home / Nest Hub Max**, **Apple Home / Siri**, **Amazon Alexa** et **Home Assistant**, avec QR Code et code d'appairage manuel disponibles dans **Paramètres & Logs → Domotique & Matter**.
 
 ---
 
 ## 🔌 API REST & Flux SSE
 
-Le superviseur met à disposition une API REST moderne et documentée, accessible directement sur `/docs` (Swagger UI interactif).
-
-### Endpoints Principaux
-
-| Méthode | Route | Description |
-| :--- | :--- | :--- |
-| `GET` | `/health` | Bilan de santé du service, statut SQLite et mode actif |
-| `GET` | `/api/events` | Flux Server-Sent Events (SSE) temps réel (données poêle, météo, alertes) |
-| `GET` | `/api/latest` | Dernier enregistrement complet de télémétrie et registres |
-| `GET` | `/api/dashboard?range_key=24h` | Historique agrégé pour les courbes graphiques (1h, 6h, 12h, 24h, 7j, 30j) |
-| `POST` | `/api/command` | Écriture d'un registre (`reg_key`, `new_val`) |
-| `POST` | `/api/command-batch` | Écriture groupée de plusieurs registres en une seule requête |
-| `POST` | `/api/silence/activate` | Activation du mode Silence intelligent avec durée en heures |
-| `POST` | `/api/silence/deactivate` | Fin anticipée du mode Silence intelligent et restauration intégrale des consignes |
-| `GET` | `/api/silence/status` | Statut du mode Silence et compte à rebours restant |
-| `GET` | `/api/matter/status` | Statut du pont Matter, QR Code d'appairage et code manuel |
-| `POST` | `/api/matter/restart` | Redémarrage du sous-processus pont Matter |
-| `POST` | `/api/matter/factory-reset`| Réinitialisation d'usine des appairages Matter |
-| `POST` | `/api/refill-hopper` | Ajout de granulés dans la trémie (ex: +15 kg) |
-| `POST` | `/api/sync-clock` | Synchronisation de l'horloge interne du poêle avec l'heure NTP |
-| `GET` | `/api/snapshots` | Liste des sauvegardes de configuration |
-| `POST` | `/api/snapshots` | Création d'un instantané de tous les registres |
-| `POST` | `/api/snapshots/{id}/restore`| Restauration intégrale d'un instantané |
-| `POST` | `/api/rollback/{audit_id}`| Annulation ciblée d'un ordre d'écriture antérieur |
-| `GET` | `/api/export-csv` | Téléchargement des relevés télémétriques au format CSV |
+Documentation OpenAPI interactive disponible sur `/docs` :
+- `GET /health` : état du conteneur, version `APP_VERSION` / `DOCKER_VERSION`, persistance stockage et statut communication.
+- `GET /api/events` : flux Server-Sent Events (SSE) temps réel.
+- `GET /api/latest` & `GET /api/dashboard?range_key=24h` : dernier état et séries temporelles (`3h`, `6h`, `24h`, `7j`, `30j`, `3M`).
+- `POST /api/command` & `POST /api/command-batch` : écriture de registres RAM/EEPROM.
+- `POST /api/silence/activate` & `/deactivate` : gestion du mode Silence ! temporisé.
+- `GET /api/system/update/status`, `POST /api/system/update/check|apply|rollback|config` : pilotage des mises à jour internes.
+- `GET /api/system/backup` & `POST /api/system/backup/restore` : sauvegarde et restauration ZIP complète.
 
 ---
 
-## 🧪 Tests Automatisés
-
-Une suite complète de **42 tests automatisés** valide la robustesse du superviseur (schémas Pydantic, calculs thermodynamiques, cartographie des registres RAM/EEPROM, sécurité SSRF et routes HTTP) :
+## 🧪 Tests Automatisés & Qualité
 
 ```bash
-# Exécution de la suite complète avec pytest
-pytest
-
-# Ou avec unittest natif Python
-python -m unittest discover -s tests
+ruff check .
+node --check matter_bridge/bridge.mjs
+pytest -v
 ```
 
-```text
-============================= test session starts =============================
-collected 42 items
-
-tests/test_analytics.py ................                                 [ 38%]
-tests/test_api.py ................                                       [ 76%]
-tests/test_collector_mapping.py ....                                     [ 85%]
-tests/test_schemas.py ......                                             [100%]
-
-============================== 42 passed in ~16s ==============================
-```
+La suite comprend plus de **155 tests** couvrant les algorithmes analytiques, les routes FastAPI, les contrats OpenAPI (**Schemathesis**), la sécurité / chiffrement Fernet / TLS, le superviseur de mise à jour interne et les tests E2E navigateur (**Playwright**).
 
 ---
 
-## 🙏 Remerciements & Crédits
+## 🙏 Remerciements & Références Techniques
 
-Ce projet s'appuie sur le travail remarquable de développeurs open source et de communautés passionnées. Nous tenons à remercier tout particulièrement :
-
-- **La communauté Agua IOT & Home Assistant** :
-  - **FredericM**, **uapi** et les contributeurs de la bibliothèque Python [**`py-agua-iot`**](https://github.com/frederic/py-agua-iot), dont les travaux pionniers d'ingénierie inverse sur les API Micronova Agua IOT (`RWMSmaster`, gestion des jetons JWT et structures JSON) ont rendu possible l'interfaçage transparent avec les poêles connectés.
-  - Les contributeurs des intégrations Home Assistant Micronova pour leurs retours d'expérience sur la robustesse des flux de données.
-- **L'équipe Open-Meteo** :
-  - Pour leur magnifique [API Météo Open-Meteo](https://open-meteo.com/), rapide, précise et accessible sans clé API obligatoire, permettant d'alimenter les prévisions thermodynamiques et le calcul d'autonomie de la trémie.
-- **Le projet Matter.js (@matter/main)** :
-  - Pour la réalisation d'une pile logicielle Matter moderne en TypeScript/Node.js, permettant de créer des ponts domotiques locaux performants sans dépendance propriétaire.
-- **Les auteurs de FastAPI, Uvicorn et Chart.js** pour la qualité de leurs fondations techniques.
-
----
-
-## 📚 Références & Documentation Technique
-
-Pour les installateurs, techniciens chauffagistes et développeurs souhaitant approfondir le fonctionnement matériel et électronique :
-
-### 1. Documentation Poêles Nobis S.r.l.
-- **Modèle de référence** : *Nobis A10 C Light Style Coax* (poêle à pellets étanche avec conduit concentrique coaxial, régulation automatique du tirage et double canalisation indépendante).
-- **Notices techniques & guides d'installation** :
-  - Manuel officiel d'utilisation et d'entretien Nobis (*Istruzioni per l'uso e la manutenzione - Stufe a pellet ermetiche con condotto coassiale*).
-  - Principe du **Brasier autonettoyant mécanique** (*Braciere autopulente brevettato*) garantissant des cycles de combustion continus avec décendrage automatique.
-  - Technologie **Confort Mode** : coupure totale de la ventilation forcée pour un fonctionnement en convection naturelle silencieuse.
-  - Fonction **Powerful (PWF)** : montée rapide en température par activation conjointe de la puissance de combustion maximale et de la ventilation dynamique.
-  - Site officiel : [nobisfire.com](https://www.nobisfire.com/)
-
-### 2. Documentation Cartes Électroniques Micronova S.r.l.
-- **Cartes électroniques compatibles** : Familles Micronova **I023**, **L023**, **V018_1** avec microcontrôleurs dédiés au pilotage thermique de poêles à granulés et modules Wi-Fi **Agua IOT** / **Navel**.
-- **Cartographie des Registres Mémoire** :
-  - **Mémoire RAM dynamique (Adresses 0x00 à 0x7F / Registres 0 à 127)** :
-    - `0` : État opérationnel du poêle (0=Off, 1=Contrôle flamme, 2=Allumage, 3=Travail, 4=Nettoyage, 5=Extinction, 6=Blocage/Alarme).
-    - `1` : Vitesse réelle de l'extracteur de fumées (RPM).
-    - `2` : Puissance de travail active (P1 à P7).
-    - `3` : Vitesse réelle du ventilateur d'ambiance (V0 à V7).
-    - `5` : Température réelle des fumées (°C) via thermocouple sonde K.
-    - `6` : Température réelle de la sonde d'ambiance (°C).
-    - `7` : Signal de dépression du pressostat différentiel / dépressomètre (Pa).
-    - `12` : Rapport cyclique du temps d'alimentation de la vis sans fin d'alimentation pellets (`auger_duty_pct`).
-  - **Mémoire EEPROM non volatile (Adresses 0x2000 à 0x8214 / 33120 à 33300)** :
-    - `33120` : Consigne de température ambiante souhaitée (7°C à 40°C, 41°C = Manuel).
-    - `33121` : Consigne de puissance de chauffe désirée (P1 à P7).
-    - `33122` : Consigne de vitesse de ventilation (0=Off, 1-7=Fixe, 8=Auto/PS).
-    - `33123` : Consigne de température canalisation Gauche (SX).
-    - `33124` : Vitesse de soufflerie canalisation Gauche (SX).
-    - `33125` : Consigne de température canalisation Droite (DX).
-    - `33126` : Vitesse de soufflerie canalisation Droite (DX).
-    - `33130` : Activation du Mode ECO / Stand-by (0=Désactivé, 1=Activé).
-    - `33131` : Activation du Mode Chrono Hebdomadaire (0=Off, 1=On).
-    - `33200..33280` : Tables de programmation hebdomadaire Chrono P1 à P4 (masques de jours, heures de début/fin, consignes thermiques associées).
-- **Protocoles de communication** :
-  - Protocole série propriétaire maître-esclave Micronova (trames d'interrogation RAM et d'écriture EEPROM sous contrôle de somme de contrôle checksum).
-  - Protocole API Cloud Micronova `RWMSmaster` avec chiffrement de session et jeton Bearer JWT.
-
----
-
-## 🛠️ Dépannage & FAQ
-
-<details>
-<summary><b>1. Le pont Matter n'apparaît pas ou le QR Code ne scanne pas</b></summary>
-
-- Assurez-vous que le port UDP **5540** n'est pas bloqué par un pare-feu local (nécessaire pour la découverte mDNS Matter).
-- Si vous utilisez Docker, vérifiez que le mapping de port `5540:5540/udp` et `5540:5540/tcp` est bien présent dans votre `docker-compose.yml`.
-- Dans l'onglet Installateur, vous pouvez déclencher une **Réinitialisation d'usine Matter** pour régénérer un identifiant d'appairage propre.
-</details>
-
-<details>
-<summary><b>2. Comment passer du mode Simulation au poêle réel ?</b></summary>
-
-1. Rendez-vous dans l'onglet **🔧 Installateur**.
-2. Dans le bloc **Mode de communication**, sélectionnez :
-   - **Agua Cloud** : renseignez votre email, mot de passe Agua IOT et identifiant client.
-   - **Passerelle Locale** : renseignez l'adresse IP locale de votre passerelle (ex: `http://192.168.1.150`).
-3. Cliquez sur **Enregistrer les paramètres**. Le superviseur bascule immédiatement sur votre installation physique.
-</details>
-
-<details>
-<summary><b>3. Comment installer la PWA sur iPhone / Android ?</b></summary>
-
-- **Sur iPhone / iPad (Safari)** : appuyez sur le bouton *Partager* (carré avec flèche vers le haut) > sélectionnez **Sur l'écran d'accueil**.
-- **Sur Android (Chrome)** : appuyez sur le menu `⋮` > sélectionnez **Ajouter à l'écran d'accueil** ou **Installer l'application**.
-- L'application se comporte alors comme une application native sans barre d'adresse ni boutons de navigation du navigateur.
-</details>
+- **`py-agua-iot`** (FredericM, uapi et contributeurs) pour la documentation du protocole Micronova Agua IOT (`RWMSmaster`).
+- **Open-Meteo** pour l'API météorologique locale sans clé obligatoire.
+- **Matter.js (`@matter/main`)**, **FastAPI**, **Uvicorn**, **Chart.js** et **Tailwind CSS**.
+- **Poêles Nobis S.r.l.** (gamme *A10 C Light Style Coax*) & **cartes Micronova S.r.l.** (*V018_1*).
 
 ---
 
 ## ⚖️ Avertissement & Licence
 
-- **Avertissement** : Ce projet est un développement communautaire indépendant et n'est ni affilié à, ni approuvé par la société **Nobis S.r.l.** ou **Micronova S.r.l.**. L'utilisation des commandes installateur et des réglages de registres relève de la responsabilité de l'utilisateur.
-- **Licence** : Distribué sous licence open-source **MIT**. Vous êtes libre de l'utiliser, de le modifier et de le distribuer.
-
----
-
-<p align="center">
-  Fait avec passion pour le confort thermique et la domotique ouverte 🏡🔥
-</p>
+- **Avertissement** : projet communautaire indépendant, non affilié à **Nobis S.r.l.** ou **Micronova S.r.l.**. L'usage des commandes installateur et écritures EEPROM relève de la responsabilité de l'utilisateur.
+- **Licence** : distribué sous licence **MIT**.

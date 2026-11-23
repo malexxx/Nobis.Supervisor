@@ -20,10 +20,13 @@ from services.update_bootstrap import (
     EXIT_CODE_RELOAD,
     MIN_HEALTHY_UPTIME_S,
     build_child_env,
+    compare_versions,
     read_update_state,
     resolve_boot_target,
     rollback_after_boot_failure,
 )
+
+IMAGE_CODE_VERSION = "2.4.0"
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("nobis.server")
@@ -87,7 +90,12 @@ def _should_auto_rollback(data_dir: str, target: dict, rc: int, uptime_s: float)
 def _run_supervisor_loop(argv: list[str]) -> int:
     """Orchestre le sous-processus Uvicorn et bascule automatiquement en cas de boot défaillant."""
     data_dir = resolve_data_dir(os.environ.get("DB_PATH", ""))
-    image_version = os.environ.get("APP_VERSION", "2.4.0").strip() or "2.4.0"
+    env_app_ver = os.environ.get("APP_VERSION", "").strip()
+    image_version = (
+        env_app_ver
+        if (env_app_ver and compare_versions(env_app_ver, IMAGE_CODE_VERSION) >= 0)
+        else IMAGE_CODE_VERSION
+    )
     image_commit = os.environ.get("NOBIS_IMAGE_COMMIT", "").strip()
 
     state = {"stop_requested": False, "proc": None}

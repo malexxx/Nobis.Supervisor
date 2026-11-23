@@ -1,5 +1,6 @@
 """Configuration globale, chemins SQLite/statiques, constantes métier Nobis A10 et catalogue de registres Micronova."""
 import os
+import re
 import sys
 from typing import Any
 
@@ -48,11 +49,40 @@ STATIC_DIR = next(
 )
 os.makedirs(STATIC_DIR, exist_ok=True)
 
-APP_VERSION: str = os.environ.get("APP_VERSION", "2.4.0").strip() or "2.4.0"
-DOCKER_VERSION: str = (
-    os.environ.get("DOCKER_VERSION", "").strip()
-    or (f"v{APP_VERSION}" if not APP_VERSION.startswith("v") else APP_VERSION)
-)
+def _parse_ver_tuple(ver: str) -> tuple[int, ...]:
+    m = re.match(r"^v?(\d+(?:\.\d+)*)", (ver or "").strip())
+    return tuple(int(p) for p in m.group(1).split(".")) if m else (0,)
+
+
+def _ver_lt(v1: str, v2: str) -> bool:
+    t1, t2 = _parse_ver_tuple(v1), _parse_ver_tuple(v2)
+    n = max(len(t1), len(t2))
+    return t1 + (0,) * (n - len(t1)) < t2 + (0,) * (n - len(t2))
+
+
+def _resolve_app_version(code_version: str) -> str:
+    """Résout APP_VERSION en ignorant une variable d'env figée inférieure au code embarqué."""
+    env_ver = os.environ.get("APP_VERSION", "").strip()
+    if not env_ver:
+        return code_version
+    if not os.environ.get("NOBIS_ACTIVE_RELEASE_ID", "").strip() and _ver_lt(env_ver, code_version):
+        return code_version
+    return env_ver
+
+
+def _resolve_docker_version(app_version: str) -> str:
+    """Résout DOCKER_VERSION en garantissant un libellé cohérent avec app_version."""
+    default_dv = f"v{app_version}" if not app_version.startswith("v") else app_version
+    env_dv = os.environ.get("DOCKER_VERSION", "").strip()
+    if not env_dv:
+        return default_dv
+    if not os.environ.get("NOBIS_ACTIVE_RELEASE_ID", "").strip() and _ver_lt(env_dv, app_version):
+        return default_dv
+    return env_dv
+
+
+APP_VERSION: str = _resolve_app_version("2.4.0")
+DOCKER_VERSION: str = _resolve_docker_version(APP_VERSION)
 
 SYSTEM_DB_PATH = os.path.join(DATA_DIR, "nobis_a10_system.db")
 MODE_DB_PATHS: dict[str, str] = {

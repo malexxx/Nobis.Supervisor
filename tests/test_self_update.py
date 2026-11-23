@@ -432,3 +432,60 @@ class TestSelfUpdateSystem(BugBountyTestCase):
         with open(os.path.join(config.BASE_DIR, ".github", "workflows", "docker-publish.yml"), encoding="utf-8") as fh:
             pub = fh.read()
         self.assertIn("GIT_COMMIT=${{ github.sha }}", pub)
+
+    def test_docker_env_version_vars_and_stale_env_guard(self):
+        from services.update_service import _APP_VERSION_RE
+
+        with open(os.path.join(config.BASE_DIR, "Dockerfile"), encoding="utf-8") as fh:
+            df = fh.read()
+        self.assertIn("ARG APP_VERSION=2.4.0", df)
+        self.assertIn("ARG DOCKER_VERSION=v2.4.0", df)
+        self.assertIn("APP_VERSION=${APP_VERSION}", df)
+        self.assertIn("DOCKER_VERSION=${DOCKER_VERSION}", df)
+
+        with open(os.path.join(config.BASE_DIR, "config.py"), encoding="utf-8") as fh:
+            cfg_txt = fh.read()
+        m_ver = _APP_VERSION_RE.search(cfg_txt)
+        self.assertIsNotNone(m_ver)
+        self.assertEqual(m_ver.group(1), "2.4.0")
+
+        # Garde-fou anti-variable figée (ex: conteneur mis à jour ayant conservé APP_VERSION=2.2.0)
+        with patch.dict(os.environ, {"APP_VERSION": "2.2.0", "DOCKER_VERSION": "2.2.0"}, clear=False):
+            os.environ.pop("NOBIS_ACTIVE_RELEASE_ID", None)
+            self.assertEqual(config._resolve_app_version("2.4.0"), "2.4.0")
+            self.assertEqual(config._resolve_docker_version("2.4.0"), "v2.4.0")
+
+        # Une variable >= code ou un override actif est respecté
+        with patch.dict(os.environ, {"APP_VERSION": "2.5.0", "DOCKER_VERSION": "v2.5.0"}, clear=False):
+            os.environ.pop("NOBIS_ACTIVE_RELEASE_ID", None)
+            self.assertEqual(config._resolve_app_version("2.4.0"), "2.5.0")
+            self.assertEqual(config._resolve_docker_version("2.5.0"), "v2.5.0")
+
+        with patch.dict(
+            os.environ,
+            {"APP_VERSION": "2.2.0", "DOCKER_VERSION": "v2.2.0+abc", "NOBIS_ACTIVE_RELEASE_ID": "v2.2.0-abc"},
+            clear=False,
+        ):
+            self.assertEqual(config._resolve_app_version("2.4.0"), "2.2.0")
+            self.assertEqual(config._resolve_docker_version("2.2.0"), "v2.2.0+abc")
+
+        # build_child_env corrige aussi DOCKER_VERSION obsolète au démarrage sur image Docker
+        child_env = build_child_env(
+            {"PATH": "/usr/bin", "APP_VERSION": "2.2.0", "DOCKER_VERSION": "2.2.0"},
+            {"target_dir": config.BASE_DIR, "is_override": False, "release": None},
+            config.BASE_DIR,
+            "2.4.0",
+        )
+        self.assertEqual(child_env["APP_VERSION"], "2.4.0")
+        self.assertEqual(child_env["DOCKER_VERSION"], "v2.4.0")
+
+        # Aucun artefact v1.0 résiduel
+        for rel_v1 in (
+            "docs/screenshots/cockpit_triarc_v1.0.png",
+            "docs/screenshots/cockpit_timeline_v1.0.png",
+        ):
+            self.assertFalse(os.path.exists(os.path.join(config.BASE_DIR, *rel_v1.split("/"))))
+        with open(os.path.join(config.BASE_DIR, "static", "index.html"), encoding="utf-8") as fh:
+            self.assertNotIn("v1.0", fh.read())
+        with open(os.path.join(config.BASE_DIR, "README.md"), encoding="utf-8") as fh:
+            self.assertNotIn("v1.0", fh.read())

@@ -218,8 +218,10 @@ def build_child_env(
 
     had_override = "NOBIS_ACTIVE_RELEASE_ID" in env
     env["APP_VERSION"] = image_version
-    if had_override:
-        env.pop("DOCKER_VERSION", None)
+    default_docker_ver = f"v{image_version}" if not image_version.startswith("v") else image_version
+    existing_docker_ver = env.get("DOCKER_VERSION", "").strip()
+    if had_override or not existing_docker_ver or compare_versions(existing_docker_ver, image_version) < 0:
+        env["DOCKER_VERSION"] = default_docker_ver
     for key in (
         "NOBIS_ACTIVE_RELEASE_ID",
         "NOBIS_ACTIVE_RELEASE_SHA",
